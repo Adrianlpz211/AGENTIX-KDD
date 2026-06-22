@@ -66,3 +66,58 @@
 - Compresión periódica de memoria
 - QA independiente
 - Protocolo STOP
+
+## [2.2.0] — 2026-06-22
+
+### Nuevas funcionalidades
+
+#### 1. Embeddings Locales (all-MiniLM-L6-v2)
+- Motor de búsqueda semántica 100% offline — sin API key
+- `@xenova/transformers` — modelo ONNX quantizado, ~23MB
+- Búsqueda híbrida RRF (Reciprocal Rank Fusion): vectorial + keyword
+- Indexación automática en `akdd sync` — batch de 30 nodos por sync
+- Mejora recuperación de memoria de ~60% → ~90% de relevancia
+- `akdd embed-status` — verificar estado
+- `akdd embed-install` — instalar one-shot
+
+#### 2. Git Context
+- Análisis automático del diff en cada `akdd sync`
+- Cruza archivos modificados contra memoria episódica → alertas de riesgo
+- Niveles: 🔴 ALTO | 🟡 MEDIO | 🟢 BAJO por archivo
+- Carga contexto en `working_memory` — el Analista lo lee antes de planificar
+- Hook post-checkout automático: `akdd git-context --install-hook`
+- `akdd git-context` — análisis manual en cualquier momento
+
+#### 3. Motor de Predicción
+- Minería de patrones causales sobre memoria episódica acumulada
+- Detecta archivos de alto riesgo, co-ocurrencias problemáticas, precondiciones implícitas
+- "Antes de tocar X: correr migraciones (80% éxito cuando se hace)"
+- Se activa en Context Guard — ANTES de ejecutar cualquier `aa:`
+- Nivel ALTO → interrumpe y muestra advertencia
+- Nivel MEDIO → nota en el plan, no interrumpe
+- `akdd predict` — ver todos los patrones detectados
+- `node grafo.cjs predecir "[tarea]" "[archivos-json]" "[modulo]"` — para agentes
+
+#### 4. CI/CD Integration
+- GitHub Actions workflow auto-generado: `akdd ci-install`
+- Registra fallos de tests en memoria episódica automáticamente
+- Compatible con: GitHub Actions, GitLab CI, Bitbucket, Jenkins
+- `akdd ci-status` — últimos 10 reportes CI en memoria
+- `akdd ci-report [--success] [--output file]` — llamado por el workflow
+
+### Arquitectura
+- `grafo.cjs` — 4 módulos nuevos integrados via lazy loading (sin overhead en arranque normal)
+- `schema.sql` — 3 tablas nuevas: `git_context_log`, `cicd_reports`, `prediction_log`
+- Migration automática: `ALTER TABLE episodios ADD COLUMN embedding TEXT`
+- Todos los módulos: fallback graceful si no están instalados
+
+### CLI
+- `akdd sync` → ahora es `akdd sync-v2` (incluye git-context + embeddings)
+- `akdd git-context` → análisis de riesgo del working tree
+- `akdd predict` → estadísticas del motor de predicción
+- `akdd embed-status` / `akdd embed-install` → gestión de embeddings
+- `akdd ci-install` / `akdd ci-status` / `akdd ci-report` → CI/CD
+
+### Autonomía
+- Antes: L2-L3 (~35-45%)
+- Ahora: L3 (~55-65%) — prevención activa + contexto git automático

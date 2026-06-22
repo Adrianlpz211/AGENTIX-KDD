@@ -202,3 +202,70 @@ CREATE INDEX IF NOT EXISTS idx_working_expirado ON working_memory(expirado);
 -- Relaciones
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_unique ON relaciones(desde_id, tipo, hacia_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_sem_unique ON relaciones_semanticas(desde_entidad, tipo, hacia_entidad);
+-- Agentic KDD — Schema CoALA v3.1 (v2.2)
+-- Agrega soporte para embeddings locales, git context y CI/CD
+-- Compatible con schema v3.0 — migrations automáticas en migrateDB()
+
+-- ─── MIGRACIÓN v2.2: embedding en episodios ──────────────────────────────────
+-- ALTER TABLE episodios ADD COLUMN embedding TEXT;  (via migrateDB)
+
+-- ─── GIT CONTEXT LOG ─────────────────────────────────────────────────────────
+-- Historial de análisis git — qué se detectó en cada sync
+CREATE TABLE IF NOT EXISTS git_context_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id TEXT NOT NULL,
+  rama TEXT,
+  commit_hash TEXT,
+  archivos_modificados TEXT DEFAULT '[]',    -- JSON array
+  riesgos_detectados TEXT DEFAULT '[]',      -- JSON array de riesgos
+  predicciones TEXT DEFAULT '[]',            -- JSON array de predicciones
+  tiene_riesgos_altos INTEGER DEFAULT 0,
+  fecha TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_context_fecha ON git_context_log(fecha);
+CREATE INDEX IF NOT EXISTS idx_git_context_rama ON git_context_log(rama);
+
+-- ─── CI/CD REPORTS ───────────────────────────────────────────────────────────
+-- Los episodios CI se guardan en la tabla episodios con area='ci-cd'
+-- Esta tabla guarda metadata adicional del run
+CREATE TABLE IF NOT EXISTS cicd_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  episodio_id TEXT,                          -- FK a episodios
+  plataforma TEXT DEFAULT 'github',          -- github | gitlab | bitbucket | jenkins
+  workflow TEXT,
+  rama TEXT,
+  commit_hash TEXT,
+  actor TEXT,
+  repo TEXT,
+  run_id TEXT,
+  run_url TEXT,
+  tests_pasando INTEGER DEFAULT 0,
+  tests_fallando INTEGER DEFAULT 0,
+  archivos_tocados TEXT DEFAULT '[]',
+  errores_tests TEXT DEFAULT '[]',           -- JSON array de tests fallidos
+  es_exito INTEGER DEFAULT 0,
+  fecha TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cicd_fecha ON cicd_reports(fecha);
+CREATE INDEX IF NOT EXISTS idx_cicd_rama ON cicd_reports(rama);
+CREATE INDEX IF NOT EXISTS idx_cicd_exito ON cicd_reports(es_exito);
+
+-- ─── PREDICTION LOG ──────────────────────────────────────────────────────────
+-- Registro de predicciones y si fueron correctas (para mejorar precisión)
+CREATE TABLE IF NOT EXISTS prediction_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tarea TEXT,
+  modulo TEXT,
+  archivos TEXT DEFAULT '[]',
+  nivel_predicho TEXT,                       -- ALTO | MEDIO | BAJO
+  alertas TEXT DEFAULT '[]',
+  precondiciones TEXT DEFAULT '[]',
+  fue_correcto INTEGER,                      -- NULL=no evaluado, 1=correcto, 0=incorrecto
+  ciclo_id TEXT,
+  fecha TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_prediction_fecha ON prediction_log(fecha);
+CREATE INDEX IF NOT EXISTS idx_prediction_correcto ON prediction_log(fue_correcto);

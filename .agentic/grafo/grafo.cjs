@@ -212,6 +212,52 @@ function migrateDB(db) {
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_unique ON relaciones(desde_id, tipo, hacia_id)",
   ];
   indices.forEach(sql => { try { db.exec(sql); } catch(e) {} });
+
+  // v2.2 — nuevas tablas (seguro llamar múltiples veces)
+  const tablasV22 = [
+    `CREATE TABLE IF NOT EXISTS git_context_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sesion_id TEXT NOT NULL,
+      rama TEXT, commit_hash TEXT,
+      archivos_modificados TEXT DEFAULT '[]',
+      riesgos_detectados TEXT DEFAULT '[]',
+      predicciones TEXT DEFAULT '[]',
+      tiene_riesgos_altos INTEGER DEFAULT 0,
+      fecha TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS cicd_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      episodio_id TEXT, plataforma TEXT DEFAULT 'github',
+      workflow TEXT, rama TEXT, commit_hash TEXT, actor TEXT, repo TEXT,
+      run_id TEXT, run_url TEXT,
+      tests_pasando INTEGER DEFAULT 0, tests_fallando INTEGER DEFAULT 0,
+      archivos_tocados TEXT DEFAULT '[]', errores_tests TEXT DEFAULT '[]',
+      es_exito INTEGER DEFAULT 0,
+      fecha TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS prediction_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tarea TEXT, modulo TEXT, archivos TEXT DEFAULT '[]',
+      nivel_predicho TEXT, alertas TEXT DEFAULT '[]', precondiciones TEXT DEFAULT '[]',
+      fue_correcto INTEGER, ciclo_id TEXT,
+      fecha TEXT DEFAULT (datetime('now'))
+    )`,
+  ];
+  tablasV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
+
+  // v2.2 — embedding en episodios
+  const migracionesV22 = [
+    "ALTER TABLE episodios ADD COLUMN embedding TEXT",
+  ];
+  migracionesV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
+
+  // v2.2 — índices nuevas tablas
+  const indicesV22 = [
+    "CREATE INDEX IF NOT EXISTS idx_git_context_fecha ON git_context_log(fecha)",
+    "CREATE INDEX IF NOT EXISTS idx_cicd_rama ON cicd_reports(rama)",
+    "CREATE INDEX IF NOT EXISTS idx_prediction_fecha ON prediction_log(fecha)",
+  ];
+  indicesV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
 }
 
 // ─── SNAPSHOT ─────────────────────────────────────────────────────────────────
@@ -1323,9 +1369,236 @@ if (_args[0] === 'decay') {
   console.log(`Decay aplicado: ${r.procesados} nodos procesados`);
 }
 if (_args[0] === 'buscar') {
-  const r = buscarHibrido(_args[1], _args[2], parseInt(_args[3]) || 10);
-  console.log(JSON.stringify(r, null, 2));
+  // v2.2: búsqueda híbrida con embeddings si disponibles
+  const embMod = getEmbeddingsModuleGrafo();
+  if (embMod && embMod.isAvailable()) {
+    buscarHibridoConEmbeddings(_args[1], _args[2], parseInt(_args[3]) || 10)
+      .then(r => console.log(JSON.stringify({ resultados: r, trace: { metodo: 'vector_hybrid_rrf' } }, null, 2)));
+  } else {
+    const r = buscarHibrido(_args[1], _args[2], parseInt(_args[3]) || 10);
+    console.log(JSON.stringify(r, null, 2));
+  }
 }
 if (_args[0] === 'coala') {
   statsCoala();
 }
+
+// ─── v2.2: Nuevos comandos CLI ────────────────────────────────────────────────
+
+if (_args[0] === 'git-context') {
+  const gitMod = getGitContextModuleGrafo();
+  if (!gitMod) { console.log('  git-context module not available (akdd update)'); process.exit(0); }
+  const db = initDB();
+  const resultado = gitMod.analizarGitContext(ROOT, db);
+  if (resultado.disponible) {
+    const { contexto } = resultado;
+    // Guardar en working_memory
+    const sesionId = `git-${Date.now()}`;
+    try {
+      db.run('UPDATE working_memory SET expirado=1 WHERE expirado=0');
+      db.run(
+        `INSERT INTO working_memory (sesion_id, tipo, contenido, relevancia) VALUES (?,?,?,?)`,
+        sesionId, 'observacion', JSON.stringify(contexto), 1.0
+      );
+      // Log en git_context_log si la tabla existe
+      try {
+        db.run(
+          `INSERT INTO git_context_log (sesion_id, rama, commit_hash, archivos_modificados, riesgos_detectados, predicciones, tiene_riesgos_altos)
+           VALUES (?,?,?,?,?,?,?)`,
+          sesionId,
+          contexto.rama || '',
+          (contexto.commits_recientes?.[0]?.hash || ''),
+          JSON.stringify(contexto.archivos_modificados || []),
+          JSON.stringify(contexto.riesgos || []),
+          JSON.stringify(contexto.predicciones || []),
+          contexto.tiene_riesgos_altos ? 1 : 0
+        );
+      } catch(e) {}
+    } catch(e) {}
+    if (db.type === 'sqljs' && db.save) db.save();
+    db.close();
+    console.log(gitMod.formatearReporte(resultado));
+  } else {
+    db.close();
+    console.log(`  ${resultado.mensaje}`);
+  }
+}
+
+if (_args[0] === 'predict') {
+  const predMod = getPrediccionModuleGrafo();
+  if (!predMod) { console.log('  prediccion module not available (akdd update)'); process.exit(0); }
+  const db = initDB();
+  predMod.mostrarEstadisticasPrediccion(db);
+  db.close();
+}
+
+if (_args[0] === 'ci-install') {
+  const ciMod = getCICDModuleGrafo();
+  if (!ciMod) { console.log('  cicd module not available (akdd update)'); process.exit(0); }
+  ciMod.instalarWorkflow(ROOT);
+}
+
+if (_args[0] === 'ci-status') {
+  const ciMod = getCICDModuleGrafo();
+  if (!ciMod) { console.log('  cicd module not available (akdd update)'); process.exit(0); }
+  const db = initDB();
+  ciMod.mostrarEstadoCI(db);
+  db.close();
+}
+
+if (_args[0] === 'ci-report') {
+  const ciMod = getCICDModuleGrafo();
+  if (!ciMod) { process.exit(0); } // No fallar CI
+  const db = initDB();
+  const esExito = _args.includes('--success');
+  const outputIdx = _args.indexOf('--output');
+  const outputFile = outputIdx >= 0 ? _args[outputIdx + 1] : null;
+  ciMod.reportarCI(ROOT, db, { esExito, outputFile });
+  if (db.type === 'sqljs' && db.save) db.save();
+  db.close();
+}
+
+if (_args[0] === 'embed-status') {
+  const embMod = getEmbeddingsModuleGrafo();
+  console.log('\n  Embeddings locales — Agentic KDD v2.2\n');
+  if (!embMod) {
+    console.log('  Estado: módulo embeddings.cjs no encontrado');
+    console.log('  Solución: akdd update\n');
+  } else if (!embMod.isAvailable()) {
+    console.log('  Estado: @xenova/transformers no instalado');
+    console.log('  Modelo: all-MiniLM-L6-v2 (23MB, 100% offline)');
+    console.log('  Instalar: akdd embed-install\n');
+  } else {
+    console.log('  Estado: ✓ disponible');
+    console.log(`  Modelo: ${embMod.MODELO}`);
+    console.log(`  Dimensiones: ${embMod.DIM}`);
+    console.log('  Búsqueda: vectorial híbrida (RRF)\n');
+  }
+}
+
+if (_args[0] === 'embed-install') {
+  const embMod = getEmbeddingsModuleGrafo();
+  if (!embMod) { console.log('\n  akdd update primero\n'); process.exit(1); }
+  embMod.instalar();
+}
+
+// ─── v2.2: Lazy loaders de módulos (sin romper arranque si no existen) ────────
+function getEmbeddingsModuleGrafo() {
+  try {
+    const p = path.join(__dirname, 'embeddings.cjs');
+    return fs.existsSync(p) ? require(p) : null;
+  } catch(e) { return null; }
+}
+function getGitContextModuleGrafo() {
+  try {
+    const p = path.join(__dirname, 'git-context.cjs');
+    return fs.existsSync(p) ? require(p) : null;
+  } catch(e) { return null; }
+}
+function getPrediccionModuleGrafo() {
+  try {
+    const p = path.join(__dirname, 'prediccion.cjs');
+    return fs.existsSync(p) ? require(p) : null;
+  } catch(e) { return null; }
+}
+function getCICDModuleGrafo() {
+  try {
+    const p = path.join(__dirname, 'cicd.cjs');
+    return fs.existsSync(p) ? require(p) : null;
+  } catch(e) { return null; }
+}
+
+// ─── v2.2: buscar con embeddings (async) ────────────────────────────────────
+async function buscarHibridoConEmbeddings(query, area, topK) {
+  const embMod = getEmbeddingsModuleGrafo();
+  const db = initDB();
+  
+  let sqlNodos = `SELECT *, 'procedural' as memoria_tipo FROM nodos WHERE estado='ACTIVO'`;
+  if (area && area !== 'global') sqlNodos += ` AND (area=? OR area='global')`;
+  const nodosAll = area ? db.all(sqlNodos, area) : db.all(sqlNodos);
+  
+  let sqlEp = `SELECT *, 'episodica' as memoria_tipo FROM episodios WHERE relevancia > 0.3`;
+  if (area && area !== 'global') sqlEp += ` AND (area=? OR area='global')`;
+  sqlEp += ' ORDER BY fecha DESC LIMIT 50';
+  const episodiosAll = area ? db.all(sqlEp, area) : db.all(sqlEp);
+  
+  const entidadesAll = db.all("SELECT *, 'semantica' as memoria_tipo FROM entidades LIMIT 100");
+  db.close();
+  
+  const todos = [...nodosAll, ...episodiosAll, ...entidadesAll];
+  if (embMod && embMod.isAvailable()) {
+    return await embMod.buscarHibridoVectorial(todos, query, topK || 10);
+  }
+  return buscarHibrido(query, area, topK).resultados;
+}
+
+// ─── v2.2: sync extendido (git-context + embeddings) ─────────────────────────
+// Se activa con: node grafo.cjs sync-v2
+if (_args[0] === 'sync-v2') {
+  (async () => {
+    // 1. Sync normal
+    sincronizar();
+    
+    const db = initDB();
+    
+    // 2. Git context
+    const gitMod = getGitContextModuleGrafo();
+    if (gitMod && gitMod.gitDisponible(ROOT)) {
+      const resultado = gitMod.analizarGitContext(ROOT, db);
+      if (resultado.disponible && resultado.contexto) {
+        const { riesgos, predicciones } = resultado.contexto;
+        if (riesgos?.some(r => r.nivel === 'ALTO')) {
+          console.log('\n  ⚠️  ALERTAS:');
+          riesgos.filter(r => r.nivel === 'ALTO').slice(0, 3).forEach(r => 
+            console.log(`  🔴 [ALTO] ${r.archivo}: ${r.advertencia || ''}`));
+        }
+        if (predicciones?.length > 0) {
+          console.log('  ⚡ Predicciones:');
+          predicciones.slice(0, 3).forEach(p => console.log(`  · ${p.mensaje}`));
+        }
+        // Guardar en working_memory
+        const sesionId = `sync-v2-${Date.now()}`;
+        try {
+          db.run('UPDATE working_memory SET expirado=1 WHERE expirado=0');
+          db.run(
+            `INSERT INTO working_memory (sesion_id, tipo, contenido, relevancia) VALUES (?,?,?,?)`,
+            sesionId, 'observacion', JSON.stringify(resultado.contexto), 1.0
+          );
+        } catch(e) {}
+      }
+    }
+    
+    // 3. Embeddings — indexar pendientes
+    const embMod = getEmbeddingsModuleGrafo();
+    if (embMod && embMod.isAvailable()) {
+      process.stdout.write('  Embeddings: indexando... ');
+      try {
+        const r = await embMod.indexarPendientes(db, 30);
+        console.log(r.indexados > 0 ? `✓ (${r.indexados} nuevos)` : '✓ (al día)');
+      } catch(e) { console.log(''); }
+    }
+    
+    if (db.type === 'sqljs' && db.save) db.save();
+    db.close();
+  })();
+}
+
+// ─── v2.2: predicción para Context Guard ─────────────────────────────────────
+if (_args[0] === 'predecir') {
+  const predMod = getPrediccionModuleGrafo();
+  if (!predMod) { console.log(JSON.stringify({ nivel_riesgo: 'BAJO', alertas: [] })); process.exit(0); }
+  try {
+    const tarea   = _args[1] || '';
+    const archivos = _args[2] ? JSON.parse(_args[2]) : [];
+    const modulo  = _args[3] || 'global';
+    const db = initDB();
+    const resultado = predMod.evaluarRiesgoTarea(tarea, archivos, modulo, db);
+    db.close();
+    console.log(JSON.stringify(resultado, null, 2));
+  } catch(e) { console.log(JSON.stringify({ nivel_riesgo: 'BAJO', alertas: [], error: e.message })); }
+}
+
+// ─── v2.2: schema migration ───────────────────────────────────────────────────
+// Las nuevas tablas se crean automáticamente en el próximo initDB()
+// grafo.cjs ya llama migrateDB() que tiene las ALTER TABLE
+// Solo hay que asegurar que las nuevas tablas de git_context_log, etc. se crean
