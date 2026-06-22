@@ -234,7 +234,43 @@ You never trigger these. They run on their own:
 
 ## Quick Start
 
-### Option A — CLI (recommended)
+### Option A — MCP (most automatic) ⭐
+```bash
+# Install once globally
+npm install -g agentic-kdd
+npm install -g agentic-kdd-mcp
+```
+
+Then add to Cursor manually (one time per PC):
+
+**Cursor** → Settings → Tools & MCPs → Add Custom MCP:
+```json
+{
+  "mcpServers": {
+    "agentic-kdd": {
+      "command": "node",
+      "args": ["PATH_TO_GLOBAL/node_modules/agentic-kdd-mcp/server.js"]
+    }
+  }
+}
+```
+
+> Find your path with: `npm root -g` → append `/agentic-kdd-mcp/server.js`
+
+**Claude Code** (terminal):
+```bash
+claude mcp add agentic-kdd -- node $(npm root -g)/agentic-kdd-mcp/server.js
+```
+
+Then in any project — just type:
+```
+aa: configurar
+```
+The MCP creates folders, analyzes code, configures everything automatically. No `akdd init` needed.
+
+---
+
+### Option B — CLI
 ```bash
 npm install -g agentic-kdd
 cd your-project
@@ -246,7 +282,7 @@ Then open in Cursor or Claude Code:
 aa: configurar
 ```
 
-### Option B — Manual (no CLI required)
+### Option C — Manual (no CLI required)
 1. Copy the ZIP contents to your project root
 2. Install the graph dependency:
 ```bash
@@ -258,7 +294,7 @@ npm install better-sqlite3
 > **Note:** If `better-sqlite3` fails to install (requires Visual Studio Build Tools on Windows), the graph will automatically use `node:sqlite` (built into Node.js 22+) or `sql.js` as fallback — no action needed.
 
 ### Auto-detected stacks
-`akdd init` detects your stack automatically and pre-configures everything:
+`akdd init` and the MCP detect your stack automatically:
 
 | Stack | Auto-detected | Pre-configured rules |
 |-------|--------------|---------------------|
