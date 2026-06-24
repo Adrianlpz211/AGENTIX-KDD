@@ -287,6 +287,69 @@ function getGraphData() {
   } catch { return { nodes: [], edges: [], ciclos: [], fases: [] }; }
 }
 
+
+// ─── v3.3: CONTRACT GUARD DATA ────────────────────────────────────────────────
+function getContractData() {
+  try {
+    if (!fs.existsSync(dbPath)) return { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] };
+    const BS3 = require('better-sqlite3');
+    const _db = new BS3(dbPath, { readonly: true });
+    let result = { total:0, protected:0, verified:0, candidate:0, invalidated:0, violations:0, recent:[] };
+    try {
+      result.total     = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts").get()?.n || 0;
+      result.protected = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='protected'").get()?.n || 0;
+      result.verified  = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='verified'").get()?.n || 0;
+      result.candidate = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='candidate'").get()?.n || 0;
+      result.invalidated= _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='invalidated'").get()?.n || 0;
+      result.violations= _db.prepare("SELECT COUNT(*) as n FROM contract_violations WHERE recovered=0").get()?.n || 0;
+      result.recent    = _db.prepare("SELECT id, module, name, status, verification_count, failure_count FROM verified_contracts ORDER BY updated_at DESC LIMIT 8").all();
+    } catch {}
+    _db.close();
+    return result;
+  } catch { return { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] }; }
+}
+
+// ─── v3.3: CREATIVE ENGINE DATA ───────────────────────────────────────────────
+function getCreativeData() {
+  try {
+    if (!fs.existsSync(dbPath)) return { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] };
+    const BS3 = require('better-sqlite3');
+    const _db = new BS3(dbPath, { readonly: true });
+    let result = { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] };
+    try {
+      result.suggestions     = _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE applied=0 AND dismissed=0").get()?.n || 0;
+      result.wins            = _db.prepare("SELECT COUNT(*) as n FROM creative_wins").get()?.n || 0;
+      result.auto_applicable = _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE auto_applicable=1 AND applied=0 AND dismissed=0").get()?.n || 0;
+      // Determine level from protected contracts
+      const protected_count = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status IN ('protected','verified')").get()?.n || 0;
+      result.level = protected_count >= 10 ? 2 : 1;
+      result.protected_for_level2 = protected_count;
+      result.recent_suggestions = _db.prepare("SELECT id, type, title, risk_level, module, auto_applicable FROM creative_suggestions WHERE applied=0 AND dismissed=0 ORDER BY created_at DESC LIMIT 5").all();
+    } catch {}
+    _db.close();
+    return result;
+  } catch { return { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] }; }
+}
+
+// ─── v3.3: MEM CURATOR DATA ───────────────────────────────────────────────────
+function getCuratorData() {
+  try {
+    const logPath = path.join(projectPath, '.agentic', 'curator.log');
+    let lastRun = 'nunca', actions = 0;
+    if (fs.existsSync(logPath)) {
+      const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
+      if (lines.length > 0) {
+        const last = lines[lines.length-1];
+        const match = last.match(/\[([^\]]+)\]/);
+        if (match) lastRun = match[1].split('T')[0];
+        actions = lines.filter(l => l.includes('mergeados') || l.includes('comprimidos') || l.includes('resueltos')).length;
+      }
+    }
+    return { lastRun, actions };
+  } catch { return { lastRun: 'nunca', actions: 0 }; }
+}
+
+
 const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
 
 // Calcular grado de conexiones por nodo (como Graphify — nodos divinos)
@@ -337,6 +400,9 @@ function parseModulos(text) {
   return results;
 }
 
+const contractData   = getContractData();
+const creativeData   = getCreativeData();
+const curatorData    = getCuratorData();
 const modulosImpl = parseModulos(config.implementados);
 const specsData = readSpecs();
 const logsData = readLogs();
@@ -1756,7 +1822,156 @@ function copyMarkdown(){
 renderNodeList();
 renderGraph();
 </script>
-</body>
+
+    <!-- ───────────────────────────────────────────────────────────────────
+         v3.3 PANELS: CONTRACT GUARD + CREATIVE ENGINE + CURATOR
+    ─────────────────────────────────────────────────────────────────────── -->
+
+    <style>
+    .v33-section { margin: 0 auto 32px; max-width: 1100px; padding: 0 24px; }
+    .v33-title { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #8d99ae; margin: 0 0 14px; }
+    .v33-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .v33-card { background: #1e2535; border: 1px solid #2e3550; border-radius: 12px; padding: 18px 20px; }
+    .v33-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .v33-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .icon-purple { background: rgba(127,119,221,0.15); }
+    .icon-green  { background: rgba(29,158,117,0.15); }
+    .icon-amber  { background: rgba(239,159,39,0.15); }
+    .v33-card-title { font-size: 14px; font-weight: 700; color: #e2e8f0; }
+    .v33-card-sub   { font-size: 11px; color: #64748b; margin-top: 1px; }
+    .v33-stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+    .v33-stat { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px; text-align: center; }
+    .v33-stat-val { font-size: 22px; font-weight: 800; line-height: 1.1; }
+    .v33-stat-label { font-size: 10px; color: #64748b; margin-top: 2px; }
+    .val-purple { color: #9f99e8; }
+    .val-green  { color: #34d399; }
+    .val-amber  { color: #fbbf24; }
+    .val-red    { color: #f87171; }
+    .val-gray   { color: #94a3b8; }
+    .contract-list { display: flex; flex-direction: column; gap: 6px; }
+    .contract-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border-radius: 7px; font-size: 12px; }
+    .contract-badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; white-space: nowrap; flex-shrink: 0; }
+    .badge-protected { background: rgba(127,119,221,0.2); color: #9f99e8; }
+    .badge-verified  { background: rgba(29,158,117,0.2);  color: #34d399; }
+    .badge-candidate { background: rgba(239,159,39,0.2);  color: #fbbf24; }
+    .badge-invalid   { background: rgba(248,113,113,0.2); color: #f87171; }
+    .contract-name { flex: 1; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .contract-module { font-size: 10px; color: #475569; }
+    .suggestion-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border-radius: 7px; font-size: 12px; margin-bottom: 5px; }
+    .sug-type { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; white-space: nowrap; flex-shrink: 0; background: rgba(239,159,39,0.15); color: #fbbf24; }
+    .sug-auto { background: rgba(29,158,117,0.15); color: #34d399; }
+    .sug-text { color: #94a3b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .level-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .level-indicator { height: 6px; flex: 1; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+    .level-fill { height: 100%; border-radius: 3px; transition: width .6s; }
+    .curator-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 12px; }
+    .curator-row:last-child { border-bottom: none; }
+    .curator-key { color: #64748b; }
+    .curator-val { color: #94a3b8; font-weight: 600; }
+    .obsidian-panel { background: #1e2535; border: 1px solid #3730a3; border-radius: 12px; padding: 16px 20px; }
+    .obsidian-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .obsidian-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(99,91,255,0.15); color: #818cf8; font-weight: 600; }
+    .obsidian-text { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+    .obsidian-cmd { font-family: monospace; font-size: 11px; background: rgba(255,255,255,0.05); color: #a5b4fc; padding: 6px 10px; border-radius: 6px; margin-top: 8px; display: block; }
+    @media(max-width:600px){ .v33-stat-row { grid-template-columns: repeat(2,1fr); } }
+    </style>
+
+    <div class="v33-section">
+      <div class="v33-title">Preservation Intelligence Layer — v3.3</div>
+      <div class="v33-grid">
+
+        <!-- CONTRACT GUARD -->
+        <div class="v33-card">
+          <div class="v33-card-header">
+            <div class="v33-card-icon icon-purple">🛡️</div>
+            <div><div class="v33-card-title">Contract Guard</div><div class="v33-card-sub">Lo que no se puede romper</div></div>
+          </div>
+          <div class="v33-stat-row">
+            <div class="v33-stat"><div class="v33-stat-val val-purple">${contractData.protected}</div><div class="v33-stat-label">Protected</div></div>
+            <div class="v33-stat"><div class="v33-stat-val val-green">${contractData.verified}</div><div class="v33-stat-label">Verified</div></div>
+            <div class="v33-stat"><div class="v33-stat-val val-amber">${contractData.candidate}</div><div class="v33-stat-label">Candidate</div></div>
+            <div class="v33-stat"><div class="v33-stat-val ${contractData.violations > 0 ? 'val-red' : 'val-gray'}">${contractData.violations}</div><div class="v33-stat-label">Violations</div></div>
+          </div>
+          ${contractData.recent && contractData.recent.length > 0 ? `
+          <div class="contract-list">
+            ${contractData.recent.map(c => `
+              <div class="contract-row">
+                <span class="contract-badge badge-${c.status}">${c.status.toUpperCase()}</span>
+                <span class="contract-name" title="${escHtml(c.name)}">${escHtml(c.name.substring(0,35))}</span>
+                <span class="contract-module">${escHtml(c.module)}</span>
+              </div>
+            `).join('')}
+          </div>` : `<div style="font-size:12px;color:#475569;text-align:center;padding:12px 0">Sin contratos todavía — corre más ciclos aa: para generarlos automáticamente</div>`}
+        </div>
+
+        <!-- CREATIVE ENGINE -->
+        <div class="v33-card">
+          <div class="v33-card-header">
+            <div class="v33-card-icon icon-amber">✨</div>
+            <div><div class="v33-card-title">Creative Engine</div><div class="v33-card-sub">Autonomía creativa dirigida</div></div>
+          </div>
+          <div class="level-bar">
+            <span style="font-size:11px;color:#64748b;white-space:nowrap">Nivel ${creativeData.level}</span>
+            <div class="level-indicator"><div class="level-fill" style="width:${(creativeData.level / 3 * 100).toFixed(0)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
+            <span style="font-size:11px;color:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap">${creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
+          </div>
+          ${creativeData.level < 2 ? `<div style="font-size:11px;color:#475569;margin-bottom:10px">Faltan ${10 - (creativeData.protected_for_level2 || 0)} contratos verificados para Nivel 2</div>` : ''}
+          <div class="v33-stat-row">
+            <div class="v33-stat"><div class="v33-stat-val val-amber">${creativeData.suggestions}</div><div class="v33-stat-label">Pendientes</div></div>
+            <div class="v33-stat"><div class="v33-stat-val val-green">${creativeData.wins}</div><div class="v33-stat-label">Aplicadas</div></div>
+          </div>
+          ${creativeData.recent_suggestions && creativeData.recent_suggestions.length > 0 ? `
+          <div>
+            ${creativeData.recent_suggestions.map(s => `
+              <div class="suggestion-row">
+                <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${s.type}</span>
+                <span class="sug-text" title="${escHtml(s.title)}">${escHtml(s.title.substring(0,50))}</span>
+              </div>
+            `).join('')}
+          </div>` : `<div style="font-size:12px;color:#475569;text-align:center;padding:8px 0">Sin sugerencias — se generan automáticamente cada ciclo</div>`}
+        </div>
+
+        <!-- MEM CURATOR -->
+        <div class="v33-card">
+          <div class="v33-card-icon icon-green" style="margin-bottom:14px;width:auto;height:auto;padding:0;display:flex;gap:10px;align-items:center;background:none">
+            <div style="width:32px;height:32px;border-radius:8px;background:rgba(29,158,117,0.15);display:flex;align-items:center;justify-content:center;font-size:16px">🔬</div>
+            <div><div class="v33-card-title">MemCurator</div><div class="v33-card-sub">Gobernanza autónoma de memoria</div></div>
+          </div>
+          <div class="curator-row"><span class="curator-key">Última curation</span><span class="curator-val">${curatorData.lastRun}</span></div>
+          <div class="curator-row"><span class="curator-key">Ciclos para auto-run</span><span class="curator-val">cada 10</span></div>
+          <div class="curator-row"><span class="curator-key">TTL episódico</span><span class="curator-val">30 días</span></div>
+          <div class="curator-row"><span class="curator-key">Límite nodos activos</span><span class="curator-val">1,000</span></div>
+          <div class="curator-row"><span class="curator-key">Dedup threshold</span><span class="curator-val">92% Jaccard</span></div>
+          <div style="margin-top:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:11px;color:#64748b">
+            <code style="color:#a5b4fc">akdd cure</code> — curation manual<br>
+            <code style="color:#a5b4fc">akdd cure report</code> — preview sin cambios
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- OBSIDIAN MCP OPTIONAL CONNECTOR -->
+    <div class="v33-section">
+      <div class="v33-title">Conector opcional — Obsidian MCP</div>
+      <div class="obsidian-panel">
+        <div class="obsidian-header">
+          <span style="font-size:20px">🗂️</span>
+          <div style="flex:1">
+            <span style="font-size:14px;font-weight:700;color:#e2e8f0">Obsidian como fuente humana</span>
+            <span class="obsidian-badge" style="margin-left:8px">OPCIONAL</span>
+          </div>
+        </div>
+        <div class="obsidian-text">
+          Si usas Obsidian, el plugin MCP conecta tu vault directamente con Agentic KDD.<br>
+          Tus notas personales, decisiones y gotchas fluyen al grafo automáticamente — sin hacer <code style="color:#a5b4fc">akdd knowledge</code> manual.
+        </div>
+        <code class="obsidian-cmd">1. Instalar plugin "Obsidian MCP Server" en Obsidian<br>2. En Claude Code/Cursor: agrega el servidor MCP del plugin<br>3. La herramienta obsidian_read_notes queda disponible en el chat</code>
+        <div style="font-size:11px;color:#475569;margin-top:8px">Sin Obsidian instalado: usa <code style="color:#a5b4fc">akdd knowledge</code> normalmente — mismo resultado.</div>
+      </div>
+    </div>
+
+  </body>
 </html>`;
 
 const server = http.createServer((req, res) => {
