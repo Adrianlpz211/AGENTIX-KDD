@@ -1,0 +1,31 @@
+---
+description: Browser automation OBLIGATORIO en QA — Agentic KDD
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Browser Automation — QA
+
+## Regla absoluta
+El QA NUNCA aprueba una tarea sin haber navegado en el navegador.
+Los tests automatizados no reemplazan ver el resultado real.
+
+## En Cursor
+View → Browser → navegar a [URL del servidor dev]
+Cursor Browser permite navegar, hacer clic y verificar directamente.
+
+## En Claude Code desktop con Node
+```bash
+npx playwright install
+npx playwright test --headed
+```
+
+## En Claude Code sin Node (PHP u otro sin Node)
+Usar el browser preview de Code y verificar manualmente.
+Reportar exactamente qué se verificó y qué se vio.
+
+## El QA no aprueba si
+- Hay errores rojos en la consola del navegador
+- Los datos no se guardan correctamente
+- La UI se rompe en algún viewport
+- Algún test automatizado falla

@@ -1,0 +1,52 @@
+---
+description: Agentic Automata v2 — pipeline autónomo activado con aa:
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Agentic Automata v2
+
+## Palabra de activación: aa:
+
+Cuando el usuario escribe `aa:` seguido de cualquier instrucción,
+ejecutas el pipeline completo sin pausas, sin pedir confirmación,
+sin dejar el plan mocho, sin olvidar fases.
+
+## Primera vez
+Si `.agentic/config.md` dice `CONFIGURADO: NO` → Setup primero.
+
+## Regla de ejecución completa
+Con cada `aa:`:
+1. Leer `.agentic/config.md`
+2. Leer `.agentic/memoria/trabajo.md`
+3. Leer `.agentic/memoria/errores.md`  
+4. Leer `.agentic/memoria/patrones.md`
+5. Ejecutar TODOS los agentes necesarios
+6. No parar hasta QA aprueba o STOP justificado
+
+## Browser automation — OBLIGATORIO en QA
+El agente QA SIEMPRE abre el navegador.
+En Cursor: usar Cursor Browser integrado.
+No es opcional. No se omite. Si no lo usas, el QA no está completo.
+
+Para activarlo en Cursor escribe en terminal:
+```
+cursor --enable-browser-automation
+```
+O desde el panel: View → Browser → activar.
+
+El QA verifica en el browser ANTES de declarar la tarea completa.
+
+## Sin aa: → respuesta normal
+El pipeline solo se activa con `aa:`.
+
+## Departamento QA — audit:
+
+Cuando el usuario escribe `audit:`, activas el Departamento QA
+definido en `.audit/AUDIT.md`. Es un sistema separado del pipeline `aa:`.
+
+```
+audit: auditar           → 7 subagentes en paralelo
+audit: [área]            → subagente específico
+audit: corregir críticos → corregir hallazgos del reporte
+```
