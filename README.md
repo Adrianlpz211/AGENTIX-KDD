@@ -1,406 +1,457 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Agentic_KDD-v2.2-8b5cf6?style=for-the-badge&labelColor=0a0d14" alt="version"/>
+# Agentic KDD
 
-# 🧠 Agentic KDD
+**A development team of one.**  
+**A team becomes a legion.**
 
-### Your AI coding partner that actually remembers.
-
-**Other AI tools forget everything the moment you close the tab.**  
-**Agentic KDD builds a living memory of your project — and gets smarter every time you code.**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![npm](https://img.shields.io/npm/v/agentic-kdd.svg?color=10b981)](https://www.npmjs.com/package/agentic-kdd)
-[![Works with Cursor](https://img.shields.io/badge/Works_with-Cursor-3b82f6)](https://cursor.sh)
-[![Works with Claude Code](https://img.shields.io/badge/Works_with-Claude_Code-f59e0b)](https://claude.ai/code)
-
-[**Get Started**](#quick-start) · [**How it works**](#how-it-works) · [**Commands**](#commands) · [**Español**](README.es.md)
-
----
-
-```
-You type one line.
-Agentic builds, tests, fixes, learns, and documents — automatically.
-```
+[![npm](https://img.shields.io/npm/v/agentic-kdd?color=8b5cf6&style=flat-square&label=agentic-kdd)](https://www.npmjs.com/package/agentic-kdd)
+[![mcp](https://img.shields.io/npm/v/agentic-kdd-mcp?color=3b82f6&style=flat-square&label=agentic-kdd-mcp)](https://www.npmjs.com/package/agentic-kdd-mcp)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](https://nodejs.org)
+[![Cursor](https://img.shields.io/badge/Cursor-compatible-0ea5e9?style=flat-square)](https://cursor.sh)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-compatible-f97316?style=flat-square)](https://claude.ai/code)
 
 </div>
 
 ---
 
-## The problem nobody talks about
+## The problem
 
-You open Cursor. You open Claude Code. You describe your project *again*. The AI starts fresh *again*. It makes the same mistake it made two weeks ago *again*.
+Every AI coding tool today has the same fundamental flaw: **the agent forgets everything when you close the chat.**
 
-You're not coding — you're babysitting context.
+Session 1: the agent explores your codebase, learns that touching `auth.ts` breaks the session manager, figures out your conventions, understands your architecture.  
+Session 2: it knows nothing. It explores again. It makes the same mistake.
 
-**Agentic KDD fixes this** — permanently.
+This isn't a model problem. It's an architecture problem. No amount of context window size fixes a system that starts from zero every time.
 
-It lives inside your project. It reads your code, learns from every error, remembers every decision, and uses all of it to make the next task smarter than the last. Session after session. Forever.
-
----
-
-## What happens when you type `aa: build the payments module`
-
-```
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │                                                                     │
-  │  1. Context Guard    Validates the task belongs to this project     │
-  │                      Checks if related files have risk history      │
-  │                      Runs predictions from past episodic memory     │
-  │                                                                     │
-  │  2. Analyst          Searches 3 memory layers simultaneously        │
-  │                      "auth.service.ts failed 3x without migrations" │
-  │                      Loads git diff — knows what changed today      │
-  │                                                                     │
-  │  3. Front Agent      Builds UI                                      │
-  │  4. Back Agent       Builds API + logic                             │
-  │                                                                     │
-  │  5. TDD + Self-Healing                                              │
-  │     Generates tests → EXECUTES → reads output                      │
-  │     If fail: searches episodic memory → web search → fix           │
-  │     Re-executes → max 3 iterations → never gives up silently       │
-  │                                                                     │
-  │  6. QA Agent         Full test suite — catches regressions         │
-  │  7. Review           Code checked against your own project rules   │
-  │  8. Memory Agent     Registers episode → syncs graph               │
-  │                      Patterns that worked → promoted to ALTA       │
-  │                      Unused patterns → temporal decay applied      │
-  │                                                                     │
-  └─────────────────────────────────────────────────────────────────────┘
-
-  You read the report. You never touched anything in between.
-```
+**Agentic KDD solves this at the infrastructure level.** Not with a bigger context window — with persistent memory that lives inside your project, learns from every cycle, and gets smarter over time.
 
 ---
 
-## New in v2.2 — The Intelligence Upgrade
+## What is KDD?
 
-Agentic went from reactive (learns after the fact) to **predictive** (prevents failures before they happen).
+**Knowledge-Driven Development** is the methodology at the core of Agentic KDD.
 
-### ⚡ Predictive Engine
+Traditional AI development treats each session as independent. KDD treats knowledge as a first-class artifact: every pattern discovered, every error resolved, every architectural decision made is stored in a structured knowledge graph and fed back into every future cycle.
 
-Your episodic memory now works for you *before* you make a mistake.
-
-```
-You type: aa: refactor auth service
-
-Agentic checks the history:
-
-  🔴 PREDICTION [HIGH]
-  auth.service.ts failed 3/4 times in past episodes
-  Known reason: migrations weren't run before touching SessionManager
-  Fix that worked: run migrations first (80% success rate when done)
-
-  ✓ Precondition detected: Run migrations first?
-```
-
-Not guessing. Reading *your own project's history* and connecting the dots.
-
-### 🔍 Git Context
-
-Every `akdd sync` reads your git diff and checks it against memory.
+The agent doesn't re-learn your project. It already knows it.
 
 ```
-akdd sync
+Without KDD:
+  Session 1 → agent learns → session ends → forgotten
+  Session 2 → start over → same mistakes → same time lost
 
-  ⚠️  GIT CONTEXT
-  Branch: feature/payments
-
-  🔴 [HIGH]  stripe.service.ts — failed 2x
-             Last fix: add STRIPE_WEBHOOK_SECRET to .env.local
-
-  🟡 [MEDIUM] session.ts — 1 past failure, proceed with caution
+With KDD:
+  Session 1 → agent learns → stored in .agentic/memoria.db
+  Session 2 → agent already knows → builds on top of everything
+  Session N → the system is smarter than it was on day one
 ```
 
-Before the AI touches a single file, it already knows which ones are dangerous and why.
-
-### 🧬 Local Embeddings — 100% Offline
-
-Semantic search without any API key. The `all-MiniLM-L6-v2` model (23MB, runs locally) makes memory retrieval go from keyword matching to *understanding*.
-
-```
-You search: "how do I handle expired sessions"
-
-Without embeddings:  finds entries with "expired" or "sessions"
-With embeddings:     finds "JWT timeout", "token vencido", "session cleanup",
-                     "auth refresh loop" — because they mean the same thing
-```
-
-Relevance jumps from ~60% to ~90%. Every `aa:` task benefits automatically.
-
-### 🔁 CI/CD Memory Loop
-
-Your repo writes to your memory — even when you're not working.
-
-```bash
-akdd ci-install   # one command → GitHub Actions workflow installed
-```
-
-Every failed test in CI registers as an episodic memory entry. You show up the next morning and Agentic already knows what broke in the midnight deploy, and why.
+This is why KDD isn't a wrapper around Claude. It's a methodology for making AI-assisted development actually compound over time.
 
 ---
 
 ## How it works
 
-Agentic KDD is built on the **CoALA memory architecture** (Princeton/CMU) — the same taxonomy used by Mem0, LangChain, and Letta — adapted specifically for software development.
+Agentic KDD lives inside your project as a `.agentic/` directory — a local SQLite database, a set of specialized agents, and a pipeline that runs automatically when you type `aa:`.
 
-```
-4 memory layers, always active:
-
-  Working Memory    → active context of the current task
-  Procedural        → patterns, errors, decisions (your project's rules)
-  Episodic          → raw trajectories — what was tried, why it worked or failed
-  Semantic          → entity graph — modules, APIs, dependencies, what breaks what
+```bash
+aa: implement JWT authentication with refresh token rotation
 ```
 
-Everything lives in a **SQLite database inside your project** — yours forever, no cloud, no subscription.
+That single command triggers a pipeline that runs without interrupting you:
 
-```sql
--- Your project's rules, sorted by proven reliability
-SELECT * FROM nodos WHERE area = 'auth' AND confianza = 'ALTA';
--- Returns: only rules applied 7+ times with 80%+ success rate
-
--- Every time this file caused a problem, and exactly what fixed it
-SELECT * FROM episodios WHERE archivos_tocados LIKE '%auth.service%' AND resultado = 'fallo';
+```
+① Analyst      — reads memory, AST graph, ADRs, specs, plans all phases
+② Build        — frontend / backend agents implement within the plan
+③ TDD Gate     — runs tests, parses output, self-heals up to 3× automatically
+④ QA           — verifies acceptance criteria against the full test suite
+⑤ ag:review    — automatic code review against accumulated KDD memory
+⑥ Memory       — syncs graph, causal edges, specs, observability
 ```
 
-The Analyst queries all 3 layers in **under 5ms** before planning any task.
+**The developer never types `ag: test` or `ag: review`. They run automatically.**
+
+The critical difference from every other agent framework is in step ③. The TDD gate is a deterministic check in Node.js code — not a prompt suggestion. The agent cannot declare tests passing without actually running them. The gate rejects progress without proof.
+
+```
+Cursor rules:   "prefer running tests before delivering"
+                → the agent follows this when it feels like it
+
+Agentic KDD:    if (tests_passing === false) { STOP("gate rejected") }
+                → the code rejects progress without proof of compliance
+```
 
 ---
 
-## For everyone — experienced dev or first-time vibe coder
+## Memory architecture
 
-You don't need to understand how any of this works internally.
+Four persistent memory layers, fully offline, in SQLite, inside your project.
 
-**If you're new to AI coding:** install it, type `aa: configurar`, describe what you want to build. Agentic handles the rest.
+```
+.agentic/memoria.db
+│
+├── WORKING MEMORY      Active session buffer
+├── EPISODIC MEMORY     Raw history of what happened in every cycle
+├── SEMANTIC MEMORY     Project entity graph, AST, module relationships
+└── PROCEDURAL MEMORY   Patterns, errors, decisions — rules that apply every cycle
+```
 
-**If you're an experienced dev:** no more re-explaining architecture. No more "the AI ignored my patterns again." Your rules are enforced automatically, every single time.
+Every memory node carries a confidence signal updated automatically:
 
-**Cursor user:** works natively — CLAUDE.md activates everything.  
-**Claude Code user:** works natively — type `aa:` in the terminal.  
-**Both at the same time:** `_LOCKS.md` coordinates parallel agents.
+```
+LOW    → suggestion, not enforced
+MEDIUM → applied and mentioned in every plan
+HIGH   → fixed rule, applied on every cycle without exception
+
+Applied ≥ 3×  +  utility ≥ 70%  →  auto-promoted to MEDIUM
+Applied ≥ 7×  +  utility ≥ 80%  →  auto-promoted to HIGH
+Unused for 60 cycles             →  auto-degraded (temporal decay)
+```
+
+Beyond the four CoALA layers, Agentic KDD adds three knowledge structures specific to software development:
+
+- **AST Graph** — symbols, imports, call graph, PageRank across 12 languages
+- **Causal Edges** — `caused_failure`, `was_fixed_by`, `tested_by`, `regressed_by` — bi-temporal, never deleted, only invalidated
+- **Knowledge Docs** — ADRs, gotchas, conventions ingested from `docs/adr/`
 
 ---
 
-## Quick Start
+## The five phases
 
-### Option A — MCP (most automatic) ⭐
+### Phase 0 — Harness
+
+Deterministic enforcement gates. The piece missing from every other agent framework.
+
+`harness.cjs` runs PRE/EXEC/POST checks on every pipeline step. `tdd-gate.cjs` is a Node.js loop that detects your test command, runs it, parses the output (Jest, Vitest, Mocha, pytest), and retries up to three times automatically. The agent cannot lie about test results.
+
+### Phase 1 — Discernment
+
+Before planning any change, the agent has a complete structural map of the project. `ast-indexer.cjs` builds an AST graph across 12 languages with PageRank scoring. `causal-edges.cjs` tracks what broke what, what fixed what, what tests cover what — bi-temporally, with full history preserved.
+
+### Phase 2 — Knowledge Base
+
+`adr-ingestor.cjs` parses Architecture Decision Records in MADR format and converts them to typed graph edges — no LLM required. `knowledge-ingestor.cjs` ingests gotchas, conventions, and runbooks. The agent understands not just what the code does, but why it was built that way.
+
+### Phase 3 — Autonomy
+
+`spec-manager.cjs` implements Kiro-style specs with wave execution. Wave 1 contains tasks with no dependencies. Wave N depends on Wave N-1. The agent executes the right wave every time. `impact-analyzer.cjs` runs a pre-change impact analysis combining AST structure, causal memory, and the knowledge base before touching anything — returning CRITICAL, MEDIUM, or LOW severity.
+
+### Phase 4 — Collaborative Mode
+
+`collab-manager.cjs` syncs the local SQLite memory to a shared Turso database. Multiple developers share one knowledge base. What one developer learns, the agent knows for everyone.
+
+```
+Dev A discovers that touching auth.ts breaks session.ts
+                        ↓ auto-sync to Turso
+Dev B already knows it before touching auth.ts
+Dev C joins the team → gets 6 months of project knowledge from day one
+```
+
+Team members join with a single invite code generated by `akdd collab invite` — no credentials to share manually, no Turso account required for team members.
+
+---
+
+## Memory governance — MemCurator
+
+`mem-curator.cjs` is an autonomous governance agent that runs automatically every 10 cycles. It handles what no other agent framework addresses explicitly:
+
+- **TTL enforcement**: episodic memory older than 30 days is compressed into summaries and archived after 90 days
+- **Semantic deduplication**: nodes with Jaccard similarity above 0.92 are merged, preserving the higher-confidence version
+- **Conflict resolution**: when new code supersedes an old rule, the old rule is marked `HISTORICO` with an explicit supersession link — not deleted
+- **Relevance scoring**: every node is scored continuously using `S(k) = similarity × exp(-λ × Δt) × log(1 + usage_count)`
+- **Node limit**: active procedural memory is capped at 1000 nodes; low-utility candidates are deprecated automatically
+
+The MemCurator is intentionally decoupled from the development agents. It has no interest in preserving its own past decisions — it only governs quality.
+
+---
+
+## Embeddings
+
+The default embedding model is `jina-embeddings-v2-base-code` — a bimodal NL-PL model trained specifically on code. It understands type relationships, AST structures, and control flow semantics. `all-MiniLM-L6-v2` is available as a lightweight fallback (~23MB vs ~500MB) for environments where storage is constrained.
+
+```bash
+akdd jina-install    # bimodal NL-PL model — recommended
+akdd embed-install   # all-MiniLM-L6-v2 — lightweight fallback
+```
+
+---
+
+## Discoverability
+
+Every `akdd sync` generates three files automatically:
+
+- `.agentic/llms.txt` — structured project map for external agents. Architecture, active rules, known pitfalls, available MCP tools. The equivalent of `robots.txt` but for LLMs.
+- `.agentic/llms-full.txt` — expanded version with all active patterns, causal memory, and ADRs.
+- `.agentic/knowledge-graph.json` — the full causal graph serialized for Git versioning. The graph travels with the repository.
+
+---
+
+## Installation
 
 ```bash
 npm install -g agentic-kdd
-npm install -g agentic-kdd-mcp
+cd my-project
+akdd init
 ```
 
-Add to Cursor → Settings → Tools & MCPs:
+`akdd init` detects your stack, downloads the latest files from GitHub, configures the MCP server in Cursor automatically, and optionally registers with Claude Code. Open the project in your IDE and run:
+
+```
+aa: configure
+```
+
+The system maps your codebase once. After that, every `aa:` cycle builds on accumulated knowledge.
+
+**Requirements:** Node.js 18+, Cursor or Claude Code (or any MCP-compatible client).
+
+---
+
+## CLI reference
+
+### Setup
+
+```bash
+akdd init              # Deploy Agentic KDD in the current project
+akdd update            # Update agents + modules — memory stays intact
+akdd health            # Full system diagnostic
+akdd health --fix      # Auto-fix detected issues
+akdd mcp               # Auto-configure MCP in Cursor / Claude Code
+akdd mcp status        # Check MCP configuration
+```
+
+### Memory
+
+```bash
+akdd sync              # Sync markdown → SQLite graph
+akdd coala             # Stats across all 4 CoALA memory layers
+akdd buscar "query"    # Hybrid search across all memory
+akdd decay             # Apply temporal decay to inactive patterns
+akdd audit             # Memory audit: stale, contradictions, proposals
+akdd forget <id>       # Invalidate a memory entry with documented reason
+akdd cure              # Run MemCurator — TTL, dedup, conflicts, scores
+akdd cure report       # Preview what curation would do (no changes)
+```
+
+### AST & impact
+
+```bash
+akdd ast               # Index project into the AST graph
+akdd ast stats         # AST index stats
+akdd ast-impact <file> # Full impact analysis (AST + causal + knowledge)
+akdd why <entity>      # Why does this exist? Full causal chain.
+akdd causal-prune      # Prune causal graph to prevent context overflow
+```
+
+### Specs
+
+```bash
+akdd spec list                     # List all module specs
+akdd spec <module>                 # Status + next execution wave
+akdd spec create <module>          # Create a feature spec
+akdd spec create <module> --bugfix # Create a bugfix spec
+```
+
+### Knowledge base
+
+```bash
+akdd adr               # Ingest ADRs from docs/adr/
+akdd knowledge         # Ingest gotchas and conventions
+```
+
+### Metrics & observability
+
+```bash
+akdd metrics           # Project KPIs: success rate, rework, autonomy score
+akdd metrics trend     # Trend across last 10 cycles
+akdd trail             # Recent decision trails
+akdd trail <cycle_id>  # Full trail: what changed, why, what memory influenced it
+akdd trail why <file>  # Why does this file or module exist?
+akdd benchmarks        # LongMemEval + Token Reduction + Memory Quality scores
+akdd llms              # Generate llms.txt + knowledge-graph.json
+```
+
+### Collaborative mode
+
+```bash
+akdd collab init              # Activate — creates shared DB automatically
+akdd collab invite            # Generate invite code (24h, one use)
+akdd collab join <code>       # Join with an invite code
+akdd collab push              # Push your learnings to the team
+akdd collab pull              # Pull the team's latest learnings
+akdd collab status            # Check sync status
+```
+
+### Embeddings
+
+```bash
+akdd jina-install      # Install jina-embeddings-v2-base-code (~500MB, code-optimized)
+akdd embed-install     # Install all-MiniLM-L6-v2 (~23MB, lightweight fallback)
+```
+
+### Intelligence
+
+```bash
+akdd git-context       # Git diff analysis + risk assessment from episodic memory
+akdd predict           # Predictive risk patterns
+akdd ci-install        # Install GitHub Actions CI/CD memory workflow
+akdd dashboard         # Open interactive knowledge graph dashboard
+```
+
+---
+
+## MCP Server — 34 native tools
+
+After `akdd init`, Cursor and Claude Code discover the MCP server automatically. Every capability is available directly in the IDE chat — including commands that previously required a terminal.
+
 ```json
+// .cursor/mcp.json — written automatically by akdd init
 {
   "mcpServers": {
     "agentic-kdd": {
       "command": "node",
-      "args": ["YOUR_GLOBAL_PATH/node_modules/agentic-kdd-mcp/server.js"]
+      "args": [".agentic/grafo/mcp-server.cjs"]
     }
   }
 }
 ```
 
-> Find your path: `npm root -g` → append `/agentic-kdd-mcp/server.js`
+**Memory (8):** `grafo_buscar` · `registrar_episodio` · `grafo_sync` · `grafo_impacto` · `registrar_entidad` · `grafo_coala` · `grafo_predecir` · `verdad_vigente`
 
-For Claude Code:
-```bash
-claude mcp add agentic-kdd -- node $(npm root -g)/agentic-kdd-mcp/server.js
-```
+**AST & Impact (5):** `ast_impact` · `ast_index` · `ast_symbols` · `impact_precheck` · `impact_diff`
 
-Then open any project and type:
-```
-aa: configurar
-```
-Done. Agentic reads your project and configures itself.
+**Specs (3):** `spec_waves` · `spec_status` · `spec_create`
 
----
+**Knowledge (2):** `knowledge_query` · `adr_ingest`
 
-### Option B — CLI
+**Causal (3):** `causal_add` · `causal_query` · `causal_prune`
 
-```bash
-npm install -g agentic-kdd
-cd your-project
-akdd init
-```
+**Observability (4):** `decision_trail` · `decision_why` · `recent_ciclos` · `metrics_summary`
 
-Open in Cursor or Claude Code → type `aa: configurar`
+**Governance (5):** `mem_curate` · `mem_score` · `memory_audit` · `memory_forget` · `report_benchmarks`
+
+**Discoverability (1):** `generate_llms_txt`
+
+**CLI from chat (6):** `init_project` · `update_project` · `collab_init` · `collab_invite` · `collab_status` · `system_health`
 
 ---
 
-### Option C — Manual (no install)
+## Pro agents
 
-1. Download and unzip to your project root
-2. Open in Cursor or Claude Code
-3. Type `aa: configurar`
+Beyond the core pipeline, four specialized agents handle operations that run independently:
 
-> SQLite works automatically: tries `better-sqlite3` → falls back to `node:sqlite` (Node 22+) → falls back to `sql.js`. Zero configuration needed.
-
----
-
-### Auto-detected stacks
-
-| Stack | Auto-detected | Pre-loaded rules |
-|-------|--------------|-----------------|
-| Next.js 14 | ✓ | App Router, Server Components, Supabase |
-| Laravel | ✓ | Services, Repositories, Form Requests |
-| Node/Express | ✓ | Services layer, error handling |
-| React | ✓ | Hooks, state management, API services |
-| PHP | ✓ | PDO queries, validation |
-| Python/FastAPI | ✓ | Pydantic, SQLAlchemy, pytest |
+| Agent | Invocation | What it does |
+|-------|------------|--------------|
+| `ag:review` | `ag: review <file>` | Code review against KDD memory. Also runs automatically in every `aa:` cycle. |
+| `ag:test` | `ag: test <module>` | Generates test suites based on error history and causal edges for the module. |
+| `ag:refactor` | `ag: refactor <file>` | Refactors with pre-change impact analysis. Won't proceed if impact is CRITICAL. |
+| `ag:doc` | `ag: doc <module>` | Technical documentation generated from code + project memory. |
 
 ---
 
-## Commands
+## Switching IDEs
 
-### `aa:` — The main pipeline
+Memory lives in the project, not the IDE. When switching from Cursor to Claude Code or back:
 
 ```bash
-aa: configurar              # first-time setup — reads your project automatically
-aa: [any task]              # full autonomous cycle
-aa: continúa — [answer]     # resume after a STOP
-aa: aprende                 # absorb knowledge from work done outside the pipeline
-aa: aprende — error: [x]    # register a specific error
-aa: aprende — decisión: [x] # register an architectural decision
+akdd mcp
 ```
 
-### `aa: sprint` — Chain multiple tasks
+That's the only step. Everything else is already there.
+
+---
+
+## Updating an existing project
 
 ```bash
-# Explicit chain
-aa: sprint — full quality cycle for auth module
-  → task 1: audit and generate issues report
-  → task 2: fix the BLOCKERs found
-  → task 3: generate tests for the failing cases
-  → task 4: update documentation
-
-# Short form — Agentic plans the tasks and proposes before executing
-aa: sprint — build payments module from zero
-aa: sprint skip    # skip current task
-aa: sprint abort   # cancel sprint, keep completed work
+akdd update
 ```
 
-Memory flows between all tasks. Output of task 1 informs task 2. Persists across sessions.
+Downloads the latest modules from GitHub. Schema migrations run automatically on the next cycle. Memory stays intact.
 
-### `ag:` — Improve existing code
+---
 
-```bash
-ag: refactor [file]   # respects every architectural decision
-ag: test [file]       # tests based on real known errors — not generic templates
-ag: doc [file]        # documents the WHY, not just the what
-ag: review [file]     # BLOCKER / REQUIRED / SUGGESTED vs your own project rules
+## What Agentic KDD is not
+
+It is not a chat interface, an IDE, or a replacement for Git. It does not require an internet connection after setup. It does not send your code anywhere. It does not depend on a SaaS backend.
+
+It is infrastructure. It runs inside your project, it travels with your repository, and it compounds over time.
+
+---
+
+## Project structure after `akdd init`
+
 ```
-
-### `audit:` — 7 independent QA subagents
-
-```bash
-audit: auditar      # full audit — all 7 subagents
-audit: seguridad    # secrets, auth, vulnerabilities
-audit: frontend     # source maps, exposed keys, build artifacts
-audit: backend      # endpoints, validation, APIs
-audit: datos        # RLS, data leaks, access control
-audit: performance  # rate limiting, cache, scaling
-audit: codigo       # code quality and Git hygiene
-```
-
-### CLI — full command list
-
-```bash
-# Setup
-akdd init              # install in current project
-akdd update            # update engine + agents (memory stays intact)
-
-# Daily
-akdd sync              # sync memory + decay + episodic consolidation
-akdd analyze           # analyze code → fill semantic entity graph
-akdd dashboard         # visual dashboard at localhost:3847
-
-# Memory
-akdd coala             # stats: all 4 memory layers
-akdd buscar "query"    # hybrid search across all layers
-akdd impacto "Module"  # what breaks if you touch this?
-akdd predict           # predictive patterns from episodic history
-
-# v2.2 Intelligence
-akdd git-context            # risk analysis of current git diff
-akdd git-context --install-hook   # auto-run on every branch switch
-akdd embed-install          # install local embeddings (23MB, offline)
-akdd embed-status           # check embedding engine
-akdd ci-install             # install GitHub Actions workflow
-akdd ci-status              # last CI/CD reports in memory
+your-project/
+├── .agentic/
+│   ├── agentes/              9 specialized agents + 4 pro
+│   ├── grafo/                23 Node.js modules
+│   │   ├── grafo.cjs              CoALA v3 memory engine
+│   │   ├── harness.cjs            deterministic pipeline enforcement
+│   │   ├── tdd-gate.cjs           mechanical self-healing loop
+│   │   ├── ast-indexer.cjs        AST graph (12 languages)
+│   │   ├── causal-edges.cjs       bi-temporal causal memory + pruning
+│   │   ├── adr-ingestor.cjs       knowledge base (ADRs)
+│   │   ├── spec-manager.cjs       Kiro-style wave execution
+│   │   ├── impact-analyzer.cjs    pre-change impact analysis
+│   │   ├── decision-trail.cjs     decision observability
+│   │   ├── metrics.cjs            project KPIs + benchmarks
+│   │   ├── memory-audit.cjs       memory governance + vigencia_tipo
+│   │   ├── mem-curator.cjs        autonomous MemCurator agent
+│   │   ├── llms-generator.cjs     llms.txt + knowledge-graph.json
+│   │   ├── embeddings.cjs         jina-v2-base-code (bimodal NL-PL)
+│   │   ├── health-check.cjs       system diagnostics
+│   │   ├── mcp-server.cjs         34 MCP tools
+│   │   └── collab-manager.cjs     collaborative sync (Turso)
+│   ├── memoria/              patterns · errors · decisions (.md)
+│   ├── specs/                module specs with wave execution
+│   ├── conocimiento/         ADRs · gotchas · conventions
+│   ├── llms.txt              structured project map for external agents
+│   ├── llms-full.txt         expanded knowledge base for agent context
+│   ├── knowledge-graph.json  serialized causal graph for Git versioning
+│   ├── config.md             project stack, modules, rules
+│   └── memoria.db            SQLite — all memory lives here
+├── .cursor/mcp.json          auto-configured by akdd init
+├── .audit/                   7 specialized QA agents
+├── dashboard.cjs             interactive knowledge graph dashboard
+├── CLAUDE.md                 activates aa: / ag: / audit: / akdd
+└── .cursorrules              Cursor rules
 ```
 
 ---
 
-## Visual Dashboard
+## Packages
 
-```bash
-akdd dashboard   # http://localhost:3847
-```
-
-- **Neural graph** — D3 interactive map of all knowledge and their connections
-- **Metrics** — Goal Attainment Rate, Autonomy Ratio, Handoff Integrity, Drift Index
-- **Timeline** — every decision and module spec, chronologically
-- **Patterns** — usage bars and confidence levels
-- **Errors** — known issues with resolution history
-- **Onboarding** — setup progress for new team members
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`agentic-kdd`](https://www.npmjs.com/package/agentic-kdd) | 3.1.0 | CLI — init, update, health, ast, metrics, trail, collab, cure, llms, benchmarks |
+| [`agentic-kdd-mcp`](https://www.npmjs.com/package/agentic-kdd-mcp) | 2.1.0 | Standalone MCP server — 34 tools for Cursor and Claude Code |
 
 ---
 
-## The STOP Protocol — honest over hallucinated
+## Compatibility
 
-When something can't be completed after 2 attempts, Agentic stops with a precise report. Never loops. Never invents.
-
-```
-🛑 STOP — Back agent
-
-Task:     persist expiry_date in warehouse table
-Phase:    2 of 3
-Attempts: 2
-
-Error:    "Invalid column name 'expiry_date'"
-Reason:   Column doesn't exist. Migration not run.
-
-→ aa: continúa — run: ALTER TABLE warehouse ADD expiry_date DATE NULL
-```
+| IDE / Client | Support |
+|---|---|
+| **Cursor** | ✅ Full — MCP auto-configured on `akdd init` |
+| **Claude Code** | ✅ Full — `claude mcp add` runs automatically |
+| **VS Code** | ✅ Via extension scaffold |
+| **Windsurf** | ✅ Via MCP manual config |
 
 ---
-
-## Autonomy level
-
-```
-L1  You re-explain everything every session
-L2  Basic memory — it remembers some things
-L3  ← Agentic KDD v2.2
-        Prevents failures before they happen
-        Learns from CI/CD automatically
-        Semantic search always loaded
-L4  Full project autonomy
-L5  Self-improving codebase
-```
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT — use it, fork it, build on it.
+MIT © [Adrianlpz211](https://github.com/Adrianlpz211)
 
 ---
 
 <div align="center">
 
-**The AI that finally remembers your project.**
+**[npm](https://www.npmjs.com/package/agentic-kdd)** · **[mcp](https://www.npmjs.com/package/agentic-kdd-mcp)** · **[github](https://github.com/Adrianlpz211/Agentic-KDD)**
 
-Made with 🧠 by [@Adrianlpz211](https://github.com/Adrianlpz211)
-
-[npm](https://www.npmjs.com/package/agentic-kdd) · [GitHub](https://github.com/Adrianlpz211/Agentic-KDD) · [Español](README.es.md)
-
-*If Agentic KDD saved you time → ⭐*
+*A development team of one.*  
+*A team becomes a legion.*
 
 </div>
