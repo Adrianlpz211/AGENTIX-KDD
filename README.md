@@ -305,6 +305,12 @@ akdd dashboard         # Open interactive knowledge graph dashboard
 
 After `akdd init`, Cursor and Claude Code discover the MCP server automatically. Every capability is available directly in the IDE chat — including commands that previously required a terminal.
 
+**`akdd init` configures MCP automatically** in both Cursor and Claude Code. You don't need to touch any config file.
+
+- **Cursor** — `akdd init` writes `.cursor/mcp.json` at the project root. Cursor reads it automatically. Reload the window and the 34 tools appear in the chat.
+- **Claude Code** — `akdd init` runs `claude mcp add agentic-kdd` automatically if the CLI is installed.
+- **Switching IDEs / reconfiguring** — `akdd mcp` handles both in one command and prints the exact manual JSON with your real system path (not a placeholder) if you need it.
+
 ```json
 // .cursor/mcp.json — written automatically by akdd init
 {
@@ -334,6 +340,39 @@ After `akdd init`, Cursor and Claude Code discover the MCP server automatically.
 **Discoverability (1):** `generate_llms_txt`
 
 **CLI from chat (6):** `init_project` · `update_project` · `collab_init` · `collab_invite` · `collab_status` · `system_health`
+
+---
+
+## Audit Department
+
+A separate QA system that runs deep project-wide audits, independent from the `aa:` development pipeline. Where `aa:` validates individual tasks, the Audit Department reviews the project as a whole.
+
+```
+audit: auditar     # full audit — all 7 agents in parallel
+audit: seguridad   # security only — secrets, auth, vulnerabilities
+audit: frontend    # frontend only — source maps, keys, build artifacts
+audit: backend     # backend only — endpoints, validation, exposed APIs
+audit: datos       # database only — schema, RLS, query exposure
+audit: performance # performance only — rate limiting, cache, scalability
+audit: browser     # real browser QA
+audit: codigo      # code quality and Git hygiene
+audit: help        # show all available commands
+```
+
+Audits run without touching code. Output goes to `_output/audit-[date].md`.
+
+The 7 specialized agents:
+
+| Agent | Focus |
+|-------|-------|
+| `00-director` | Orchestrates the full audit, consolidates reports |
+| `01-seguridad` | Exposed secrets, auth weaknesses, injection risks |
+| `02-frontend` | Build artifacts, source maps, client-side key exposure |
+| `03-backend` | Endpoint security, input validation, API surface |
+| `04-datos` | Database schema, RLS policies, query exposure |
+| `05-performance` | Rate limiting, caching strategy, scalability bottlenecks |
+| `06-browser` | Real browser QA against the running application |
+| `07-codigo` | Code quality, dead code, Git history hygiene |
 
 ---
 
