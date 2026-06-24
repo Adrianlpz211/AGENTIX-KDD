@@ -259,8 +259,20 @@ Every `akdd sync` auto-generates:
 
 ## Installation
 
+**Mac / Linux:**
 ```bash
-npm install -g agentic-kdd
+curl -fsSL https://raw.githubusercontent.com/Adrianlpz211/Agentic-KDD/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/Adrianlpz211/Agentic-KDD/main/install.ps1 | iex
+```
+
+The installer checks for Node.js 18+, installs it automatically if missing, then installs the CLI globally. One command, no manual steps.
+
+**Then, in every project:**
+```bash
 cd my-project
 akdd init
 ```
