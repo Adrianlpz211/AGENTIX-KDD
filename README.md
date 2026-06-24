@@ -1,10 +1,16 @@
 <div align="center">
 
-# Agentic KDD
+```
+ █████╗  ██████╗ ███████╗███╗   ██╗████████╗██╗ ██████╗     ██╗  ██╗██████╗ ██████╗ 
+██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██║██╔════╝     ██║ ██╔╝██╔══██╗██╔══██╗
+███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██║██║          █████╔╝ ██║  ██║██║  ██║
+██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██║██║          ██╔═██╗ ██║  ██║██║  ██║
+██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ██║╚██████╗     ██║  ██╗██████╔╝██████╔╝
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝     ╚═╝  ╚═╝╚═════╝ ╚═════╝
 
-**A development team of one.**  
-**A team becomes a legion.**
-
+                      A development team of one.
+                       A team becomes a legion.
+```
 [![npm](https://img.shields.io/npm/v/agentic-kdd?color=8b5cf6&style=flat-square&label=agentic-kdd)](https://www.npmjs.com/package/agentic-kdd)
 [![mcp](https://img.shields.io/npm/v/agentic-kdd-mcp?color=3b82f6&style=flat-square&label=agentic-kdd-mcp)](https://www.npmjs.com/package/agentic-kdd-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)](LICENSE)
