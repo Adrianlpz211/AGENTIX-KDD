@@ -1,0 +1,99 @@
+{
+  "name": "agentic-kdd",
+  "displayName": "Agentic KDD",
+  "description": "AI coding agent with persistent memory, AST graph, and knowledge base for any project",
+  "version": "0.1.0",
+  "publisher": "agentic-kdd",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Other"],
+  "keywords": ["ai", "agent", "coding", "memory", "knowledge", "agentic"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentickdd.showDashboard",
+        "title": "Agentic KDD: Open Dashboard"
+      },
+      {
+        "command": "agentickdd.indexAST",
+        "title": "Agentic KDD: Index Project (AST)"
+      },
+      {
+        "command": "agentickdd.queryMemory",
+        "title": "Agentic KDD: Query Memory"
+      },
+      {
+        "command": "agentickdd.analyzeImpact",
+        "title": "Agentic KDD: Analyze Impact of Current File"
+      },
+      {
+        "command": "agentickdd.createSpec",
+        "title": "Agentic KDD: Create Spec for Module"
+      },
+      {
+        "command": "agentickdd.syncKnowledge",
+        "title": "Agentic KDD: Sync ADRs & Gotchas"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentickdd",
+          "title": "Agentic KDD",
+          "icon": "$(brain)"
+        }
+      ]
+    },
+    "views": {
+      "agentickdd": [
+        {
+          "type": "webview",
+          "id": "agentickdd.dashboard",
+          "name": "Dashboard"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agentic KDD",
+      "properties": {
+        "agentickdd.astEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic AST indexing on file save"
+        },
+        "agentickdd.embeddingsModel": {
+          "type": "string",
+          "enum": ["miniLM", "jina-code"],
+          "default": "miniLM",
+          "description": "Embeddings model for semantic search"
+        },
+        "agentickdd.collabMode": {
+          "type": "string",
+          "enum": ["disabled", "turso"],
+          "default": "disabled",
+          "description": "Collaborative memory sync mode"
+        }
+      }
+    },
+    "mcpServers": {
+      "agentic-kdd": {
+        "command": "node",
+        "args": ["${workspaceFolder}/.agentic/grafo/mcp-server.cjs"],
+        "type": "stdio"
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.js",
+    "compile": "node build.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
