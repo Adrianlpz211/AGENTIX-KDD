@@ -187,6 +187,38 @@ Responder normalmente usando el contexto del proyecto.
 - `.agentic/conocimiento/` → docs del proyecto
 - `.audit/`                → Departamento QA
 
+
+## DETECCIÓN AUTOMÁTICA DE TAREAS SIN aa:
+
+Esta regla actúa como red de seguridad para cuando el dev olvida escribir `aa:`.
+
+Si el mensaje NO tiene `aa:` pero cumple los criterios de abajo,
+trátalo exactamente como si tuviera `aa:` — ejecuta el pipeline completo.
+
+### TRATAR COMO aa: si el mensaje:
+- Empieza con verbo de acción técnica:
+  "implementa", "crea", "crea un", "fix", "arregla", "agrega", "añade",
+  "modifica", "refactoriza", "conecta", "integra", "genera", "construye",
+  "desarrolla", "corrige", "actualiza", "migra", "convierte", "extrae",
+  "aplica", "añade soporte", "haz que", "necesito que"
+- Menciona un archivo o módulo específico: "en auth.ts", "en el módulo de pagos", "en src/"
+- Tiene contexto técnico claro con intención de cambio: "el bug de X", "la feature de Y", "el error en Z"
+- Empieza con prefijo técnico: `fix:` / `feat:` / `build:` / `dev:` / `chore:`
+
+### NO ejecutar el pipeline si:
+- Es una pregunta (termina en `?`)
+- Empieza con: "explícame", "qué es", "cómo funciona", "cuándo", "por qué", "dónde", "muéstrame", "dame", "qué piensas"
+- Es una consulta de estado: `akdd buscar`, `akdd health`, `akdd metrics`, `akdd trail`
+- Es una conversación sobre el proyecto, no una acción sobre él
+
+### Comportamiento al detectar tarea sin aa:
+Antes de ejecutar, mostrar exactamente:
+```
+🔄 Detecté una tarea de desarrollo — ejecutando como aa:
+```
+Luego proceder con el pipeline completo como si el dev hubiera escrito `aa:`.
+
+
 # ============================================================
 # INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
 # ============================================================
