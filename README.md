@@ -289,20 +289,85 @@ aa: configure
 
 ## CLI reference
 
-### Setup
+The full list looks long. In practice, your daily workflow is two things:
+
+```
+aa: your task here     → autonomous development pipeline
+akdd dashboard         → see the project knowledge graph
+```
+
+Everything else either runs automatically or is used in specific situations.
+
+---
+
+### What you actually use daily
 
 ```bash
+aa: <task>             # Develop anything — feature, fix, refactor
+akdd dashboard         # Visual knowledge graph + metrics + project docs
+akdd health            # Something feels off — full diagnostic
+akdd update            # New version of Agentic published
+```
+
+### Team setup (once per project)
+
+```bash
+akdd collab init              # Activate shared memory for the team
+akdd collab invite            # Generate invite code for a new member
+akdd collab join <code>       # New member runs this once to join
+```
+
+### What runs automatically — you never call these
+
+```bash
+akdd sync              # Runs at end of every aa: cycle
+akdd cure              # Runs every 10 cycles (MemCurator)
+akdd metrics           # Updates after every cycle
+akdd trail             # Fills itself after every cycle
+akdd llms              # Regenerates after every sync
+akdd contracts         # Populates itself from passing tests
+akdd creative          # Runs suggestions at end of every cycle
+```
+
+### Diagnostic — when something specific happens
+
+```bash
+akdd audit             # Memory feels noisy or outdated
+akdd ast-impact <file> # About to touch something critical — assess damage first
+akdd contracts blast <file>   # Worried about breaking something — check risk
+akdd contracts gate    # After a big change — verify nothing broke
+akdd why <file>        # Don't understand why this exists — full causal chain
+akdd buscar "query"    # Looking for what the system knows about a topic
+akdd benchmarks        # Need evidence of Agentic KDD's value
+```
+
+### One-time setup
+
+```bash
+akdd init              # Deploy Agentic KDD in a new project
+akdd mcp               # Reconfigure MCP after switching IDEs
+akdd jina-install      # Install code-optimized embeddings (~500MB)
+akdd embed-install     # Install lightweight fallback embeddings (~23MB)
+akdd ci-install        # Add GitHub Actions CI/CD memory workflow
+akdd adr               # Ingest architecture decisions from docs/adr/
+akdd knowledge         # Ingest gotchas and conventions from docs/
+```
+
+### Full reference (all commands)
+
+<details>
+<summary>Expand — complete command list</summary>
+
+```bash
+# Setup
 akdd init              # Deploy Agentic KDD
 akdd update            # Update modules — memory stays intact
 akdd health            # Full system diagnostic
 akdd health --fix      # Auto-fix detected issues
 akdd mcp               # Auto-configure MCP in Cursor / Claude Code
 akdd mcp status        # Check MCP configuration
-```
 
-### Memory
-
-```bash
+# Memory
 akdd sync              # Sync markdown → SQLite + generate llms.txt
 akdd coala             # Stats across all 4 CoALA layers
 akdd buscar "query"    # Hybrid search across all memory
@@ -310,67 +375,49 @@ akdd audit             # Memory audit: stale, contradictions, proposals
 akdd forget <id>       # Invalidate a memory entry with reason
 akdd cure              # Run MemCurator — TTL, dedup, conflicts, scores
 akdd cure report       # Preview curation (no changes)
-```
 
-### AST & impact
-
-```bash
+# AST & impact
 akdd ast               # Index project into AST graph
-akdd ast-impact <file> # Full impact analysis (AST + causal + knowledge)
+akdd ast-impact <file> # Full impact analysis
 akdd why <entity>      # Why does this exist? Full causal chain.
 akdd causal-prune      # Prune causal graph to prevent context overflow
-```
 
-### Preservation Intelligence
-
-```bash
+# Preservation Intelligence
 akdd contracts             # Contract Guard status
 akdd contracts list        # List all verified contracts
-akdd contracts blast <f>   # Blast radius — contracts at risk if this file changes
+akdd contracts blast <f>   # Blast radius — contracts at risk
 akdd contracts gate        # Run Preservation Gate manually
 akdd contracts verify      # Revalidate all contracts
 akdd creative              # Creative Engine level
 akdd creative suggest      # View pending improvement suggestions
 akdd creative apply <id>   # Apply a suggestion
 akdd creative wins         # View applied creative improvements
-```
 
-### Specs & knowledge
-
-```bash
+# Specs & knowledge
 akdd spec list                     # List all module specs
 akdd spec <module>                 # Status + next execution wave
 akdd spec create <module>          # Create a feature spec
 akdd spec create <module> --bugfix # Create a bugfix spec
 akdd adr                           # Ingest ADRs from docs/adr/
 akdd knowledge                     # Ingest gotchas and conventions
-```
 
-### Metrics & observability
-
-```bash
+# Metrics & observability
 akdd metrics           # Project KPIs
 akdd metrics trend     # Trend across last 10 cycles
 akdd trail             # Recent decision trails
-akdd trail <cycle_id>  # Full trail: what changed, why, what influenced it
+akdd trail <cycle_id>  # Full trail of a specific cycle
 akdd benchmarks        # LongMemEval + Token Reduction + Memory Quality
 akdd llms              # Regenerate llms.txt + knowledge-graph.json
-```
 
-### Collaborative mode
-
-```bash
+# Collaborative mode
 akdd collab init              # Activate — creates shared DB automatically
 akdd collab invite            # Generate invite code (24h, one use)
 akdd collab join <code>       # Join with an invite code
 akdd collab push              # Push learnings to the team
 akdd collab pull              # Pull team's latest learnings
 akdd collab status            # Check sync status
-```
 
-### Intelligence
-
-```bash
+# Intelligence
 akdd git-context       # Git diff analysis + risk from episodic memory
 akdd predict           # Predictive risk patterns
 akdd jina-install      # Install jina-embeddings-v2-base-code (~500MB)
@@ -378,6 +425,8 @@ akdd embed-install     # Install all-MiniLM-L6-v2 (~23MB fallback)
 akdd ci-install        # Install GitHub Actions CI/CD memory workflow
 akdd dashboard         # Open interactive knowledge graph dashboard
 ```
+
+</details>
 
 ---
 
