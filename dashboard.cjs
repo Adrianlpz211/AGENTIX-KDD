@@ -748,6 +748,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <div class="mode-tabs">
   <div class="mode-tab active" onclick="setMode('graph',this)">🧠 <span data-i="tab_graph">Knowledge Graph</span></div>
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
+  <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
 </div>
 
 <div class="content">
@@ -1262,6 +1263,129 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 </div>
 
+<!-- ════════ PRESERVATION INTEL ════════ -->
+<div id="mode-intel" style="display:none;flex:1;overflow-y:auto;padding:24px;flex-direction:column;gap:20px">
+
+  <style>
+  #mode-intel { background: var(--bg); }
+  .il-title { font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);margin:0 0 12px }
+  .il-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:20px }
+  .il-card { background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px }
+  .il-card-head { display:flex;align-items:center;gap:9px;margin-bottom:12px }
+  .il-card-icon { width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0 }
+  .icon-p { background:rgba(127,119,221,.15) }
+  .icon-g { background:rgba(29,158,117,.15) }
+  .icon-a { background:rgba(239,159,39,.15) }
+  .il-card-name { font-size:13px;font-weight:700;color:var(--text) }
+  .il-card-sub  { font-size:11px;color:var(--text3);margin-top:1px }
+  .il-stat-row { display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px }
+  .il-stat { background:rgba(255,255,255,.03);border-radius:7px;padding:9px;text-align:center }
+  .il-stat-val { font-size:20px;font-weight:800;line-height:1.1 }
+  .il-stat-lbl { font-size:10px;color:var(--text3);margin-top:2px }
+  .vp { color:#9f99e8 } .vg { color:#34d399 } .va { color:#fbbf24 } .vr { color:#f87171 } .vx { color:var(--text2) }
+  .il-list { display:flex;flex-direction:column;gap:5px }
+  .il-row { display:flex;align-items:center;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px }
+  .il-badge { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;white-space:nowrap;flex-shrink:0 }
+  .bp { background:rgba(127,119,221,.2);color:#9f99e8 }
+  .bv { background:rgba(29,158,117,.2);color:#34d399 }
+  .bc { background:rgba(239,159,39,.2);color:#fbbf24 }
+  .bi { background:rgba(248,113,113,.2);color:#f87171 }
+  .il-row-name { flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .il-row-mod  { font-size:10px;color:var(--text3) }
+  .sug-row { display:flex;align-items:flex-start;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px;margin-bottom:4px }
+  .sug-type { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;background:rgba(239,159,39,.15);color:#fbbf24;white-space:nowrap;flex-shrink:0 }
+  .sug-auto { background:rgba(29,158,117,.15);color:#34d399 }
+  .sug-txt  { color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .lvl-bar { display:flex;align-items:center;gap:8px;margin-bottom:10px }
+  .lvl-track { height:5px;flex:1;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden }
+  .lvl-fill  { height:100%;border-radius:3px }
+  .cur-row { display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px }
+  .cur-row:last-child { border-bottom:none }
+  .cur-k { color:var(--text3) } .cur-v { color:var(--text2);font-weight:600 }
+  .empty-state { font-size:12px;color:var(--text3);text-align:center;padding:12px 0 }
+  .obs-panel { background:var(--surface);border:1px solid #3730a3;border-radius:12px;padding:14px 18px;margin-bottom:20px }
+  .obs-head  { display:flex;align-items:center;gap:9px;margin-bottom:9px }
+  .obs-badge { font-size:10px;padding:2px 7px;border-radius:9px;background:rgba(99,91,255,.15);color:#818cf8;font-weight:600 }
+  .obs-txt   { font-size:13px;color:var(--text2);line-height:1.5 }
+  .obs-cmd   { font-family:monospace;font-size:11px;background:rgba(255,255,255,.05);color:#a5b4fc;padding:6px 10px;border-radius:6px;margin-top:8px;display:block }
+  </style>
+
+  <p class="il-title">Contract Guard</p>
+  <div class="il-grid">
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-p">🛡️</div>
+        <div><div class="il-card-name">Contratos verificados</div><div class="il-card-sub">Lo que no se puede romper</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val vp">${contractData.protected}</div><div class="il-stat-lbl">Protected</div></div>
+        <div class="il-stat"><div class="il-stat-val vg">${contractData.verified}</div><div class="il-stat-lbl">Verified</div></div>
+        <div class="il-stat"><div class="il-stat-val va">${contractData.candidate}</div><div class="il-stat-lbl">Candidate</div></div>
+        <div class="il-stat"><div class="il-stat-val ${contractData.violations > 0 ? 'vr' : 'vx'}">${contractData.violations}</div><div class="il-stat-lbl">Violations</div></div>
+      </div>
+      ${contractData.recent && contractData.recent.length > 0 ? `
+      <div class="il-list">
+        ${contractData.recent.map(c => `
+          <div class="il-row">
+            <span class="il-badge b${c.status[0]}">${c.status.toUpperCase()}</span>
+            <span class="il-row-name" title="${escHtml(c.name)}">${escHtml(c.name.substring(0,38))}</span>
+            <span class="il-row-mod">${escHtml(c.module)}</span>
+          </div>`).join('')}
+      </div>` : `<div class="empty-state">Sin contratos — corre ciclos aa: para generarlos</div>`}
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-a">✨</div>
+        <div><div class="il-card-name">Creative Engine</div><div class="il-card-sub">Autonomía creativa dirigida</div></div>
+      </div>
+      <div class="lvl-bar">
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">Nivel ${creativeData.level}</span>
+        <div class="lvl-track"><div class="lvl-fill" style="width:${Math.round(creativeData.level / 3 * 100)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
+        <span style="font-size:11px;color:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap">${creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
+      </div>
+      ${creativeData.level < 2 ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Faltan ${10 - (creativeData.protected_for_level2 || 0)} contratos para Nivel 2</div>` : ''}
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val va">${creativeData.suggestions}</div><div class="il-stat-lbl">Pendientes</div></div>
+        <div class="il-stat"><div class="il-stat-val vg">${creativeData.wins}</div><div class="il-stat-lbl">Aplicadas</div></div>
+      </div>
+      ${creativeData.recent_suggestions && creativeData.recent_suggestions.length > 0 ? `
+        ${creativeData.recent_suggestions.map(s => `
+          <div class="sug-row">
+            <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${s.type}</span>
+            <span class="sug-txt" title="${escHtml(s.title)}">${escHtml(s.title.substring(0,50))}</span>
+          </div>`).join('')}` : `<div class="empty-state">Sin sugerencias todavía</div>`}
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-g">🔬</div>
+        <div><div class="il-card-name">MemCurator</div><div class="il-card-sub">Gobernanza autónoma</div></div>
+      </div>
+      <div class="cur-row"><span class="cur-k">Última curation</span><span class="cur-v">${curatorData.lastRun}</span></div>
+      <div class="cur-row"><span class="cur-k">Auto-run</span><span class="cur-v">cada 10 ciclos</span></div>
+      <div class="cur-row"><span class="cur-k">TTL episódico</span><span class="cur-v">30 días</span></div>
+      <div class="cur-row"><span class="cur-k">Límite nodos</span><span class="cur-v">1,000</span></div>
+      <div class="cur-row"><span class="cur-k">Dedup threshold</span><span class="cur-v">92% Jaccard</span></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        <code style="color:#a5b4fc">akdd cure</code> — manual &nbsp;·&nbsp; <code style="color:#a5b4fc">akdd cure report</code> — preview
+      </div>
+    </div>
+  </div>
+
+  <div class="obs-panel">
+    <div class="obs-head">
+      <span style="font-size:18px">🗂️</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text)">Obsidian MCP</span>
+      <span class="obs-badge">OPCIONAL</span>
+    </div>
+    <div class="obs-txt">Conecta tu vault de Obsidian como fuente humana de conocimiento. Tus notas fluyen al grafo sin hacer <code style="color:#a5b4fc">akdd knowledge</code> manual.</div>
+    <code class="obs-cmd">1. Instalar plugin "Obsidian MCP Server" en Obsidian → 2. Agregar el servidor MCP en Cursor/Claude Code → 3. La herramienta obsidian_read_notes queda disponible en el chat</code>
+    <div style="font-size:11px;color:var(--text3);margin-top:7px">Sin Obsidian: usa <code style="color:#a5b4fc">akdd knowledge</code> — mismo resultado.</div>
+  </div>
+
+</div>
+
 <script>
 const NODES = ${JSON.stringify(nodes)};
 const EDGES = ${JSON.stringify(edges)};
@@ -1293,6 +1417,7 @@ function setMode(mode,el){
   document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('mode-graph').style.display=mode==='graph'?'flex':'none';
+  if(document.getElementById('mode-intel')) document.getElementById('mode-intel').style.display=mode==='intel'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
 }
