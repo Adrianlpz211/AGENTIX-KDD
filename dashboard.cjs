@@ -1943,4 +1943,24 @@ renderGraph();
 </script>
 
   </body>
-</html>`
+</html>`;
+
+const server = require('http').createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(HTML);
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  const url = `http://localhost:${PORT}`;
+  console.log(`\n  Agentic KDD Dashboard v4`);
+  console.log(`  → ${url}\n`);
+  // Open browser
+  const { exec } = require('child_process');
+  const cmd = process.platform === 'win32' ? `start "" "${url}"`
+            : process.platform === 'darwin' ? `open "${url}"`
+            : `xdg-open "${url}"`;
+  exec(cmd, (err) => {
+    if (err) console.log(`  Open manually: ${url}`);
+  });
+  console.log('  Press Ctrl+C to stop\n');
+});
