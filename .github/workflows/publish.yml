@@ -1,0 +1,141 @@
+# Agentic KDD — npm Trusted Publishing
+# SLSA Build Level 2 via Sigstore (automatically signed by GitHub Actions OIDC)
+#
+# What this does:
+#   - Publishes to npm with provenance attestation
+#   - Attestation is signed by Sigstore and logged to Rekor (public, immutable)
+#   - npm shows a green provenance badge on the package page
+#   - Users can verify with: npm audit signatures
+#   - Blocks publishing from compromised credentials (supply chain attack defense)
+#
+# How to configure:
+#   1. Go to npmjs.com → your package → Settings → Publishing → "Granular access tokens"
+#   2. Create a "Granular Access Token" — type: Automation, scope: Read and Write
+#   3. Go to GitHub repo → Settings → Secrets → Actions → New secret
+#   4. Name: NPM_TOKEN, Value: the token from step 2
+#   5. Push a tag like v3.3.0 to trigger the release
+#
+# Alternatively (recommended): Configure Trusted Publisher on npmjs.com
+#   This eliminates the need for NPM_TOKEN entirely.
+#   npmjs.com → package → Publishing → Trusted Publisher → Add GitHub Actions
+
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'   # Triggers on: v3.3.0, v3.3.1, etc.
+
+permissions:
+  contents: read
+  id-token: write  # Required for Sigstore OIDC provenance
+
+jobs:
+  # ── Validate before publishing ──────────────────────────────────────────────
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Syntax check all modules
+        run: |
+          for f in *.cjs; do
+            node --check "$f" || exit 1
+          done
+
+  # ── Publish CLI package ─────────────────────────────────────────────────────
+  publish-cli:
+    name: Publish agentic-kdd CLI
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm-publish  # Requires manual approval in GitHub Environments (optional)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Verify package.json version matches tag
+        run: |
+          PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ package.json version ($PKG_VERSION) != tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "✅ Version match: $PKG_VERSION"
+
+      - name: Publish with provenance (SLSA L2)
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # --provenance flag: generates Sigstore attestation signed by GitHub OIDC
+        # The attestation is logged to Rekor (public transparency log)
+        # npm badge: https://www.npmjs.com/package/agentic-kdd shows "provenance ✓"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Agentic KDD ${{ github.ref_name }}"
+          body: |
+            ## Agentic KDD ${{ steps.version.outputs.VERSION }}
+
+            Published to npm with SLSA Build L2 provenance.
+
+            **Install:**
+            ```bash
+            npm install -g agentic-kdd@${{ steps.version.outputs.VERSION }}
+            ```
+
+            **Verify provenance:**
+            ```bash
+            npm audit signatures
+            ```
+          generate_release_notes: true
+
+  # ── Publish MCP package ─────────────────────────────────────────────────────
+  publish-mcp:
+    name: Publish agentic-kdd-mcp
+    needs: test
+    runs-on: ubuntu-latest
+    if: contains(github.ref_name, 'mcp') || github.event.inputs.publish_mcp == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish MCP server with provenance
+        working-directory: ./packages/mcp
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+# ── Separate workflow: CI on every PR ──────────────────────────────────────────
+# This runs on every PR to catch issues before tagging

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Syntax check & tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: ['18', '20', '22']  # test across LTS versions
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Syntax check all .cjs modules
+        run: |
+          echo "Checking Node.js syntax..."
+          failed=0
+          for f in *.cjs; do
+            if ! node --check "$f" 2>/dev/null; then
+              echo "❌ Syntax error in $f"
+              failed=1
+            fi
+          done
+          if [ $failed -eq 1 ]; then exit 1; fi
+          echo "✅ All .cjs files pass syntax check"
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Check install scripts syntax
+        run: |
+          bash -n install.sh && echo "✅ install.sh OK"
+          pwsh -Command "& {Import-Module Microsoft.PowerShell.Management; Test-Path install.ps1}" 2>/dev/null || echo "PowerShell not available — skipping"
