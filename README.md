@@ -586,8 +586,8 @@ your-project/
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| [`agentic-kdd`](https://www.npmjs.com/package/agentic-kdd) | 3.4.0 | CLI — 50+ commands |
-| [`agentic-kdd-mcp`](https://www.npmjs.com/package/agentic-kdd-mcp) | 2.4.0 | MCP server — 53 tools |
+| [`agentic-kdd`](https://www.npmjs.com/package/agentic-kdd) | 3.5.1 | CLI — 50+ commands |
+| [`agentic-kdd-mcp`](https://www.npmjs.com/package/agentic-kdd-mcp) | 2.5.1 | MCP server — 53 tools |
 
 ---
 
