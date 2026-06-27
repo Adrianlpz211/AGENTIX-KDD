@@ -44,12 +44,21 @@ function extractValuesFromPrompt(prompt) {
 
   // Numbers in context of known business fields
   const businessFields = [
+    // SaaS Billing (original)
     'trial_days', 'trial_period', 'trial',
     'discount', 'yearly_discount',
     'password', 'min_password', 'password_min',
     'invoice_prefix', 'invoice_number',
     'max_users', 'max_api_calls', 'max_storage',
     'rate_limit', 'timeout', 'retries',
+    // Agency OS
+    'hourly_rate', 'hourly_rate_default',
+    'overtime_threshold', 'overtime_multiplier', 'overtime',
+    'invoice_due', 'invoice_due_days', 'due_days',
+    'budget_warning', 'campaign_budget_warning',
+    'tax_rate', 'tax_rate_default',
+    'password_min_length',
+    'retainer_billing_day', 'billing_day',
   ];
 
   businessFields.forEach(field => {
