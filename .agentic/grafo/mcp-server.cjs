@@ -545,6 +545,9 @@ console.error(`[Agentic KDD MCP v2.0] ${TOOLS.length} tools disponibles. ROOT: $
 // ─── v3.2: TOOLS ADICIONALES ──────────────────────────────────────────────────
 // mem_curate, generate_llms_txt, report_benchmarks, causal_prune
 
+// Lookup map para tools registradas dinámicamente (v3.2+)
+const TOOL_MAP = {};
+
 // Añadir al TOOL_MAP y TOOLS en runtime
 const TOOLS_V32 = [
   {
