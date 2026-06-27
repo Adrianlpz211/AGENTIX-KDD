@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Syntax check & tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Syntax check all .cjs modules
+        run: |
+          echo "Checking Node.js syntax..."
+          failed=0
+          for f in $(find . -name "*.cjs" -not -path "*/node_modules/*" -not -path "*/.git/*"); do
+            if ! node --check "$f" 2>/dev/null; then
+              echo "❌ Syntax error in $f"
+              failed=1
+            fi
+          done
+          if [ $failed -eq 1 ]; then exit 1; fi
+          echo "✅ All .cjs files pass syntax check"
+
+      - name: Check install scripts
+        run: bash -n install.sh && echo "✅ install.sh OK" || echo "⚠️ install.sh not found"

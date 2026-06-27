@@ -1,0 +1,73 @@
+{
+  "name": "agentic-kdd",
+  "displayName": "Agentic KDD",
+  "description": "AI coding agent with persistent memory — knowledge graph, AST analysis, contract guard, and autonomous pattern detection.",
+  "version": "0.2.0",
+  "publisher": "adrianlpz211",
+  "icon": "icon.png",
+  "license": "MIT",
+  "homepage": "https://github.com/Adrianlpz211/Agentic-KDD",
+  "repository": { "type": "git", "url": "https://github.com/Adrianlpz211/Agentic-KDD" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Other"],
+  "keywords": ["ai", "agent", "memory", "kdd", "cursor", "claude", "copilot", "mcp"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "agentickdd.showDashboard",  "title": "Agentic KDD: Open Dashboard" },
+      { "command": "agentickdd.indexAST",        "title": "Agentic KDD: Index Project (AST)" },
+      { "command": "agentickdd.queryMemory",     "title": "Agentic KDD: Search Memory" },
+      { "command": "agentickdd.analyzeImpact",   "title": "Agentic KDD: Analyze Impact of Current File" },
+      { "command": "agentickdd.blastRadius",     "title": "Agentic KDD: Blast Radius — Current File" },
+      { "command": "agentickdd.createSpec",      "title": "Agentic KDD: Create Spec for Module" },
+      { "command": "agentickdd.syncKnowledge",   "title": "Agentic KDD: Sync ADRs and Gotchas" },
+      { "command": "agentickdd.contractsStatus", "title": "Agentic KDD: Contract Guard Status" },
+      { "command": "agentickdd.historial",       "title": "Agentic KDD: Session Historial" },
+      { "command": "agentickdd.health",          "title": "Agentic KDD: Health Check" },
+      { "command": "agentickdd.detectPatterns",  "title": "Agentic KDD: Detect Patterns Across Modules" },
+      { "command": "agentickdd.report",          "title": "Agentic KDD: Effectiveness Report" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "agentickdd", "title": "Agentic KDD", "icon": "$(circuit-board)" }
+      ]
+    },
+    "views": {
+      "agentickdd": [
+        { "type": "webview", "id": "agentickdd.dashboard", "name": "Memory and Status" }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        { "command": "agentickdd.analyzeImpact", "when": "editorIsOpen", "group": "agentickdd@1" },
+        { "command": "agentickdd.blastRadius",   "when": "editorIsOpen", "group": "agentickdd@2" }
+      ]
+    },
+    "configuration": {
+      "title": "Agentic KDD",
+      "properties": {
+        "agentickdd.astEnabled": {
+          "type": "boolean", "default": true,
+          "description": "Auto-index AST on file save"
+        },
+        "agentickdd.embeddingsModel": {
+          "type": "string", "enum": ["miniLM", "jina-code"], "default": "miniLM",
+          "description": "Embeddings model for semantic search"
+        },
+        "agentickdd.collabMode": {
+          "type": "string", "enum": ["disabled", "turso"], "default": "disabled",
+          "description": "Collaborative memory sync"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.22.0"
+  }
+}
