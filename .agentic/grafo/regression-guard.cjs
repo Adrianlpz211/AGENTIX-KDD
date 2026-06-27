@@ -122,8 +122,22 @@ function runTestFile(testPattern, projectRoot) {
     const isWin = process.platform === 'win32';
     const shell = isWin ? 'cmd.exe' : 'sh';
     const flag  = isWin ? '/c' : '-c';
-    const cmd   = `npm test -- --testPathPattern="${testPattern}" 2>&1`;
-    
+
+    // Detect Python project
+    const isPython =
+      fs.existsSync(path.join(projectRoot, 'requirements.txt')) ||
+      fs.existsSync(path.join(projectRoot, 'backend', 'requirements.txt'));
+
+    let cmd;
+    if (isPython) {
+      // testPattern for pytest = test file or -k expression
+      const backendDir = fs.existsSync(path.join(projectRoot, 'backend', 'requirements.txt'))
+        ? 'backend' : '.';
+      cmd = `cd ${backendDir} && pytest -x -v 2>&1`;
+    } else {
+      cmd = `npm test -- --testPathPattern="${testPattern}" 2>&1`;
+    }
+
     const result = require('child_process').spawnSync(
       shell, [flag, cmd],
       { cwd: projectRoot, timeout: 60000, encoding: 'utf8', stdio: 'pipe' }
