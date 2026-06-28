@@ -32,9 +32,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Adrianlpz211/agentix-kdd.git"
+    "url": "git+https://github.com/Adrianlpz211/AGENTIX-KDD.git"
   },
-  "homepage": "https://github.com/Adrianlpz211/agentix-kdd",
+  "homepage": "https://github.com/Adrianlpz211/AGENTIX-KDD",
   "engines": {
     "node": ">=18.0.0"
   },

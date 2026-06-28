@@ -6,7 +6,7 @@ const { execSync } = require('child_process');
 const chalk = require('chalk');
 const ora = require('ora');
 
-const GITHUB_REPO = 'Adrianlpz211/agentix-kdd';
+const GITHUB_REPO = 'Adrianlpz211/AGENTIX-KDD';
 const TEMP_DIR = path.join(require('os').tmpdir(), 'agentic-kdd-update');
 
 async function update() {
