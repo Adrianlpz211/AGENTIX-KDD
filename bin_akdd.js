@@ -27,6 +27,8 @@ const HELP = `
     akdd update            Update agents + engine (memory stays intact)
     akdd onboard           Analyze existing project + pre-populate memory
     akdd analyze           Cross-artifact consistency check
+    akdd locks             Lock Manager status
+    akdd locks release-all Release all locks for this instance
     akdd health            System health check — what's configured, what's missing
     akdd health --fix      Auto-fix common issues
 
@@ -160,6 +162,7 @@ switch (command) {
   case 'update':  update(); break;
   case 'onboard': onboard(); break;
   case 'analyze': runModule('akdd-analyze.cjs', args[0] || 'run'); break;
+  case 'locks':   runModule('lock-manager.cjs', args[0] || 'status', args[1] || ''); break;
   case 'analyze': analyze(); break;
 
   // ── v3.0: Health ──────────────────────────────────────────────────────

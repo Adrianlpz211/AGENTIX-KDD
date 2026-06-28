@@ -443,3 +443,39 @@ Donde `[area]` es el nombre del módulo implementado (ej: `clients`, `auth`, `in
 # ============================================================
 # INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
 # ============================================================
+
+## LOCK MANAGER — Desarrollo multi-instancia
+
+Cuando múltiples instancias de Cursor o Claude Code trabajan en el mismo proyecto,
+usar lock-manager.cjs para evitar colisiones.
+
+### Al INICIO de cada ciclo aa:
+```
+node .agentic/grafo/lock-manager.cjs acquire --module=[área] --files=[archivos] --purpose=[tarea]
+```
+Si retorna 🔴 → STOP. Otro agente está trabajando en ese módulo. Esperar o elegir otro módulo.
+
+### ANTES de cualquier migration de Prisma o schema:
+```
+node .agentic/grafo/lock-manager.cjs acquire-schema --purpose=migration
+```
+Si retorna 🔴 → STOP. No correr migrations hasta que el schema esté libre.
+
+### AL TERMINAR cada ciclo aa: (después de Memory step):
+```
+node .agentic/grafo/lock-manager.cjs release --module=[área]
+node .agentic/grafo/lock-manager.cjs release-schema   # solo si se adquirió
+```
+
+### Comandos disponibles
+```
+akdd locks                → ver locks activos
+akdd locks release-all    → liberar todos los locks de esta instancia
+akdd locks check --files=src/auth.ts,src/middleware.ts → verificar archivos
+```
+
+### Reglas
+- NUNCA adquirir lock de un módulo que ya tiene otro agente
+- Renovar el lock si la tarea tarda más de 25 minutos: `lock-manager.cjs renew --module=[área]`
+- Si Cursor crashea, los locks expiran solos en 30 minutos
+- Schema lock: máximo 10 minutos — solo para el tiempo de la migration
