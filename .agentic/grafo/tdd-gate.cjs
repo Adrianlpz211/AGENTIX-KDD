@@ -234,6 +234,10 @@ function findTestFiles(projectRoot, scope = []) {
     /\.(test|spec)\.(ts|tsx|js|jsx)$/,
     /__(tests?)__\//,
     /test\/.*\.(ts|js)$/,
+    // Python
+    /test_.*\.py$/,
+    /.*_test\.py$/,
+    /tests\/.*\.py$/,
   ];
 
   const results = [];
