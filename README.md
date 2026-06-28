@@ -1,16 +1,5 @@
-<div align="center">
+# Agentic KDD v3.6
 
-```
- █████╗  ██████╗ ███████╗███╗   ██╗████████╗██╗ ██████╗     ██╗  ██╗██████╗ ██████╗ 
-██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██║██╔════╝     ██║ ██╔╝██╔══██╗██╔══██╗
-███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██║██║          █████╔╝ ██║  ██║██║  ██║
-██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██║██║          ██╔═██╗ ██║  ██║██║  ██║
-██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ██║╚██████╗     ██║  ██╗██████╔╝██████╔╝
-╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝     ╚═╝  ╚═╝╚═════╝ ╚═════╝
-
-                      A development team of one.
-                       A team becomes a legion.
-```
 > Autonomous development pipeline with persistent knowledge memory. Forces TDD, blocks spec violations before build, and eliminates repeated errors across sessions.
 
 [![npm](https://img.shields.io/npm/v/agentic-kdd)](https://www.npmjs.com/package/agentic-kdd)
