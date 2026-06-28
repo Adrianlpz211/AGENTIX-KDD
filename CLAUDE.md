@@ -479,3 +479,28 @@ akdd locks check --files=src/auth.ts,src/middleware.ts → verificar archivos
 - Renovar el lock si la tarea tarda más de 25 minutos: `lock-manager.cjs renew --module=[área]`
 - Si Cursor crashea, los locks expiran solos en 30 minutos
 - Schema lock: máximo 10 minutos — solo para el tiempo de la migration
+
+## POST-CYCLE — OBLIGATORIO después de CADA ciclo aa: exitoso
+
+⛔ SIN EXCEPCIÓN. NO es opcional. NO depende del usuario pedirlo.
+
+```bash
+node .agentic/grafo/post-cycle.cjs [área] --tests=[N] --task="[descripción]"
+```
+
+Ejemplo:
+```bash
+node .agentic/grafo/post-cycle.cjs auth --tests=24 --task="JWT multi-tenant auth"
+```
+
+Resuelve automáticamente:
+- Ciclo registrado en BD (+1 al contador)
+- Contratos acumulados (tdd-gate run)
+- Módulo documentado en config.md
+- Patrones Node.js detectados y escritos
+- Spec del módulo generada en .agentic/specs/
+- Log de observabilidad escrito
+- Config guardada en project_settings
+- Grafo sincronizado
+
+**Si NO corres post-cycle.cjs: el dashboard nunca sube del 57%, los ciclos no se cuentan, los contratos no se acumulan.**

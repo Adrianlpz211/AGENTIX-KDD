@@ -39,6 +39,8 @@ Fase 2, 3... → mismo flujo
   ↓
 Memoria → sync grafo + specs + log de observabilidad
   ↓
+⚙️  POST-CYCLE — OBLIGATORIO, SIEMPRE, SIN EXCEPCIÓN
+  ↓
 ✅ Reporte final al usuario
 ```
 
@@ -373,12 +375,40 @@ node .agentic/grafo/tdd-gate.cjs run [área]
 El gate.cjs es el árbitro final. Si retorna exit code 1 → STOP.
 El agente NO puede declarar "tests pasando" sin evidencia del gate.
 
-⛔ **NUNCA** avanzar al paso 5 (QA) sin confirmar el registro de contratos:
+---
+
+### POST-CYCLE — OBLIGATORIO al terminar CADA ciclo aa: exitoso
+
+⛔ **NUNCA** dar el reporte final al usuario sin ejecutar post-cycle.cjs antes.
+⛔ **ESTO NO ES OPCIONAL.** No depende de instrucciones del usuario. No se puede saltar.
+Es código determinístico — no una instrucción que el LLM puede ignorar.
+
 ```bash
-node .agentic/grafo/contract-guard.cjs status
+node .agentic/grafo/post-cycle.cjs [área] --tests=[N] --task="[descripción de la tarea]"
 ```
-Si `Total: 0` después de un PASS → el tdd-gate.cjs run no se ejecutó → volver a ejecutarlo.
-Los contratos son el historial de lo que funciona. Sin ellos el Preservation Gate es ciego.
+
+Ejemplos:
+```bash
+node .agentic/grafo/post-cycle.cjs auth --tests=24 --task="JWT multi-tenant auth"
+node .agentic/grafo/post-cycle.cjs dashboard --tests=12 --task="Dashboard Analytics"
+node .agentic/grafo/post-cycle.cjs invoices --tests=22 --task="Billing retainer"
+```
+
+Este comando ejecuta automáticamente en orden:
+1. Registra el ciclo en memoria.db (ciclos contador +1)
+2. Registra contratos (tdd-gate.cjs run)
+3. Registra módulos en config.md y BD
+4. Detecta y escribe patrones Node.js/TypeScript nuevos
+5. Genera spec del módulo en .agentic/specs/
+6. Guarda config en BD (project_settings)
+7. Escribe log de observabilidad (_output/log-YYYY-MM.md)
+8. Sync grafo completo
+
+**Verificar que funcionó:**
+```bash
+akdd metrics  # ciclos debe haber subido
+akdd contracts  # total debe haber subido
+```
 
 ### Gate QA — OBLIGATORIO en paso 5
 
