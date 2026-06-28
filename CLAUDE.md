@@ -38,31 +38,6 @@ Variantes: `aa: aprende`, `aa: aprende — módulo [x]`, `aa: aprende [archivo]`
 
 ---
 
-## CUANDO VES aa: sprint
-
-Lee `.agentic/agentes/09-sprint.md` y ejecuta su protocolo completo.
-Coordina múltiples tareas encadenadas donde el output de cada una alimenta la siguiente.
-La memoria KDD fluye entre todas las tareas del sprint.
-
-Variantes:
-- `aa: sprint — [objetivo]` con lista de tareas explícitas
-- `aa: sprint — [objetivo]` sin lista → inferir tareas y proponer antes de ejecutar
-- `aa: sprint skip` → saltar tarea actual y continuar
-- `aa: sprint abort` → cancelar sprint, mantener lo completado
-
----
-
-## CUANDO VES aa: aprende
-
-Lee `.agentic/agentes/08-aprende.md` y ejecuta su protocolo completo.
-Analiza el proyecto, detecta patrones/errores/decisiones implícitas
-y propone que registrar — siempre pregunta antes de escribir.
-
-Variantes: aa: aprende / aa: aprende modulo [x] / aa: aprende [archivo]
-aa: aprende error: [x] / aa: aprende decision: [x] / aa: aprende patron: [x]
-
----
-
 ## CUANDO VES aa: help
 
 Mostrar exactamente esto:
@@ -88,36 +63,6 @@ Consulta del grafo (en terminal):
   akdd graph              → estado del grafo de conocimiento
   akdd update             → actualizar Agentic KDD
 ```
-
-## CUANDO VES aa: sprint
-
-Lee `.agentic/agentes/09-sprint.md` y ejecuta su protocolo completo.
-Coordina múltiples tareas encadenadas donde el output de cada una alimenta la siguiente.
-La memoria KDD fluye entre todas las tareas del sprint.
-
-Variantes:
-- `aa: sprint — [objetivo]` con lista de tareas explícitas
-- `aa: sprint — [objetivo]` sin lista → inferir tareas y proponer antes de ejecutar
-- `aa: sprint skip` → saltar tarea actual y continuar
-- `aa: sprint abort` → cancelar sprint, mantener lo completado
-
----
-
-## CUANDO VES aa: aprende
-
-Lee `.agentic/agentes/08-aprende.md` y ejecuta su protocolo.
-Analiza el código, detecta patrones/errores/decisiones implícitas
-y propone qué registrar en memoria KDD antes de escribir nada.
-
-Variantes:
-- `aa: aprende` → analiza todo
-- `aa: aprende — módulo [x]` → foco en módulo
-- `aa: aprende [archivo]` → foco en archivo
-- `aa: aprende — error: [x]` → registrar error directo
-- `aa: aprende — decisión: [x]` → registrar decisión directo
-- `aa: aprende — patrón: [x]` → registrar patrón directo
-
----
 
 ## CUANDO VES aa:
 
@@ -455,9 +400,35 @@ Luego proceder con el pipeline completo como si el dev hubiera escrito `aa:`.
 # INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
 # ============================================================
 
+## MODO EXPLORE — aa: explore [objetivo]
+
+Antes de implementar, pensar junto al dev sin escribir código.
+
+Si el mensaje empieza con `aa: explore` o `aa: think`:
+
+1. Leer `.agentic/config.md` y memoria relevante
+2. Analizar el objetivo: ¿qué implica? ¿qué riesgos hay? ¿qué alternativas existen?
+3. Presentar:
+   ```
+   🔍 EXPLORE: [objetivo]
+   
+   Opciones de implementación:
+     A) [enfoque 1] — pros/contras
+     B) [enfoque 2] — pros/contras
+   
+   Contratos en riesgo: [lista]
+   Blast radius estimado: [ALTO/MEDIO/BAJO]
+   Archivos que tocaría: [lista]
+   
+   ¿Arrancamos con aa: [opción elegida]?
+   ```
+4. NO escribir ningún archivo. NO correr tests. Solo análisis.
+
+---
+
 ## CONTRACT GUARD — Registro automático post-TDD Gate
 
-Después de cada TDD Gate PASS en cualquier ciclo `aa:`, ejecutar en terminal:
+Después de cada TDD Gate PASS en cualquier ciclo `aa:`, ejecutar:
 
 ```
 node .agentic/grafo/tdd-gate.cjs run [area]
@@ -465,5 +436,10 @@ node .agentic/grafo/tdd-gate.cjs run [area]
 
 Donde `[area]` es el nombre del módulo implementado (ej: `clients`, `auth`, `invoices`).
 
-**Esto es obligatorio.** Sin este paso los contratos nunca se acumulan.
-El pipeline no puede continuar a Memoria si este comando no se ejecuta después del TDD Gate PASS.
+**Esto es obligatorio.** Sin este paso los contratos no se acumulan.
+
+---
+
+# ============================================================
+# INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
+# ============================================================
