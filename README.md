@@ -180,13 +180,26 @@ akdd ast symbols <file>        # List symbols in a file
 akdd git-context               # Current git context for the agent
 ```
 
-### QA / Audit department
+### QA / Audit department 🔵 (in chat — audits only, never touches code)
 ```bash
-akdd audit                     # Memory audit report (QA department)
-audit: auditar                 # Full project audit (in-chat)
-audit: seguridad               # Security audit — secrets, auth, multi-tenant
+audit: auditar                 # Full audit — 7 subagents in parallel
+audit: seguridad               # Security — secrets, auth, vulnerabilities
+audit: frontend                # Frontend — source maps, leaked keys, build
+audit: backend                 # Backend — endpoints, validation, APIs
+audit: datos                   # Data — RLS, exposed DB, leaks
+audit: performance             # Performance — rate limiting, cache, scalability
+audit: browser                 # Real-browser QA
+audit: codigo                  # Code quality & Git
+audit: help                    # Show the audit menu
+```
+> Reports are saved to `_output/audit-[date].md` and `.audit/reporte-actual.md`.
+> To fix a finding: `aa: corrige el hallazgo SEG-01` (or just ask in chat).
+
+### Observability ⚪ (terminal)
+```bash
+akdd audit                     # Memory audit report (stale / conflicting nodes)
 akdd telemetry                 # Telemetry report
-akdd report                    # Effectiveness report
+akdd report                    # Effectiveness report (before/after)
 akdd metrics                   # Project metrics
 ```
 
