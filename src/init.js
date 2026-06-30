@@ -291,6 +291,34 @@ Estado: Pendiente aa: configurar
 `);
   }
 
+  // ── PROYECTO EXISTENTE: onboard + ast + sync automáticos (una sola vez) ─────
+  // Si el dev marcó "ya tiene código", poblamos el dashboard con lo que se puede
+  // deducir del proyecto: patrones (onboard), nodos del código (ast) y grafo (sync).
+  // Todo best-effort: si algo falla, init NO se rompe.
+  if (!isNew) {
+    const grafoDir = path.join(projectPath, '.agentic', 'grafo');
+    const brownSpinner = ora({ text: 'Proyecto existente — analizando y poblando memoria...', color: 'cyan' }).start();
+    try {
+      brownSpinner.stop();
+      const { onboard } = require('./onboard');
+      await onboard();                       // detecta stack/módulos/patrones → patrones.md
+    } catch (e) {
+      console.log(chalk.gray('  (puedes correrlo luego con: akdd onboard)'));
+    }
+    try {
+      execSync(`node "${path.join(grafoDir, 'ast-indexer.cjs')}" index`, { stdio: 'pipe', cwd: projectPath, timeout: 120000 });
+      console.log(chalk.green('  ✓ Mapa de código indexado (akdd ast)'));
+    } catch (e) {
+      console.log(chalk.gray('  (puedes generar el mapa de código luego con: akdd ast)'));
+    }
+    try {
+      execSync(`node "${path.join(grafoDir, 'grafo.cjs')}" sync`, { stdio: 'pipe', cwd: projectPath, timeout: 30000 });
+      console.log(chalk.green('  ✓ Grafo de conocimiento sincronizado (akdd sync)'));
+    } catch (e) {
+      console.log(chalk.gray('  (puedes sincronizar el grafo luego con: akdd sync)'));
+    }
+  }
+
   // ── RESUMEN FINAL ───────────────────────────────────────────
   console.log('\n' + chalk.bold('  Instalado:'));
   console.log(chalk.gray('  .agentic/agentes/      — pipeline de 9 agentes'));
