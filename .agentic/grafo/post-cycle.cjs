@@ -570,6 +570,20 @@ function syncGrafo() {
   } catch(e) { return false; }
 }
 
+// ── Step 10: Index AST (mapa de código) ───────────────────────────────────────
+// Mantiene el grafo de símbolos fresco automáticamente. Es INCREMENTAL: ast-indexer
+// guarda un content_hash por archivo y se salta los que no cambiaron, así que en
+// segundo plano tras cada commit solo re-parsea lo que cambió. Cuesta 0 tokens.
+
+function indexarAst() {
+  const astCjs = path.join(GRAFO_DIR, 'ast-indexer.cjs');
+  if (!fs.existsSync(astCjs)) return false;
+  try {
+    execSync(`node "${astCjs}" index`, { cwd: ROOT, stdio: 'pipe', timeout: 120000 });
+    return true;
+  } catch(e) { return false; }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function collectFiles(dir, results, extensions, maxDepth, depth = 0) {
@@ -628,6 +642,7 @@ function main() {
     specs:     [],
     log:       false,
     sync:      false,
+    ast:       false,
   };
 
   // Step 1: Register cycle
@@ -672,6 +687,11 @@ function main() {
   if (!silent) process.stdout.write('  8. Sync grafo... ');
   results.sync = syncGrafo();
   if (!silent) console.log(results.sync ? '✅' : '⚠️  sync falló (continuando)');
+
+  // Step 10: Index AST (incremental — solo re-parsea archivos cambiados)
+  if (!silent) process.stdout.write('  9. Index AST (mapa de código)... ');
+  results.ast = indexarAst();
+  if (!silent) console.log(results.ast ? '✅' : '⚠️  (omitido)');
 
   if (!silent) {
     console.log('\n══════════════════════════════════════════════════');

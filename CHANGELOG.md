@@ -1,5 +1,17 @@
 # Changelog — Agentic KDD
 
+## [3.8.0] — 2026-06-30
+
+### Onboarding automático de proyectos existentes + AST automático
+- **`akdd init` en proyecto existente** — al elegir "ya tiene código", ahora corre
+  automáticamente `onboard` (detecta stack/módulos/patrones), indexa el código (`ast`)
+  y sincroniza el grafo (`sync`). El dashboard arranca poblado sin pasos manuales.
+  Todo best-effort: si algún paso falla, `init` no se rompe.
+- **AST automático en el cierre de ciclo** — `post-cycle.cjs` ahora indexa el AST como
+  paso final. Es incremental (ast-indexer cachea por `content_hash`), así que tras cada
+  commit solo re-parsea los archivos que cambiaron. Mantiene el grafo de símbolos fresco
+  sin depender de que el agente lo corra, en segundo plano y a 0 tokens.
+
 ## [3.7.0] — 2026-06-30
 
 ### Registro de contratos automático (sin intervención del agente)
