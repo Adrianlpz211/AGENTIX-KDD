@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.8.1-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.8.2-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -20,7 +20,7 @@ English · [Español](README.es.md)
 
 ## What it is
 
-**Agentix KDD** isn't another AI that codes for you. It's the **armor** you put on the AI you already use — Claude Code or Cursor — so it **remembers, doesn't break what was working, and doesn't contradict itself**.
+**Agentix KDD** isn't another AI that codes for you. It's the **armor** you put on the AI you already use — natively on **Claude Code and Cursor** — so it **remembers, doesn't break what was working, and doesn't contradict itself**.
 
 It lives **inside your project**: it reads your code, saves every decision and every error to a persistent memory, and uses all of it to make the next task safer than the last. You keep using your editor; Agentix shields it from underneath.
 
@@ -83,25 +83,36 @@ Done. Agentix reads your project and configures itself. From there, every task s
 
 ---
 
-## Commands
+## Compatibility
 
-```bash
-# Main pipeline
-aa: [any task]             # autonomous cycle: analyze · build · test · learn
-aa: sprint — [goal]        # chain several tasks; memory flows between them
-aa: aprende                # absorb knowledge from work done outside the pipeline
+Agentix is **first-class on Claude Code and Cursor** — that's where it's **battle-tested**. Because its engine is built on **open standards** (`AGENTS.md` and **MCP**), it *should* also work with other agents (VS Code, Windsurf, Kiro, Aider…), but in the interest of honesty: **so far it's only thoroughly tested on Claude Code and Cursor**. If you try it on another IDE and it works, open an issue and we'll add it to the "tested" list.
 
-# QA department (never touches code, audits only)
-audit: auditar             # full audit
-audit: seguridad           # secrets, auth, multi-tenant
+---
 
-# CLI
-akdd update                # update the engine (your memory stays intact)
-akdd sync                  # sync memory + graph
-akdd buscar "query"        # semantic search across memory
-akdd dashboard             # visual board at localhost:3847
-akdd health                # system diagnostics
-```
+## Commands — what runs on its own vs what you run
+
+> **Legend:** 🟢 automatic (runs by itself) · 🔵 trigger (you type it in chat) · ⚪ manual (terminal, only when needed)
+
+### 🟢 What happens on its own — you type nothing
+
+Since v3.7+, this is recorded **automatically, in the background, at zero token cost**:
+
+| When | What happens automatically |
+|------|----------------------------|
+| On every git **commit** | Closes the cycle: **registers the cycle**, **accumulates contracts**, indexes the code (incremental AST), syncs the graph |
+| Every **5 cycles** | Saves a **checkpoint** to resume in another chat or machine |
+| Inside every **`aa:`** | Reads memory, runs tests (TDD Gate), QA, the contract gate, review, and saves what it learned |
+| On **`akdd init`** in a project with code | Runs `onboard` + `ast` + `sync` to seed the dashboard |
+| On **install / update** | Installs the git hook by itself |
+
+### 🔵 What you type in chat — pipeline triggers
+
+| Command | What it does |
+|---------|--------------|
+| `aa: [any task]` | Full pipeline: analyze · build · test · learn |
+| `aa: sprint — [goal]` | Chains several tasks; memory flows between them |
+| `aa: aprende` | Absorbs knowledge from work done outside the pipeline |
+| `audit: auditar` · `audit: seguridad` | QA department — audits, **never touches code** |
 
 It also exposes **54 MCP tools** for compatible clients (Claude Code, Cursor, any stdio MCP client).
 
@@ -109,15 +120,18 @@ It also exposes **54 MCP tools** for compatible clients (Claude Code, Cursor, an
 
 ---
 
-## Full CLI reference
+## ⚪ Full CLI reference (manual)
+
+Everything below is **manual** — run it only when you need it. The automatic behavior is in the section above.
 
 ### Setup & lifecycle
 ```bash
-akdd init                      # Deploy Agentic KDD in a new project
+akdd init                      # Deploy Agentix KDD in a new project
 akdd onboard                   # Onboard an existing (brownfield) project
 akdd update                    # Update the engine from GitHub (memory stays intact)
 akdd sync                      # Sync memory + knowledge graph
-akdd mcp                       # (Re)configure MCP for Cursor / Claude Code
+akdd hooks [status]            # Install / check the automatic git hook
+akdd mcp                       # (Re)configure MCP for Cursor / Claude Code / VS Code
 akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd dashboard                 # Visual board at localhost:3847
 ```
@@ -126,6 +140,8 @@ akdd dashboard                 # Visual board at localhost:3847
 ```bash
 akdd buscar "query"            # Hybrid semantic + BM25 search across memory
 akdd recall "query"            # Recall relevant memory for a task
+akdd historial                 # Resume checkpoint — paste into a new chat
+akdd checkpoint                # Create a session checkpoint now
 akdd graph                     # Knowledge graph summary
 akdd stats                     # Memory statistics
 akdd why <file|entity>         # Why does this exist — decision trail
@@ -202,7 +218,6 @@ akdd spec create <module>      # Create a spec for a module
 akdd spec                      # List specs
 akdd sprint-plan               # Plan a multi-phase sprint
 akdd benchmarks                # Run / view benchmarks
-akdd checkpoint                # Create a session checkpoint
 ```
 
 ### Embeddings (semantic search)
@@ -241,7 +256,7 @@ Across a 19-phase run building a real multi-tenant SaaS (same Claude model in bo
 
 Agentix is **young, evolving software**. All 48 engine files were audited and **30+ bugs were fixed** (memory, gates, vector search, packaging). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
-What **does work today**: the `aa:` pipeline, persistent memory with real semantic search, the gates (Spec / Regression / TDD / Security), the dashboard with real metrics, the MCP server, and multi-instance coordination.
+What **does work today**: the `aa:` pipeline, automatic registration of cycles and contracts (via the git hook), persistent memory with real semantic search, the gates (Spec / Regression / TDD / Security), the dashboard with real metrics, the MCP server, and multi-instance coordination.
 
 ---
 
