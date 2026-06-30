@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.8.3] — 2026-06-30
+
+### Modo colaborativo en beta privada (preparación para lanzamiento público)
+- **`collab` desactivado por defecto.** Todos los subcomandos (`init/invite/join/push/pull/status`)
+  muestran un aviso de "beta privada" y no corren, salvo que se defina `AKDD_COLLAB_ENABLED=1`
+  (uso interno / clientes). Esto evita exponer el provisioner de Turso/Cloudflare al público.
+- El resto de Agentix funciona **100% local, sin cuenta** — la colaboración era la única pieza
+  con dependencia externa.
+- READMEs (EN/ES) y menú del CLI marcan colaboración como **🔒 beta privada**.
+- También: listado completo de las auditorías del departamento QA (`audit:` por área) en ambos READMEs.
+
 ## [3.8.2] — 2026-06-30
 
 ### READMEs alineados EN↔ES + mapa de comandos manual/automático

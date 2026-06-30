@@ -109,7 +109,7 @@ const HELP = `
     akdd trail <ciclo_id>  Full trail of a specific cycle
     akdd trail why <f>     Why does this file/entity exist?
 
-  Collaborative Mode (Legion):
+  Collaborative Mode (Legion) — 🔒 private beta (set AKDD_COLLAB_ENABLED=1 to use):
     akdd collab init       Activate collaborative mode — creates shared DB automatically
     akdd collab invite     Generate a 6-char invite code for a team member (24h, one-use)
     akdd collab join <code>  Join the team with an invite code (e.g. LUMO-X7K2P4)

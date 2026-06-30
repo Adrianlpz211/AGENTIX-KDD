@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.8.2-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.8.3-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -215,15 +215,10 @@ akdd locks wait --module=X     # Esperar hasta que un módulo se libere
 akdd locks release-all         # Liberar todos los locks (limpieza de sesión)
 ```
 
-### Colaboración (sync de equipo)
-```bash
-akdd collab init               # Inicializar un espacio colaborativo compartido
-akdd collab invite             # Generar un código de invitación
-akdd collab join <código>      # Unirse al espacio de un compañero
-akdd collab push               # Subir tu memoria al espacio compartido
-akdd collab pull               # Bajar la memoria del equipo
-akdd collab status             # Estado de la colaboración
-```
+### Colaboración (sync de equipo) — 🔒 beta privada
+> La **memoria compartida de equipo** está en **beta privada** y aún no está habilitada para uso
+> público. Todo lo demás de Agentix funciona **100% local, sin ninguna cuenta** — la colaboración
+> es la única pieza que sigue cerrada. ¿La necesitas para tu equipo? [Abre un issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
 ### Specs y planificación
 ```bash
