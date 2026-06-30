@@ -1,0 +1,25 @@
+#!/bin/sh
+# Agentic KDD managed hook
+# post-commit — registra contratos + cierra el ciclo automáticamente, en segundo plano.
+# NUNCA bloquea el commit (siempre exit 0). Para desactivar: borra este archivo.
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -f "$ROOT/.agentic/grafo/post-cycle.cjs" ] || exit 0
+
+LOG="$ROOT/.agentic/grafo/post-cycle.log"
+
+# Debounce: si corrió hace < 90s, no repetir.
+if [ -f "$LOG" ]; then
+  NOW=$(date +%s)
+  MTIME=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null || echo 0)
+  [ $((NOW - MTIME)) -lt 90 ] && exit 0
+fi
+
+# Área = primera subcarpeta bajo src/ en el último commit; si no hay → general.
+AREA=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep '^src/' | head -1 | cut -d/ -f2)
+[ -z "$AREA" ] && AREA=general
+
+HASH=$(git log -1 --format=%h 2>/dev/null)
+( cd "$ROOT" && node .agentic/grafo/post-cycle.cjs "$AREA" --hook --task="auto post-commit $HASH" >> "$LOG" 2>&1 ) &
+
+exit 0

@@ -666,7 +666,9 @@ const arg1 = process.argv[3];
 const arg2 = process.argv[4];
 
 switch(cmd) {
-  case 'sync':     sincronizar(); _autoIndexEmbeddings(); break;
+  case 'sync':     sincronizar(); _autoIndexEmbeddings();
+                   try { require('./install-hooks.cjs').installHooks({ quiet: true }); } catch {}
+                   break;
   case 'sync-stats':
     sincronizar();
     stats();

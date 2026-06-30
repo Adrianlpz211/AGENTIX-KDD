@@ -29,6 +29,8 @@ const HELP = `
     akdd analyze           Cross-artifact consistency check
     akdd locks             Lock Manager status
     akdd locks release-all Release all locks for this instance
+    akdd hooks             Install git hooks (registro automático de contratos)
+    akdd hooks status      Show git hook status
     akdd health            System health check — what's configured, what's missing
     akdd health --fix      Auto-fix common issues
 
@@ -163,6 +165,13 @@ switch (command) {
   case 'onboard': onboard(); break;
   case 'analyze': runModule('akdd-analyze.cjs', args[0] || 'run'); break;
   case 'locks':   runModule('lock-manager.cjs', args[0] || 'status', args[1] || ''); break;
+  case 'hooks': {
+    const sub = arg1 || 'install';
+    if (sub === 'uninstall')   runModule('install-hooks.cjs', '--uninstall');
+    else if (sub === 'status') runModule('install-hooks.cjs', '--status');
+    else                       runModule('install-hooks.cjs', '');
+    break;
+  }
   case 'analyze': analyze(); break;
 
   // ── v3.0: Health ──────────────────────────────────────────────────────

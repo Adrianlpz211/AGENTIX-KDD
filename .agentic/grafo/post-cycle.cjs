@@ -51,7 +51,8 @@ const testsPassing = parseInt(opts.tests || opts.p || '0');
 const testsTotal   = parseInt(opts['tests-total'] || opts.total || testsPassing.toString());
 const taskType   = opts.type || 'feature';
 const modules    = (opts.modules || opts.m || area).split(',').map(s => s.trim()).filter(Boolean);
-const silent     = opts.silent === true || opts.silent === 'true';
+const hookMode   = opts.hook === true || opts.hook === 'true';
+const silent     = opts.silent === true || opts.silent === 'true' || hookMode;
 
 // ── DB adapter (supports both better-sqlite3 and node:sqlite) ─────────────────
 
@@ -538,6 +539,7 @@ post-cycle: ✓ ciclo registrado, contratos actualizados, specs generadas
 // ── Step 8: Verificar better-sqlite3 ────────────────────────────────────────
 
 function verificarDependencias() {
+  if (hookMode) return; // en hook nunca instalamos paquetes dentro de un commit
   const pkgPath = path.join(ROOT, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
 
@@ -589,10 +591,12 @@ function safeRead(f) { try { return fs.readFileSync(f, 'utf8'); } catch { return
 
 function main() {
   if (!fs.existsSync(AGENTIC_DIR)) {
+    if (hookMode) process.exit(0);
     console.error('❌ Agentic KDD not installed. Run: akdd init');
     process.exit(1);
   }
   if (!fs.existsSync(DB_PATH)) {
+    if (hookMode) { console.log('post-cycle (hook): memoria.db no encontrada — omitido.'); process.exit(0); }
     console.error('❌ memoria.db not found. Run: akdd sync');
     process.exit(1);
   }

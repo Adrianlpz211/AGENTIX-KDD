@@ -112,6 +112,13 @@ async function update() {
       });
     } catch(e) { /* sync is best-effort */ }
 
+    // ── PASO 5: Instalar git hooks (registro automático de contratos) ──────
+    try {
+      execSync(`node "${path.join(grafoDest, 'install-hooks.cjs')}" --quiet`, {
+        stdio: 'pipe', cwd: projectPath, timeout: 15000
+      });
+    } catch(e) { /* hook best-effort */ }
+
     spinner.succeed(chalk.green('Updated successfully!'));
 
     console.log('\n' + chalk.bold('  What was updated:'));

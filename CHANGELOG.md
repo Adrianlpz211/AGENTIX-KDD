@@ -1,5 +1,19 @@
 # Changelog — Agentic KDD
 
+## [3.7.0] — 2026-06-30
+
+### Registro de contratos automático (sin intervención del agente)
+- **Hook git post-commit** — nuevo `.agentic/grafo/git-hooks/post-commit` que dispara
+  `post-cycle.cjs` en segundo plano tras cada commit. Nunca bloquea el commit (exit 0),
+  con debounce de 90s y derivación de área desde `src/`.
+- **Instalador `install-hooks.cjs`** — idempotente, no-op sin git, y NO sobrescribe hooks
+  ajenos (marcador). Auto-instalado por `akdd init`, `akdd update` y `grafo.cjs sync`
+  (esta vía propaga el hook a proyectos ya instalados en su próximo `akdd update`).
+- **`post-cycle.cjs --hook`** — modo seguro: no ejecuta `npm install` y no falla si falta
+  `memoria.db` (sale 0). El uso manual del comando queda idéntico.
+- **Nuevo comando `akdd hooks [install|uninstall|status]`**.
+- **Fix:** `src/init.js` apuntaba al nombre de repo viejo (`Agentic-KDD`); ahora `AGENTIX-KDD`.
+
 ## [3.6.0] — 2026-06-28
 
 ### Auditoría completa + endurecimiento del motor

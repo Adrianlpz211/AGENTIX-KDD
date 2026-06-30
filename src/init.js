@@ -8,7 +8,7 @@ const chalk = require('chalk');
 const ora = require('ora');
 const inquirer = require('inquirer');
 
-const GITHUB_REPO = 'Adrianlpz211/Agentic-KDD';
+const GITHUB_REPO = 'Adrianlpz211/AGENTIX-KDD';
 const TEMP_DIR = path.join(require('os').tmpdir(), 'agentic-kdd-download');
 
 // ── Descargar desde GitHub ──────────────────────────────────────
@@ -202,6 +202,14 @@ async function init() {
     spinner.text = 'Instalando archivos...';
     copyAgenticFiles(sourcePath, projectPath);
     fs.removeSync(TEMP_DIR);
+
+    // Instalar git hooks (registro automático de contratos) — best-effort, no aborta init
+    try {
+      require('child_process').execSync(
+        `node "${path.join(projectPath, '.agentic', 'grafo', 'install-hooks.cjs')}" --quiet`,
+        { stdio: 'pipe', cwd: projectPath }
+      );
+    } catch (e) { /* hook best-effort */ }
 
     // Instalar better-sqlite3 para el grafo SQLite
     spinner.text = 'Instalando dependencias del grafo...';

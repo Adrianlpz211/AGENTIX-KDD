@@ -484,6 +484,10 @@ akdd locks check --files=src/auth.ts,src/middleware.ts → verificar archivos
 
 ⛔ SIN EXCEPCIÓN. NO es opcional. NO depende del usuario pedirlo.
 
+> NOTA (v3.7.0): si los git hooks están instalados (`akdd hooks`, o automático en
+> `akdd init` / `akdd update`), post-cycle se dispara solo tras cada commit, en segundo
+> plano y sin bloquear el commit. El comando manual de abajo sigue siendo válido.
+
 ```bash
 node .agentic/grafo/post-cycle.cjs [área] --tests=[N] --task="[descripción]"
 ```
