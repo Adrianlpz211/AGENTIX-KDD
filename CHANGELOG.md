@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.8.2] — 2026-06-30
+
+### READMEs alineados EN↔ES + mapa de comandos manual/automático
+- **README inglés y español ahora idénticos en estructura y contenido** (cada uno en su idioma).
+- Nueva sección **Compatibilidad**: honesta — primera clase en Claude Code y Cursor (probado a
+  fondo), compatible con otros vía `AGENTS.md`/MCP pero aún no probado a fondo ahí.
+- Nueva sección **"Comandos — qué corre solo y qué corres tú"** con leyenda 🟢 automático /
+  🔵 disparador / ⚪ manual, dejando claro qué se registra de forma autónoma (ciclos, contratos,
+  AST, checkpoint cada 5) y qué comandos son manuales.
+- **Referencia completa del CLI** portada también al README español (antes solo en inglés).
+
 ## [3.8.1] — 2026-06-30
 
 ### Alineación de documentación + endurecimiento de collab (cosmético/seguridad)
