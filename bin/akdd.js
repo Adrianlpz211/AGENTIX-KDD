@@ -75,6 +75,7 @@ const HELP = `
 
   Memory (ranked retrieval):
     akdd recall "query"    Ranked BM25+vector search — replaces full file reads
+    akdd reason "query"    ReasoningBank — estrategias de ciclos que funcionaron
     akdd memory stats      Memory retrieval stats (indexed, coverage, mode)
     akdd memory index      Re-index all .agentic/memoria/*.md files
     akdd validate scan     Scan all memory for stale/obsolete/poisoned entries
@@ -109,7 +110,7 @@ const HELP = `
     akdd trail <ciclo_id>  Full trail of a specific cycle
     akdd trail why <f>     Why does this file/entity exist?
 
-  Collaborative Mode (Legion):
+  Collaborative Mode (Legion) — 🔒 private beta (set AKDD_COLLAB_ENABLED=1 to use):
     akdd collab init       Activate collaborative mode — creates shared DB automatically
     akdd collab invite     Generate a 6-char invite code for a team member (24h, one-use)
     akdd collab join <code>  Join the team with an invite code (e.g. LUMO-X7K2P4)
@@ -170,6 +171,11 @@ switch (command) {
     if (sub === 'uninstall')   runModule('install-hooks.cjs', '--uninstall');
     else if (sub === 'status') runModule('install-hooks.cjs', '--status');
     else                       runModule('install-hooks.cjs', '');
+    break;
+  }
+  case 'reason': {
+    if (!arg1 || arg1 === 'status') runModule('reasoning-bank.cjs', 'status');
+    else runModule('reasoning-bank.cjs', 'recall', `"${arg1}"${arg2 ? ' ' + arg2 : ''}`);
     break;
   }
   case 'analyze': analyze(); break;

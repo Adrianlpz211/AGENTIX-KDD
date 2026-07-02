@@ -292,6 +292,39 @@ const instalar = installMini;
 // Búsqueda vectorial: firma vieja (items, query, topK) → semanticSearch(query, items, topK).
 // Los items vienen de la DB con `embedding` como JSON string → parsear a array para que
 // semanticSearch (que exige Array.isArray) pueda rankearlos.
+// ─── MARK 2: Ranking híbrido (JS puro, sin deps nativas) ──────────────────────
+// Fusiona significado (vector) + palabras clave + confianza/recencia del nodo.
+// Con fallback en cada capa: sin modelo → keyword; sin keyword → boost.
+
+function _tokenize(s) {
+  return (String(s || '').toLowerCase().match(/[a-z0-9áéíóúñü]{2,}/gi) || []);
+}
+
+function _keywordScore(queryTerms, text) {
+  if (!queryTerms.length) return 0;
+  const t = String(text || '').toLowerCase();
+  let hits = 0;
+  for (const term of queryTerms) if (t.indexOf(term) !== -1) hits++;
+  return hits / queryTerms.length; // 0..1
+}
+
+function _nodeBoost(item) {
+  let b = 0;
+  const conf = String(item.confianza || item.confidence || '').toUpperCase();
+  if (conf === 'ALTA' || conf === 'HIGH') b += 0.10;
+  else if (conf === 'MEDIA' || conf === 'MEDIUM') b += 0.05;
+  const f = item.fecha_update || item.updated_at || item.fecha || null;
+  if (f) {
+    const t = new Date(f).getTime();
+    if (!isNaN(t)) {
+      const days = (Date.now() - t) / 86400000;
+      if (days >= 0 && days < 30) b += 0.06;
+      else if (days < 90) b += 0.03;
+    }
+  }
+  return b; // 0..~0.16
+}
+
 async function buscarHibridoVectorial(items, query, topK = 10, projectRoot) {
   const parsed = (items || []).map(it => {
     if (it && typeof it.embedding === 'string' && it.embedding) {
@@ -299,7 +332,28 @@ async function buscarHibridoVectorial(items, query, topK = 10, projectRoot) {
     }
     return it;
   });
-  return semanticSearch(query, parsed, topK, projectRoot);
+
+  // Embedding de la consulta (null si no hay modelo → cae a keyword+boost)
+  let queryEmbed = null;
+  try { queryEmbed = await embed(query, projectRoot); } catch { queryEmbed = null; }
+  const qTerms = [...new Set(_tokenize(query))];
+
+  const W_VEC = 0.6, W_KW = 0.4;
+
+  const scored = parsed.map(item => {
+    const hasVec = queryEmbed && Array.isArray(item.embedding) && item.embedding.length === queryEmbed.length;
+    const vScore = hasVec ? Math.max(0, cosineSim(queryEmbed, item.embedding)) : 0; // clamp 0..1
+    const kScore = _keywordScore(qTerms, `${item.titulo || ''} ${item.contenido || item.texto || ''}`);
+    const boost  = _nodeBoost(item);
+    // Si hay vector → fusión ponderada; si no → keyword manda (nunca slice a ciegas)
+    const base = queryEmbed ? (W_VEC * vScore + W_KW * kScore) : kScore;
+    const score = Math.min(1, base + boost);
+    return { ...item, score, _vScore: vScore, _kScore: kScore };
+  })
+  .sort((a, b) => b.score - a.score)
+  .slice(0, topK);
+
+  return scored;
 }
 
 // Indexado de embeddings en DB: calcula y persiste el vector de los nodos que aún no lo

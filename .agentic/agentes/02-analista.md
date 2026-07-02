@@ -312,3 +312,38 @@ Si la planificación usa un patrón con `vigencia_tipo: HISTORICO`:
 → Si sigue vigente: `node .agentic/grafo/memory-audit.cjs approve <id>`
 → Si no: `node .agentic/grafo/memory-audit.cjs forget <id> "<razón>"`
 
+---
+
+## MODO LEGIÓN (v3.9) — exploración en paralelo 🦾
+
+Los lookups del "Orden final de lectura" (buscar, impacto, AST, ADRs, gotchas,
+spec, causales) son **independientes entre sí** → se pueden correr EN PARALELO.
+Solo aplica a esta fase de **exploración** (leer/analizar). NUNCA para escribir código.
+
+### Si tu entorno soporta sub-agentes en paralelo (ej. Claude Code)
+Despliega hasta **4 sub-agentes concurrentes**, cada uno con un encargo autónomo, y
+que devuelva un **resumen compacto** (no volcar archivos crudos):
+
+- 🔍 **Sub-agente MEMORIA** → `grafo.cjs buscar` + `verdad_vigente` + episodios →
+  patrones ALTA, errores del área, decisiones relevantes.
+- 🧩 **Sub-agente IMPACTO** → `impact-analyzer.cjs precheck` + `ast-indexer.cjs impacto` →
+  severidad, archivos dependientes, símbolos en riesgo.
+- 📐 **Sub-agente KNOWLEDGE** → `adr-ingestor.cjs query` + `knowledge-ingestor.cjs query` →
+  ADRs vigentes, gotchas ALTO/MEDIO.
+- 📋 **Sub-agente SPEC** → `spec-manager.cjs status/waves` + `causal-edges.cjs query` →
+  criterios del spec, waves, historial de fallos.
+
+Luego TÚ (orquestador) **fusionas los 4 resúmenes** en el PLAN.md de forma
+determinista: dedup, prioriza por `_score`/severidad, y arma las fases.
+
+### Degradación con gracia (OBLIGATORIO)
+Si tu entorno **NO** soporta sub-agentes en paralelo (ej. Cursor), corre los lookups
+**SECUENCIALMENTE** como en "Orden final de lectura". La Legión es una **optimización,
+no un requisito**: nunca bloquees, falles ni cambies el resultado por no poder
+paralelizar — solo tardas un poco más. El plan final debe ser idéntico.
+
+### Límites (control, no caos)
+- Máximo 4 sub-agentes, **solo lectura/análisis**.
+- Cada uno devuelve un resumen compacto, no archivos crudos.
+- El merge lo hace el orquestador (tú), determinista. Los sub-agentes NO deciden el plan.
+

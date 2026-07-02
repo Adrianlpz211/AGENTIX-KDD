@@ -681,6 +681,21 @@ function main() {
   results.log = true;
   if (!silent) console.log('✅');
 
+  // Step 7.5: ReasoningBank — aprender de este ciclo exitoso (MARK 3)
+  try {
+    const rb = require('./reasoning-bank.cjs');
+    const strat = `Módulo ${area}: ${testsPassing} tests pasando` +
+      (results.patrones && results.patrones.length ? `; patrones: ${results.patrones.slice(0, 5).join(', ')}` : '');
+    const rres = rb.record(db, {
+      intent: taskName,
+      area,
+      strategy: strat,
+      signals: { tests: testsPassing, modules, patrones: results.patrones || [] },
+    });
+    results.reasoning = rres && rres.action;
+    if (!silent) console.log(`  8. ReasoningBank... ${rres && rres.ok ? '✅ ' + rres.action + (rres.confidence ? ` (${rres.confidence})` : '') : '⚠️  ' + ((rres && rres.reason) || 'omitido')}`);
+  } catch (e) { /* best-effort — nunca rompe el ciclo */ }
+
   db.close();
 
   // Step 9: Sync grafo (after DB close)

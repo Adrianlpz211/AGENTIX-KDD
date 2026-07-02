@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.8.2-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.8.4-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -215,15 +215,10 @@ akdd locks wait --module=X     # Block until a module is free
 akdd locks release-all         # Release all locks (session cleanup)
 ```
 
-### Collaboration (team sync)
-```bash
-akdd collab init               # Initialize a shared collab space
-akdd collab invite             # Generate an invite code
-akdd collab join <code>        # Join a teammate's collab space
-akdd collab push               # Push your memory to the shared space
-akdd collab pull               # Pull teammates' memory
-akdd collab status             # Collaboration status
-```
+### Collaboration (team sync) — 🔒 private beta
+> Shared **team memory** is in **private beta** and not enabled for public use yet. Everything
+> else in Agentix works **100% locally, no account required** — collaboration is the only piece
+> that's still gated. Want it for your team? [Open an issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
 ### Specs & planning
 ```bash

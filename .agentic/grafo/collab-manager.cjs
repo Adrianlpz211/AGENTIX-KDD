@@ -516,6 +516,17 @@ if (require.main === module) {
   const [,, cmd, arg1, arg2] = process.argv;
   const projectRoot = process.cwd();
 
+  // ── Modo colaborativo en BETA PRIVADA ─────────────────────────────────────
+  // Desactivado por defecto para uso público. El resto de Agentix funciona 100%
+  // local sin esto. Para activarlo (uso interno / clientes), define en el entorno:
+  //   AKDD_COLLAB_ENABLED=1
+  if (!process.env.AKDD_COLLAB_ENABLED) {
+    console.log('\n[COLLAB] 🔒 Modo colaborativo en BETA PRIVADA — aún no disponible públicamente.');
+    console.log('[COLLAB] El resto de Agentix (pipeline aa:, memoria, gates, dashboard) funciona normal y 100% local.');
+    console.log('[COLLAB] ¿Lo necesitas para tu equipo? Escríbele al autor: https://github.com/Adrianlpz211\n');
+    process.exit(0);
+  }
+
   switch (cmd) {
     case 'init':
       collabInit(projectRoot).catch(console.error);

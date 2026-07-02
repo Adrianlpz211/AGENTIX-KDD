@@ -276,8 +276,48 @@ Antes del Build step:
 4. Si hay findings HIGH → WARN + continúa con advertencia visible
 5. Si no hay findings → PASS, continúa normalmente
 
+### Escudo (v3.8.4) — corre sobre TODOS los archivos del changeset
+Además de los checks de tenant/JWT/auth (que solo aplican a CRITICAL/SENSITIVE),
+el gate ahora escanea **todos** los archivos en busca de:
+  - **Secretos/credenciales** (llaves privadas, tokens de proveedor, connection
+    strings con password, JWT, Bearer literales) → CRITICAL = STOP.
+  - **PII** (correos, tarjetas con validación Luhn) → WARN.
+  - **Prompt-injection** (instrucciones maliciosas escondidas, exfiltración,
+    "reveal prompt") → HIGH/CRITICAL según el caso.
+  - **Unicode invisible** (inyección oculta) → WARN.
+Robusto: redacta los secretos en el reporte, da número de línea, y descarta
+falsos positivos (placeholders, `process.env`, emails de ejemplo).
+
 El Security Gate NO reemplaza el audit: seguridad completo.
 Es una verificación rápida antes del Build para los patrones más comunes.
+
+## MODO LEGIÓN — sub-agentes en paralelo (v3.9)
+
+La "Iron Legion" de Agentix: en los pasos de **OJOS** (leer/analizar/revisar) el
+pipeline puede desplegar sub-agentes EN PARALELO, y el orquestador **fusiona sus
+resultados de forma determinista**. En los pasos de **MANOS** (escribir código,
+guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
+
+### Dónde SÍ (ojos)
+- **Analista** → exploración en paralelo (ver `.agentic/agentes/02-analista.md`, MODO LEGIÓN).
+- **QA / Review** → lentes en paralelo (ver `.agentic/agentes/05-qa.md`, MODO LEGIÓN).
+- **audit:** → ya es Legión (7 subagentes en paralelo).
+
+### Dónde NO (manos)
+- **Build / Front / Back** → un solo autor (paralelizar rompe: se pisan los archivos).
+- **Memoria / post-cycle** → escritura única coherente.
+
+### Regla de degradación (OBLIGATORIA — no rompe nada)
+La Legión es una **optimización, no un requisito**:
+- Si el entorno soporta sub-agentes en paralelo (Claude Code) → desplegar la Legión.
+- Si NO los soporta o es limitado (Cursor u otros) → correr esos pasos
+  **SECUENCIALMENTE** como siempre. El resultado debe ser **idéntico**, solo un poco
+  más lento. **Jamás bloquear, fallar ni cambiar el veredicto por no poder paralelizar.**
+
+### Control (no es swarm)
+- Solo lectura/análisis/juicio en paralelo — nunca escritura.
+- Máximo 4 sub-agentes por paso, cada uno con encargo autónomo y resumen compacto.
+- El orquestador (no los sub-agentes) fusiona y decide. Determinista.
 
 ## ENCADENAMIENTO DE COMANDOS
 
