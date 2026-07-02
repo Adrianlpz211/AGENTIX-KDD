@@ -807,6 +807,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </header>
 
+<style>
+  #mode-intel { background: var(--bg); }
+  .il-title { font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);margin:0 0 12px }
+  .il-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:20px }
+  .il-card { background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px }
+  .il-card-head { display:flex;align-items:center;gap:9px;margin-bottom:12px }
+  .il-card-icon { width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0 }
+  .icon-p { background:rgba(127,119,221,.15) }
+  .icon-g { background:rgba(29,158,117,.15) }
+  .icon-a { background:rgba(239,159,39,.15) }
+  .il-card-name { font-size:13px;font-weight:700;color:var(--text) }
+  .il-card-sub  { font-size:11px;color:var(--text3);margin-top:1px }
+  .il-stat-row { display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px }
+  .il-stat { background:rgba(255,255,255,.03);border-radius:7px;padding:9px;text-align:center }
+  .il-stat-val { font-size:20px;font-weight:800;line-height:1.1 }
+  .il-stat-lbl { font-size:10px;color:var(--text3);margin-top:2px }
+  .vp { color:#9f99e8 } .vg { color:#34d399 } .va { color:#fbbf24 } .vr { color:#f87171 } .vx { color:var(--text2) }
+  .il-list { display:flex;flex-direction:column;gap:5px }
+  .il-row { display:flex;align-items:center;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px }
+  .il-badge { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;white-space:nowrap;flex-shrink:0 }
+  .bp { background:rgba(127,119,221,.2);color:#9f99e8 }
+  .bv { background:rgba(29,158,117,.2);color:#34d399 }
+  .bc { background:rgba(239,159,39,.2);color:#fbbf24 }
+  .bi { background:rgba(248,113,113,.2);color:#f87171 }
+  .il-row-name { flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .il-row-mod  { font-size:10px;color:var(--text3) }
+  .sug-row { display:flex;align-items:flex-start;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px;margin-bottom:4px }
+  .sug-type { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;background:rgba(239,159,39,.15);color:#fbbf24;white-space:nowrap;flex-shrink:0 }
+  .sug-auto { background:rgba(29,158,117,.15);color:#34d399 }
+  .sug-txt  { color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .lvl-bar { display:flex;align-items:center;gap:8px;margin-bottom:10px }
+  .lvl-track { height:5px;flex:1;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden }
+  .lvl-fill  { height:100%;border-radius:3px }
+  .cur-row { display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px }
+  .cur-row:last-child { border-bottom:none }
+  .cur-k { color:var(--text3) } .cur-v { color:var(--text2);font-weight:600 }
+  .empty-state { font-size:12px;color:var(--text3);text-align:center;padding:12px 0 }
+  .obs-panel { background:var(--surface);border:1px solid #3730a3;border-radius:12px;padding:14px 18px;margin-bottom:20px }
+  .obs-head  { display:flex;align-items:center;gap:9px;margin-bottom:9px }
+  .obs-badge { font-size:10px;padding:2px 7px;border-radius:9px;background:rgba(99,91,255,.15);color:#818cf8;font-weight:600 }
+  .obs-txt   { font-size:13px;color:var(--text2);line-height:1.5 }
+  .obs-cmd   { font-family:monospace;font-size:11px;background:rgba(255,255,255,.05);color:#a5b4fc;padding:6px 10px;border-radius:6px;margin-top:8px;display:block }
+  #mode-intel { display:none;flex:1;overflow-y:auto;padding:24px;flex-direction:column;gap:0;align-items:stretch;justify-content:flex-start;box-sizing:border-box; }
+</style>
 <div class="mode-tabs">
   <div class="mode-tab active" onclick="setMode('graph',this)">🧠 <span data-i="tab_graph">Knowledge Graph</span></div>
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
@@ -1325,51 +1369,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 </div>
 
 <!-- ════════ PRESERVATION INTEL ════════ -->
-<style>
-  #mode-intel { background: var(--bg); }
-  .il-title { font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);margin:0 0 12px }
-  .il-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:20px }
-  .il-card { background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px }
-  .il-card-head { display:flex;align-items:center;gap:9px;margin-bottom:12px }
-  .il-card-icon { width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0 }
-  .icon-p { background:rgba(127,119,221,.15) }
-  .icon-g { background:rgba(29,158,117,.15) }
-  .icon-a { background:rgba(239,159,39,.15) }
-  .il-card-name { font-size:13px;font-weight:700;color:var(--text) }
-  .il-card-sub  { font-size:11px;color:var(--text3);margin-top:1px }
-  .il-stat-row { display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px }
-  .il-stat { background:rgba(255,255,255,.03);border-radius:7px;padding:9px;text-align:center }
-  .il-stat-val { font-size:20px;font-weight:800;line-height:1.1 }
-  .il-stat-lbl { font-size:10px;color:var(--text3);margin-top:2px }
-  .vp { color:#9f99e8 } .vg { color:#34d399 } .va { color:#fbbf24 } .vr { color:#f87171 } .vx { color:var(--text2) }
-  .il-list { display:flex;flex-direction:column;gap:5px }
-  .il-row { display:flex;align-items:center;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px }
-  .il-badge { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;white-space:nowrap;flex-shrink:0 }
-  .bp { background:rgba(127,119,221,.2);color:#9f99e8 }
-  .bv { background:rgba(29,158,117,.2);color:#34d399 }
-  .bc { background:rgba(239,159,39,.2);color:#fbbf24 }
-  .bi { background:rgba(248,113,113,.2);color:#f87171 }
-  .il-row-name { flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
-  .il-row-mod  { font-size:10px;color:var(--text3) }
-  .sug-row { display:flex;align-items:flex-start;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px;margin-bottom:4px }
-  .sug-type { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;background:rgba(239,159,39,.15);color:#fbbf24;white-space:nowrap;flex-shrink:0 }
-  .sug-auto { background:rgba(29,158,117,.15);color:#34d399 }
-  .sug-txt  { color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
-  .lvl-bar { display:flex;align-items:center;gap:8px;margin-bottom:10px }
-  .lvl-track { height:5px;flex:1;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden }
-  .lvl-fill  { height:100%;border-radius:3px }
-  .cur-row { display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px }
-  .cur-row:last-child { border-bottom:none }
-  .cur-k { color:var(--text3) } .cur-v { color:var(--text2);font-weight:600 }
-  .empty-state { font-size:12px;color:var(--text3);text-align:center;padding:12px 0 }
-  .obs-panel { background:var(--surface);border:1px solid #3730a3;border-radius:12px;padding:14px 18px;margin-bottom:20px }
-  .obs-head  { display:flex;align-items:center;gap:9px;margin-bottom:9px }
-  .obs-badge { font-size:10px;padding:2px 7px;border-radius:9px;background:rgba(99,91,255,.15);color:#818cf8;font-weight:600 }
-  .obs-txt   { font-size:13px;color:var(--text2);line-height:1.5 }
-  .obs-cmd   { font-family:monospace;font-size:11px;background:rgba(255,255,255,.05);color:#a5b4fc;padding:6px 10px;border-radius:6px;margin-top:8px;display:block }
-  /* fix intel layout */
-  #mode-intel { display:none;flex:1;overflow-y:auto;padding:24px;flex-direction:column;gap:0;align-items:stretch;justify-content:flex-start;box-sizing:border-box; }
-</style>
 <div id="mode-intel" style="display:none">
 
 
@@ -1773,7 +1772,9 @@ function renderGraph(){
     }))
     .force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-600:-320))
     .force('center',d3.forceCenter(W/2,H/2))
-    .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4));
+    .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4))
+    .force('x',d3.forceX(W/2).strength(0.04))
+    .force('y',d3.forceY(H/2).strength(0.04));
 
   linkSel=g.append('g').selectAll('line').data(links).enter().append('line')
     .attr('stroke','#2a3050').attr('stroke-width',1).attr('stroke-opacity',0.35)
@@ -1820,8 +1821,8 @@ function renderGraph(){
 
   simulation.on('tick',()=>{
     linkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-    nodeSel.attr('cx',d=>Math.max(15,Math.min(W-15,d.x))).attr('cy',d=>Math.max(15,Math.min(H-15,d.y)));
-    glowSel.attr('cx',d=>Math.max(15,Math.min(W-15,d.x))).attr('cy',d=>Math.max(15,Math.min(H-15,d.y)));
+    nodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
+    glowSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
     if(labelSel)labelSel.attr('x',d=>d.x).attr('y',d=>d.y);
   });
 
