@@ -1324,8 +1324,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </div>
 
-</div>
-
 <!-- ════════ PRESERVATION INTEL ════════ -->
 <style>
   #mode-intel { background: var(--bg); }
@@ -1372,7 +1370,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   /* fix intel layout */
   #mode-intel { display:none;flex:1;overflow-y:auto;padding:24px;flex-direction:column;gap:0;align-items:stretch;justify-content:flex-start;box-sizing:border-box; }
 </style>
-<div id="mode-intel" style="display:none;width:100%;height:100%;overflow-y:auto;background:var(--bg);flex-direction:column;align-items:stretch;justify-content:flex-start;padding:24px;box-sizing:border-box;gap:0">
+<div id="mode-intel" style="display:none">
 
 
 
@@ -1451,6 +1449,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 
 </div>
+</div>
 
 <script>
 const NODES = ${JSON.stringify(nodes)};
@@ -1483,30 +1482,7 @@ function setMode(mode,el){
   document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('mode-graph').style.display=mode==='graph'?'flex':'none';
-  const intelEl = document.getElementById('mode-intel');
-  const contentEl = document.querySelector('.content');
-  if(intelEl) {
-    if(mode === 'intel') {
-      const topOffset = contentEl ? contentEl.getBoundingClientRect().top : 80;
-      intelEl.style.position = 'fixed';
-      intelEl.style.top = topOffset + 'px';
-      intelEl.style.left = '0';
-      intelEl.style.right = '0';
-      intelEl.style.bottom = '0';
-      intelEl.style.height = '';
-      intelEl.style.width = '100%';
-      intelEl.style.zIndex = '10';
-      intelEl.style.display = 'flex';
-      intelEl.style.flex = '';
-      intelEl.style.flexDirection = 'column';
-      intelEl.style.overflowY = 'auto';
-      intelEl.style.background = 'var(--bg)';
-    } else {
-      intelEl.style.display = 'none';
-      intelEl.style.position = '';
-      intelEl.style.zIndex = '';
-    }
-  }
+  document.getElementById('mode-intel').style.display=mode==='intel'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
 }
