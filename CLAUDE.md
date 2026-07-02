@@ -112,6 +112,9 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd why <f>` | `decision_why` con `{target: "<f>"}` |
 | `akdd audit` | `memory_audit` |
 | `akdd causal-prune` | `causal_prune` |
+| `akdd hooks` | correr `node .agentic/grafo/install-hooks.cjs` |
+| `akdd reason status` | correr `node .agentic/grafo/reasoning-bank.cjs status` |
+| `akdd reason recall <query>` | correr `node .agentic/grafo/reasoning-bank.cjs recall "<query>"` |
 
 Los comandos que SÍ requieren terminal (solo estos dos):
 - `npm install -g agentic-kdd` → instalar el CLI por primera vez
