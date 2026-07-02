@@ -1487,15 +1487,24 @@ function setMode(mode,el){
   const contentEl = document.querySelector('.content');
   if(intelEl) {
     if(mode === 'intel') {
-      if(contentEl) contentEl.style.display = 'none';
+      const topOffset = contentEl ? contentEl.getBoundingClientRect().top : 80;
+      intelEl.style.position = 'fixed';
+      intelEl.style.top = topOffset + 'px';
+      intelEl.style.left = '0';
+      intelEl.style.right = '0';
+      intelEl.style.bottom = '0';
+      intelEl.style.height = '';
+      intelEl.style.width = '100%';
+      intelEl.style.zIndex = '10';
       intelEl.style.display = 'flex';
-      intelEl.style.flex = '1';
+      intelEl.style.flex = '';
       intelEl.style.flexDirection = 'column';
       intelEl.style.overflowY = 'auto';
-      intelEl.style.width = '100%';
+      intelEl.style.background = 'var(--bg)';
     } else {
-      if(contentEl) contentEl.style.display = 'flex';
       intelEl.style.display = 'none';
+      intelEl.style.position = '';
+      intelEl.style.zIndex = '';
     }
   }
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
