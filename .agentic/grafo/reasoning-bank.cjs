@@ -79,6 +79,47 @@ function tokenize(s) {
   return [...new Set((String(s || '').toLowerCase().match(/[a-z0-9áéíóúñü]{2,}/gi) || []))];
 }
 
+// Tareas reales casi nunca repiten el intent textual exacto (cada fix describe
+// algo distinto), así que el match por `key` casi nunca reincide y todo se queda
+// EMERGING para siempre. Antes de crear una fila nueva, buscamos si ya existe una
+// estrategia parecida en la misma área — mismas palabras clave de dominio, no solo
+// conectores — y, si la hay, la reforzamos en vez de diluir el aprendizaje en filas
+// nuevas. Se usa conteo de tokens compartidos (no ratio): descripciones cortas y
+// variadas del mismo bug recurrente suelen compartir 2-3 palabras clave y difieren
+// en el resto, así que un ratio sobre el total castiga demasiado la redacción libre.
+const STOPWORDS = new Set([
+  'fix', 'real', 'critico', 'crítico', 'bug', 'error', 'feature', 'chore', 'ux', 'ui',
+  'de', 'la', 'el', 'en', 'no', 'se', 'y', 'a', 'un', 'una', 'del', 'con', 'para', 'por',
+  'que', 'los', 'las', 'al', 'sin', 'ya', 'su', 'lo', 'es', 'o', 'u', 'e',
+  'the', 'and', 'to', 'of', 'for', 'in', 'on', 'is', 'it', 'be', 'was', 'were', 'are',
+]);
+const MIN_SHARED_TOKENS = 2;
+
+function significantTokens(s) {
+  // >=2 (no >2): acrónimos de 2 letras como "ia"/"ux"/"db" sí son palabras clave
+  // de dominio; el ruido de 2 letras ya lo filtra STOPWORDS explícitamente.
+  return tokenize(s).filter(t => !STOPWORDS.has(t) && t.length >= 2);
+}
+
+function findSimilar(db, area, intent) {
+  const areaNorm = String(area || 'general').toLowerCase().trim();
+  const qTerms = significantTokens(intent);
+  if (qTerms.length < MIN_SHARED_TOKENS) return null;
+
+  let rows = [];
+  try {
+    rows = db.prepare('SELECT id, intent, success_count, fail_count FROM reasoning_bank WHERE lower(area) = ?').all(areaNorm);
+  } catch { return null; }
+
+  let best = null, bestShared = 0;
+  for (const r of rows) {
+    const rTerms = significantTokens(r.intent);
+    const shared = qTerms.filter(t => rTerms.includes(t)).length;
+    if (shared > bestShared) { bestShared = shared; best = r; }
+  }
+  return bestShared >= MIN_SHARED_TOKENS ? best : null;
+}
+
 // ── record: aprende de un ciclo exitoso ──────────────────────────────────────
 function record(db, entry) {
   if (!db) return { ok: false, reason: 'no-db' };
@@ -93,7 +134,8 @@ function record(db, entry) {
   const signals = JSON.stringify((entry && entry.signals) || {});
 
   try {
-    const existing = db.prepare('SELECT id, success_count, fail_count FROM reasoning_bank WHERE key = ?').get(key);
+    const existing = db.prepare('SELECT id, success_count, fail_count FROM reasoning_bank WHERE key = ?').get(key)
+      || findSimilar(db, area, intent);
     if (existing) {
       const sc   = (existing.success_count || 0) + 1;
       const conf = confidenceFor(sc, existing.fail_count || 0);

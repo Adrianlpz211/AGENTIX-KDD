@@ -399,8 +399,8 @@ function runSelfHealingLoop(opts) {
             if (DB2) {
               const behavior = rg.registerBehavior(DB2, {
                 module:      area || 'global',
-                files:       [],
-                testFiles:   [],
+                files:       scope,
+                testFiles:   testFiles,
                 projectRoot: projectRoot || process.cwd(),
               });
               if (behavior) {
@@ -502,7 +502,18 @@ if (require.main === module) {
   switch (command) {
     case 'run': {
       const area = args[0] || 'global';
-      const result = runSelfHealingLoop({ projectRoot, area });
+      // Changeset real (staged+unstaged+untracked) para que Regression Guard
+      // pueda asociar el behavior a archivos concretos — sin esto related_files
+      // queda vacío y checkBeforeBuild() nunca puede matchear nada.
+      let scope = [];
+      try {
+        const gitContext = require('./git-context.cjs');
+        if (gitContext.gitDisponible(projectRoot)) {
+          const diff = gitContext.getDiff(projectRoot);
+          scope = [...diff.archivos_modificados, ...diff.archivos_nuevos];
+        }
+      } catch (e) { /* sin git — scope vacío, igual que antes */ }
+      const result = runSelfHealingLoop({ projectRoot, area, scope });
       process.exit(result.success ? 0 : 1);
       break;
     }
