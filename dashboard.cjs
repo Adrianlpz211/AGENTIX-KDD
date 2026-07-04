@@ -148,7 +148,12 @@ function readSpecs() {
       const c = fs.readFileSync(path.join(specsPath, f), 'utf8');
       const estado = (c.match(/Estado: (.+)/) || [])[1]?.trim() || 'DESCONOCIDO';
       const fecha = (c.match(/ltima actualización: (.+)/) || [])[1]?.trim() || '—';
-      const tests = (c.match(/PASS/g) || []).length;
+      // La tabla "Suite | Tests | Estado" del spec siempre tiene 1 sola fila con
+      // "PASS" en la plantilla, así que contar ocurrencias de PASS siempre da 1
+      // sin importar cuántos tests reales tenga el módulo. El número real está
+      // en la línea "Tests: N pasando" que sí se actualiza por ciclo.
+      const testsLine = c.match(/Tests:\s*(\d+)\s*pasando/);
+      const tests = testsLine ? parseInt(testsLine[1], 10) : (c.match(/PASS/g) || []).length;
       return { name: f.replace('.md',''), estado, fecha, tests };
     });
   } catch { return []; }
@@ -275,20 +280,27 @@ function calcOnboarding(config, mImpl, dec, pat, specsArr) {
     { label: 'Módulos documentados', ok: mImpl.length > 0 },
     { label: 'Primera decisión registrada', ok: dec.length > 0 },
     { label: 'Primer patrón registrado', ok: pat.length > 0 },
-    { label: 'Primer ciclo aa: completado', ok: readMemoria('trabajo.md').includes('COMPLETADO') },
+    { label: 'Primer ciclo aa: completado', ok: (ciclosDB && ciclosDB.length > 0) || readMemoria('trabajo.md').includes('COMPLETADO') },
     { label: 'Specs generadas', ok: specsArr.length > 0 },
   ];
   const done = checks.filter(c => c.ok).length;
   return { checks, done, total: checks.length, pct: Math.round(done/checks.length*100) };
 }
 
+const PLACEHOLDER_TITLES = /^(Título de la decisión|Título del patrón|Nombre del patrón|Nombre del error|Nombre del error o patrón)$/i;
+
 function parseEntries(content) {
   return content.split(/^## /m)
+    // El header y las instrucciones de formato de cada .md viven dentro de un
+    // comentario HTML <!-- ... -->; como el split corta por "## " sin saber de
+    // comentarios, el título de archivo y el ejemplo de formato ("## [FECHA]
+    // Título de la decisión") se colaban como si fueran entradas reales.
     .filter(s => s.trim() && !s.startsWith('<!--') && !s.startsWith('Cómo') && !s.startsWith('Formato') && !s.startsWith('Registro') && !s.startsWith('Patrones') && s.length > 10)
+    .filter(s => !s.includes('<!--') && !s.includes('-->'))
     .map(s => {
       const lines = s.split('\n');
       const titulo = lines[0].trim().replace(/^\[.*?\]\s*/, '').trim();
-      if (!titulo || titulo.length < 5) return null;
+      if (!titulo || titulo.length < 5 || PLACEHOLDER_TITLES.test(titulo)) return null;
       const get = (k) => { for (const l of lines) { if (l.startsWith(k + ':')) return l.split(':').slice(1).join(':').trim(); } return ''; };
       return { titulo, area: get('Área') || get('Area') || 'global', confianza: get('Confianza') || 'BAJA', aplicado: parseInt(get('Aplicado')) || 0, util: parseInt(get('Útil') || get('Util')) || 0, estado: get('Estado') || 'ACTIVO', contenido: s };
     }).filter(Boolean);
@@ -1160,7 +1172,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="docs-sub">Everything a new team member needs to get up to speed.</div>
         <div class="report-section">
           <div class="report-title">💡 Suggested Questions to explore</div>
-          ${suggestedQuestions.map(q => `<div class="question-card">${escHtml(q)}<span class="question-arrow">↗</span></div>`).join('')}
+          ${suggestedQuestions.map(q => `<div class="question-card" onclick="askQuestion(${escHtml(JSON.stringify(q))})">${escHtml(q)}<span class="question-arrow">↗</span></div>`).join('')}
         </div>
         <div class="docs-h2">🔑 Key things to know</div>
         ${patrones.filter(p=>p.confianza==='ALTA').length>0 ? `
@@ -1436,6 +1448,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     </div>
   </div>
 
+  <!-- Obsidian MCP — oculto: integración con un plugin de terceros nunca probada
+       de verdad contra este proyecto, sin valor demostrado todavía. No se borró
+       a propósito — si algún día se prueba y sirve, se reactiva quitando este
+       comentario.
   <div class="obs-panel">
     <div class="obs-head">
       <span style="font-size:18px">🗂️</span>
@@ -1446,6 +1462,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <code class="obs-cmd">1. Instalar plugin "Obsidian MCP Server" en Obsidian → 2. Agregar el servidor MCP en Cursor/Claude Code → 3. La herramienta obsidian_read_notes queda disponible en el chat</code>
     <div style="font-size:11px;color:var(--text3);margin-top:7px">Sin Obsidian: usa <code style="color:#a5b4fc">akdd knowledge</code> — mismo resultado.</div>
   </div>
+  -->
 
 </div>
 </div>
@@ -1546,6 +1563,20 @@ function setFilter(f,el){
 }
 
 function filterSearch(val){searchVal=val.toLowerCase();renderNodeList();}
+
+// Las "Suggested Questions" no se responden con texto — se responden mostrando
+// los nodos reales detrás de la pregunta: saltan al grafo, abren la lista de
+// nodos y la filtran por las palabras clave de la pregunta.
+function askQuestion(q){
+  const gTab=document.querySelector('.mode-tab[onclick*="graph"]');
+  if(gTab) setMode('graph',gTab);
+  const nTab=document.querySelector('.sb-tab[onclick*="nodes"]');
+  if(nTab) showSbTab('nodes',nTab);
+  const STOP=new Set(['what','how','why','does','do','is','are','the','a','an','to','for','in','of','on','i','should','this','was','were','decided','permanent','rules','add','feature']);
+  const term=q.toLowerCase().replace(/[?¿]/g,'').split(/\s+/).filter(w=>w.length>2&&!STOP.has(w)).slice(0,4).join(' ');
+  const box=document.getElementById('srch');
+  if(box){ box.value=term; filterSearch(term); box.focus(); }
+}
 
 function getFiltered(){
   let r=NODES;
