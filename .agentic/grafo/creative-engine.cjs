@@ -71,6 +71,7 @@ const SUGGESTION_TYPES = {
   MISSING_TEST:     { label: 'Missing test',      risk: 'MEDIUM', auto_apply_at: null },
   OPPORTUNITY:      { label: 'Opportunity',       risk: 'LOW',    auto_apply_at: 2 },
   ARCHITECTURE:     { label: 'Architecture',      risk: 'HIGH',   auto_apply_at: null },
+  ROOT_CAUSE:       { label: 'Root cause',        risk: 'HIGH',   auto_apply_at: null }, // nunca auto-aplica
 };
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
@@ -333,6 +334,42 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
         module: r.desde_entidad.split('/')[0] || 'global',
         risk_level: 'MEDIUM',
         evidence: [{ type: 'regression_edge', file: r.desde_entidad, count: r.n }],
+      }, cicloId);
+      if (s) suggestions.push(s);
+    }
+  } catch {}
+
+  // ── 5. Síntomas repetidos sin resolver → clúster de causa raíz ────────────
+  // Lo inverso de un contrato: un contrato dice "esto funcionó N veces →
+  // protegido"; esto dice "esto falló con la misma área/raíz N veces → alerta
+  // de que hay que investigarlo". Errores runtime (ej. caídas de sesión de un
+  // servicio externo) no pasan por verified_contracts porque no hay un test
+  // automatizado que los reproduzca, así que el bloque 2 (arriba) no los ve.
+  try {
+    const clusters = db.prepare(`
+      SELECT area, COUNT(*) as n
+      FROM nodos
+      WHERE tipo = 'error' AND estado = 'ACTIVO' AND area != 'global'
+      GROUP BY area
+      HAVING n >= 3
+      ORDER BY n DESC
+      LIMIT 5
+    `).all();
+
+    for (const c of clusters) {
+      const examples = db.prepare(`
+        SELECT titulo FROM nodos
+        WHERE tipo = 'error' AND estado = 'ACTIVO' AND area = ?
+        ORDER BY fecha_creacion DESC LIMIT 3
+      `).all(c.area).map(r => r.titulo.slice(0, 70));
+
+      const s = addSuggestion(db, {
+        type: 'ROOT_CAUSE',
+        title: `${c.n} errores activos sin resolver en "${c.area}" — posible causa raíz común`,
+        description: `Se acumularon ${c.n} errores distintos en el área "${c.area}" sin marcar como resueltos. Aunque se vean distintos, vale la pena revisar si comparten una misma causa de fondo antes de que sigan creciendo. Ejemplos:\n- ${examples.join('\n- ')}`,
+        module: c.area,
+        risk_level: 'HIGH',
+        evidence: [{ type: 'error_cluster', area: c.area, count: c.n, examples }],
       }, cicloId);
       if (s) suggestions.push(s);
     }

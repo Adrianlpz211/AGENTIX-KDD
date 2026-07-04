@@ -667,6 +667,12 @@ const arg2 = process.argv[4];
 
 switch(cmd) {
   case 'sync':     sincronizar(); _autoIndexEmbeddings();
+                   // sincronizar() es la referencia local sin envolver — los hooks de
+                   // abajo ("Hook into existing exports") solo parchan
+                   // module.exports.sincronizar, que este switch nunca llama. Sin esta
+                   // llamada directa, Creative Engine nunca corre en un sync real
+                   // (confirmado: la tabla creative_suggestions nunca se crea).
+                   try { _autoRunCreativeEngine(`sync-${Date.now()}`); } catch {}
                    try { require('./install-hooks.cjs').installHooks({ quiet: true }); } catch {}
                    break;
   case 'sync-stats':
