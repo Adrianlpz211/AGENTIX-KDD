@@ -313,15 +313,22 @@ guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
 - **QA / Review** → lentes en paralelo (ver `.agentic/agentes/05-qa.md`, MODO LEGIÓN).
 - **audit:** → ya es Legión (7 subagentes en paralelo).
 
-### Dónde NO (manos) — con una excepción condicional (Fase 2, v3.10)
+### Dónde NO (manos) — con una excepción condicional (Fase 2, v3.11.1)
 - **Build / Front / Back** → un solo autor por defecto (paralelizar rompe: se pisan los archivos).
-  **Excepción:** si la tarea requiere Front Y Back a la vez, y el Orquestador verificó que
-  los archivos que cada uno va a tocar NO se cruzan (ningún archivo en común) → invocar
-  `.agentic/agentes/03-front.md` y `.agentic/agentes/04-back.md` EN PARALELO, mismo
-  mecanismo que ya usa `audit:` (Agent tool, una sola invocación por cada uno, en el mismo
-  mensaje). Esperar los dos resultados antes de seguir a TDD/QA — ninguno dispara al otro
-  como en el flujo secuencial. Si hay CUALQUIER duda de que los archivos se crucen, o la
-  tarea es solo front o solo back → un solo autor, secuencial, como siempre. Ante la duda,
+  **Excepción — IMPERATIVO, NO OPCIONAL SI SE CUMPLE LA CONDICIÓN:**
+  Si la tarea requiere Front Y Back a la vez, Y ya verificaste que los archivos que cada
+  uno va a tocar NO se cruzan (ningún archivo en común) → **NO implementes front y back
+  tú mismo, uno después del otro.** Tienes que invocar tu herramienta de sub-agentes
+  (Task/Agent) **DOS VECES, en el mismo mensaje** — una pasándole el contenido de
+  `.agentic/agentes/03-front.md` + el brief de la fase, otra pasándole
+  `.agentic/agentes/04-back.md` + el mismo brief — exactamente el mismo mecanismo
+  mecánico que ya usas para lanzar los 7 subagentes de `audit: auditar`. Si tu entorno
+  no tiene herramienta de sub-agentes disponible, cae a la regla de degradación de abajo
+  (secuencial, un solo autor) — pero si SÍ la tienes disponible (como ahora mismo, en
+  esta sesión), úsala, no la ignores y sigas trabajando tú mismo de corrido.
+  Espera los dos resultados antes de seguir a TDD/QA — ninguno dispara al otro como en
+  el flujo secuencial. Si hay CUALQUIER duda de que los archivos se crucen, o la tarea es
+  solo front o solo back → un solo autor, secuencial, como siempre. Ante la duda,
   secuencial — nunca arriesgar un archivo pisado por ganar velocidad.
 - **Memoria / post-cycle** → escritura única coherente.
 
