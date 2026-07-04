@@ -136,12 +136,13 @@ akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd dashboard                 # Visual board at localhost:3847
 ```
 
-> New to the dashboard's Knowledge Graph tab? [How to read the graph](docs/GRAFO-GUIA.md) explains
-> what the colors, clusters and isolated dots actually mean (Spanish, plain language, no jargon).
->
-> Confused by Preservation Intel's contract counts or an empty Creative Engine?
-> [How to read contracts + Creative Engine](docs/CONTRATOS-GUIA.md) covers the promotion
-> thresholds (candidate → verified → protected) and when suggestions actually appear.
+New to the dashboard's Knowledge Graph tab or confused by Preservation Intel's contract
+counts? Two visual guides (Spanish, plain language, no jargon):
+
+<a href="docs/GRAFO-GUIA.md"><img src="assets/grafo-guia.svg" width="49%"></a>
+<a href="docs/CONTRATOS-GUIA.md"><img src="assets/contratos-guia.svg" width="49%"></a>
+
+[How to read the graph](docs/GRAFO-GUIA.md) · [How to read contracts + Creative Engine](docs/CONTRATOS-GUIA.md)
 
 ### Memory & knowledge graph
 ```bash

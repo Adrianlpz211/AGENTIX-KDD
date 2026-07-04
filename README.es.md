@@ -136,12 +136,13 @@ akdd health [--fix]            # Diagnóstico del sistema (--fix repara lo que p
 akdd dashboard                 # Tablero visual en localhost:3847
 ```
 
-> ¿Primera vez en la pestaña Knowledge Graph del dashboard? [Cómo leer el grafo](docs/GRAFO-GUIA.md)
-> explica qué significan los colores, los grupos y los puntos sueltos, sin tecnicismos.
->
-> ¿Te confunden los números de contratos de Preservation Intel o un Creative Engine vacío?
-> [Cómo leer contratos + Creative Engine](docs/CONTRATOS-GUIA.md) explica los umbrales de
-> promoción (candidate → verified → protected) y cuándo aparecen sugerencias de verdad.
+¿Primera vez en la pestaña Knowledge Graph del dashboard, o te confunden los números de
+contratos de Preservation Intel? Dos guías visuales:
+
+<a href="docs/GRAFO-GUIA.md"><img src="assets/grafo-guia.svg" width="49%"></a>
+<a href="docs/CONTRATOS-GUIA.md"><img src="assets/contratos-guia.svg" width="49%"></a>
+
+[Cómo leer el grafo](docs/GRAFO-GUIA.md) · [Cómo leer contratos + Creative Engine](docs/CONTRATOS-GUIA.md)
 
 ### Memoria y grafo de conocimiento
 ```bash
