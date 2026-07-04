@@ -136,6 +136,9 @@ akdd health [--fix]            # Diagnóstico del sistema (--fix repara lo que p
 akdd dashboard                 # Tablero visual en localhost:3847
 ```
 
+> ¿Primera vez en la pestaña Knowledge Graph del dashboard? [Cómo leer el grafo](docs/GRAFO-GUIA.md)
+> explica qué significan los colores, los grupos y los puntos sueltos, sin tecnicismos.
+
 ### Memoria y grafo de conocimiento
 ```bash
 akdd buscar "query"            # Búsqueda híbrida semántica + BM25 en la memoria

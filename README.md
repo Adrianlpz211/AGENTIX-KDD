@@ -136,6 +136,9 @@ akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd dashboard                 # Visual board at localhost:3847
 ```
 
+> New to the dashboard's Knowledge Graph tab? [How to read the graph](docs/GRAFO-GUIA.md) explains
+> what the colors, clusters and isolated dots actually mean (Spanish, plain language, no jargon).
+
 ### Memory & knowledge graph
 ```bash
 akdd buscar "query"            # Hybrid semantic + BM25 search across memory

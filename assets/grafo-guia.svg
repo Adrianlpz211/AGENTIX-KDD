@@ -1,0 +1,119 @@
+<svg viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <radialGradient id="god-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="620" fill="#0a0d14"/>
+
+  <!-- Title -->
+  <text x="30" y="42" fill="#e2e8f0" font-size="22" font-weight="700">Cómo leer el Knowledge Graph de Agentix</text>
+  <text x="30" y="66" fill="#94a3b8" font-size="13">Cada punto es un recuerdo real del proyecto. Cada línea es una relación que el sistema encontró — no es azar.</text>
+
+  <!-- Legend -->
+  <g transform="translate(30,90)">
+    <rect x="0" y="0" width="940" height="46" rx="10" fill="#111520" stroke="#2a3050"/>
+    <circle cx="30" cy="23" r="8" fill="#ef4444"/>
+    <text x="46" y="27" fill="#e2e8f0" font-size="13" font-weight="600">error</text>
+    <text x="46" y="27" dx="42" fill="#64748b" font-size="11">algo que falló</text>
+
+    <circle cx="230" cy="23" r="8" fill="#10b981"/>
+    <text x="246" y="27" fill="#e2e8f0" font-size="13" font-weight="600">patrón</text>
+    <text x="246" y="27" dx="50" fill="#64748b" font-size="11">una regularidad detectada</text>
+
+    <circle cx="470" cy="23" r="8" fill="#3b82f6"/>
+    <text x="486" y="27" fill="#e2e8f0" font-size="13" font-weight="600">decisión</text>
+    <text x="486" y="27" dx="58" fill="#64748b" font-size="11">una elección de diseño registrada</text>
+
+    <circle cx="760" cy="23" r="11" fill="url(#god-glow)"/>
+    <circle cx="760" cy="23" r="8" fill="#3b3b3b" stroke="#f59e0b" stroke-width="2.5"/>
+    <text x="776" y="27" fill="#fbbf24" font-size="13" font-weight="600">divine</text>
+    <text x="776" y="27" dx="50" fill="#64748b" font-size="11">nodo con muchas conexiones (hub)</text>
+  </g>
+
+  <!-- Group A: pattern+decision cluster -->
+  <g transform="translate(120,260)">
+    <text x="0" y="-90" fill="#e2e8f0" font-size="14" font-weight="700">Grupo A — patrones ⟶ decisiones</text>
+    <text x="0" y="-70" fill="#64748b" font-size="12">Esto es aprendizaje real: algo que se repite conectado</text>
+    <text x="0" y="-54" fill="#64748b" font-size="12">a la decisión de diseño que salió de ahí.</text>
+
+    <g stroke="#2a3050" stroke-width="1.2" opacity="0.9">
+      <line x1="-70" y1="-10" x2="0" y2="-40"/>
+      <line x1="-70" y1="-10" x2="0" y2="10"/>
+      <line x1="-70" y1="-10" x2="-70" y2="40"/>
+      <line x1="0" y1="-40" x2="60" y2="-30"/>
+      <line x1="0" y1="-40" x2="0" y2="10"/>
+      <line x1="0" y1="10" x2="60" y2="-30"/>
+      <line x1="0" y1="10" x2="60" y2="30"/>
+      <line x1="0" y1="10" x2="-70" y2="40"/>
+      <line x1="60" y1="-30" x2="60" y2="30"/>
+      <line x1="60" y1="30" x2="-70" y2="40"/>
+      <line x1="-70" y1="40" x2="0" y2="65"/>
+      <line x1="60" y1="30" x2="0" y2="65"/>
+    </g>
+    <circle cx="-70" cy="-10" r="10" fill="#10b981"/>
+    <circle cx="0" cy="-40" r="9" fill="#3b82f6"/>
+    <circle cx="0" cy="10" r="10" fill="#10b981"/>
+    <circle cx="60" cy="-30" r="9" fill="#3b82f6"/>
+    <circle cx="60" cy="30" r="9" fill="#3b82f6"/>
+    <circle cx="-70" cy="40" r="9" fill="#3b82f6"/>
+    <circle cx="0" cy="65" r="10" fill="#10b981"/>
+  </g>
+
+  <!-- Group B: error clique, all divine -->
+  <g transform="translate(500,260)">
+    <text x="0" y="-90" fill="#e2e8f0" font-size="14" font-weight="700">Grupo B — errores, misma raíz</text>
+    <text x="0" y="-70" fill="#64748b" font-size="12">Se ven distintos pero el sistema descubrió que son</text>
+    <text x="0" y="-54" fill="#64748b" font-size="12">la MISMA causa — por eso quedan tan enredados (⚡ divine).</text>
+
+    <g stroke="#3a2a2a" stroke-width="1" opacity="0.85">
+      <line x1="-60" y1="-30" x2="10" y2="-45"/>
+      <line x1="-60" y1="-30" x2="-70" y2="20"/>
+      <line x1="-60" y1="-30" x2="0" y2="0"/>
+      <line x1="-60" y1="-30" x2="55" y2="-25"/>
+      <line x1="10" y1="-45" x2="0" y2="0"/>
+      <line x1="10" y1="-45" x2="55" y2="-25"/>
+      <line x1="10" y1="-45" x2="60" y2="30"/>
+      <line x1="-70" y1="20" x2="0" y2="0"/>
+      <line x1="-70" y1="20" x2="-20" y2="55"/>
+      <line x1="0" y1="0" x2="55" y2="-25"/>
+      <line x1="0" y1="0" x2="60" y2="30"/>
+      <line x1="0" y1="0" x2="-20" y2="55"/>
+      <line x1="55" y1="-25" x2="60" y2="30"/>
+      <line x1="60" y1="30" x2="-20" y2="55"/>
+      <line x1="-20" y1="55" x2="-70" y2="20"/>
+    </g>
+    <g>
+      <circle cx="-60" cy="-30" r="12" fill="url(#god-glow)"/><circle cx="-60" cy="-30" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="10" cy="-45" r="12" fill="url(#god-glow)"/><circle cx="10" cy="-45" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="-70" cy="20" r="12" fill="url(#god-glow)"/><circle cx="-70" cy="20" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="0" cy="0" r="12" fill="url(#god-glow)"/><circle cx="0" cy="0" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="55" cy="-25" r="12" fill="url(#god-glow)"/><circle cx="55" cy="-25" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="60" cy="30" r="12" fill="url(#god-glow)"/><circle cx="60" cy="30" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="-20" cy="55" r="12" fill="url(#god-glow)"/><circle cx="-20" cy="55" r="8" fill="#ef4444" stroke="#f59e0b" stroke-width="2"/>
+    </g>
+  </g>
+
+  <!-- Group C: scattered isolated dots -->
+  <g transform="translate(830,260)">
+    <text x="-60" y="-90" fill="#e2e8f0" font-size="14" font-weight="700">Sueltos</text>
+    <text x="-60" y="-70" fill="#64748b" font-size="12">Pasaron una vez.</text>
+    <text x="-60" y="-54" fill="#64748b" font-size="12">Nadie los conectó</text>
+    <text x="-60" y="-38" fill="#64748b" font-size="12">todavía. Normal.</text>
+    <circle cx="-20" cy="-5" r="7" fill="#ef4444"/>
+    <circle cx="30" cy="20" r="7" fill="#ef4444"/>
+    <circle cx="-40" cy="45" r="7" fill="#ef4444"/>
+    <circle cx="10" cy="65" r="7" fill="#ef4444"/>
+  </g>
+
+  <!-- Bottom reading box -->
+  <g transform="translate(30,470)">
+    <rect x="0" y="0" width="940" height="120" rx="12" fill="#111520" stroke="#2a3050"/>
+    <text x="24" y="30" fill="#a78bfa" font-size="14" font-weight="700">La lectura general — ¿qué dice el grafo del proyecto?</text>
+    <text x="24" y="56" fill="#94a3b8" font-size="12.5">• Un grupo grande y mezclado de <tspan fill="#10b981" font-weight="600">patrones</tspan> + <tspan fill="#3b82f6" font-weight="600">decisiones</tspan> = el sistema está aprendiendo de verdad, no solo archivando.</text>
+    <text x="24" y="78" fill="#94a3b8" font-size="12.5">• Un grupo denso y "divine" de puros <tspan fill="#ef4444" font-weight="600">errores</tspan> = ahí está tu foco real de inestabilidad — vale la pena atacarlo de raíz.</text>
+    <text x="24" y="100" fill="#94a3b8" font-size="12.5">• Muchos puntos sueltos = ruido normal de un proyecto activo. Sería mala señal solo si con el tiempo dejan de conectarse cosas nuevas al grupo grande.</text>
+  </g>
+</svg>
