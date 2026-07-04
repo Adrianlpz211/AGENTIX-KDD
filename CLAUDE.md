@@ -67,6 +67,9 @@ Consulta del grafo (en terminal):
 ## CUANDO VES aa:
 
 ```
+0. Correr: node .agentic/grafo/context-enricher.cjs "[tarea tal cual la escribió el usuario]"
+   → leer el brief que imprime (riesgo estimado, avisos, contratos, alertas activas)
+   → nunca bloquea: si falla, no encuentra nada, o da error — seguir igual, es un plus
 1. Leer .agentic/config.md
 2. Leer .agentic/memoria/trabajo.md
 3. Si CONFIGURADO: NO → Setup primero
@@ -76,7 +79,7 @@ Consulta del grafo (en terminal):
 ```
 
 Flujo completo:
-Orquestador → Analista → Front/Back → QA → Memoria
+Context Enricher → Orquestador (.agentic/agentes/01-orquestador.md) → Analista → Front/Back → QA → Memoria
 
 ## CUANDO VES audit:
 
