@@ -1,0 +1,69 @@
+<svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect x="0" y="0" width="1000" height="560" fill="#0a0d14"/>
+
+  <text x="30" y="42" fill="#e2e8f0" font-size="22" font-weight="700">Cómo leer los Contratos + Creative Engine</text>
+  <text x="30" y="66" fill="#94a3b8" font-size="13">Un contrato = un test que pasa. Sube de nivel solo con evidencia repetida — no por decreto.</text>
+
+  <!-- Pipeline -->
+  <g transform="translate(30,100)">
+    <!-- Candidate -->
+    <rect x="0" y="0" width="200" height="90" rx="12" fill="#111520" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="16" y="26" fill="#fbbf24" font-size="14" font-weight="700">CANDIDATE</text>
+    <text x="16" y="46" fill="#94a3b8" font-size="11">Un test pasó una vez.</text>
+    <text x="16" y="62" fill="#94a3b8" font-size="11">Se registra solo, sin</text>
+    <text x="16" y="78" fill="#94a3b8" font-size="11">pedirle nada a nadie.</text>
+
+    <path d="M205 45 L268 45" stroke="#2a3050" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="210" y="35" fill="#64748b" font-size="10">3 passes seguidos</text>
+    <text x="210" y="65" fill="#64748b" font-size="10">≤5% fallo</text>
+
+    <!-- Verified -->
+    <rect x="270" y="0" width="200" height="90" rx="12" fill="#111520" stroke="#34d399" stroke-width="1.5"/>
+    <text x="286" y="26" fill="#34d399" font-size="14" font-weight="700">VERIFIED</text>
+    <text x="286" y="46" fill="#94a3b8" font-size="11">Ya demostró que no</text>
+    <text x="286" y="62" fill="#94a3b8" font-size="11">fue casualidad —</text>
+    <text x="286" y="78" fill="#94a3b8" font-size="11">se repitió con evidencia.</text>
+
+    <path d="M475 45 L538 45" stroke="#2a3050" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="480" y="35" fill="#64748b" font-size="10">7 passes seguidos</text>
+    <text x="480" y="65" fill="#64748b" font-size="10">≤2% fallo</text>
+
+    <!-- Protected -->
+    <rect x="540" y="0" width="200" height="90" rx="12" fill="#111520" stroke="#9f99e8" stroke-width="1.5"/>
+    <text x="556" y="26" fill="#a78bfa" font-size="14" font-weight="700">PROTECTED</text>
+    <text x="556" y="46" fill="#94a3b8" font-size="11">Ya no se puede tocar</text>
+    <text x="556" y="62" fill="#94a3b8" font-size="11">en silencio: si un cambio</text>
+    <text x="556" y="78" fill="#94a3b8" font-size="11">lo rompe, Agentix para.</text>
+
+    <path d="M640 95 L640 130" stroke="#f87171" stroke-width="2" marker-end="url(#arrow-red)"/>
+    <text x="655" y="118" fill="#f87171" font-size="10">1 falla = baja de rango</text>
+
+    <!-- Violation -->
+    <rect x="540" y="135" width="200" height="70" rx="12" fill="#1a1114" stroke="#f87171" stroke-width="1.5"/>
+    <text x="556" y="160" fill="#f87171" font-size="14" font-weight="700">VIOLATION</text>
+    <text x="556" y="180" fill="#94a3b8" font-size="11">Un contrato protegido</text>
+    <text x="556" y="196" fill="#94a3b8" font-size="11">se rompió de verdad.</text>
+  </g>
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5578"/></marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f87171"/></marker>
+  </defs>
+
+  <!-- Reading box -->
+  <g transform="translate(30,320)">
+    <rect x="0" y="0" width="940" height="80" rx="12" fill="#111520" stroke="#2a3050"/>
+    <text x="24" y="26" fill="#a78bfa" font-size="14" font-weight="700">Cómo leerlos en el dashboard</text>
+    <text x="24" y="48" fill="#94a3b8" font-size="12.5">Protected + Verified alto = zonas del código que Agentix ya defiende activamente. Candidate alto = está aprendiendo, todavía sin garantías.</text>
+    <text x="24" y="68" fill="#94a3b8" font-size="12.5">Violations &gt; 0 = algo protegido se rompió de verdad — no es ruido, hay que revisarlo.</text>
+  </g>
+
+  <!-- Creative Engine -->
+  <g transform="translate(30,420)">
+    <rect x="0" y="0" width="940" height="120" rx="12" fill="#111520" stroke="#2a3050"/>
+    <text x="24" y="28" fill="#fbbf24" font-size="14" font-weight="700">✨ Creative Engine — ¿cuándo se llena?</text>
+    <text x="24" y="52" fill="#94a3b8" font-size="12.5">Nivel 1 (ASISTIDO) → Nivel 2 (CREATIVO) al llegar a <tspan fill="#e2e8f0" font-weight="600">10 contratos</tspan> en estado Protected + Verified.</text>
+    <text x="24" y="74" fill="#94a3b8" font-size="12.5">Las sugerencias NO salen de cada ciclo — solo cuando el Autonomous Decision Engine <tspan fill="#e2e8f0" font-weight="600">duda</tspan> de una decisión</text>
+    <text x="24" y="94" fill="#94a3b8" font-size="12.5">durante un ciclo real y la difiere en vez de tomarla sola. Si nunca duda, esta sección se queda vacía — no es un error.</text>
+  </g>
+</svg>

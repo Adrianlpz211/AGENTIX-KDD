@@ -132,3 +132,9 @@ All memory lives in `.agentic/memoria.db` — a local SQLite file. Never committ
 - Collab infrastructure (Turso + Cloudflare Worker — separate, opt-in via env var)
 - Benchmark project code (separate repository — coming)
 - IDE extensions (VS Code extension in `vscode-extension/` — pre-release)
+
+> ⚠️ **Turso/collab is in trial mode.** `akdd collab init` provisions a shared Turso database
+> automatically via a Cloudflare Worker — it works, but it hasn't been battle-tested with real
+> multi-dev teams at scale yet. Everything else in this repo (memory, gates, dashboard) runs
+> 100% local with no external dependency; only opt into `akdd collab *` if you're comfortable
+> being an early tester of that specific piece.
