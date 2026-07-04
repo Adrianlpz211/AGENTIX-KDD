@@ -74,12 +74,16 @@ Consulta del grafo (en terminal):
 2. Leer .agentic/memoria/trabajo.md
 3. Si CONFIGURADO: NO → Setup primero
 4. Ejecutar pipeline completo sin pausar entre agentes
+   → En la fase de construcción: si la tarea es Front + Back a la vez Y sus archivos NO
+     se cruzan, invocar 03-front.md y 04-back.md EN PARALELO (ver MODO LEGIÓN abajo,
+     Fase 2 del Sistema de Agentes Lite). Si hay cualquier duda de cruce, o es solo un
+     lado → secuencial, un solo autor, como siempre.
 5. No pedir confirmación al usuario entre fases
 6. Detener SOLO ante STOP genuino
 ```
 
 Flujo completo:
-Context Enricher → Orquestador (.agentic/agentes/01-orquestador.md) → Analista → Front/Back → QA → Memoria
+Context Enricher → Orquestador (.agentic/agentes/01-orquestador.md) → Analista → Front/Back (paralelo si aplica, ver MODO LEGIÓN) → QA → Memoria
 
 ## CUANDO VES audit:
 
@@ -309,8 +313,16 @@ guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
 - **QA / Review** → lentes en paralelo (ver `.agentic/agentes/05-qa.md`, MODO LEGIÓN).
 - **audit:** → ya es Legión (7 subagentes en paralelo).
 
-### Dónde NO (manos)
-- **Build / Front / Back** → un solo autor (paralelizar rompe: se pisan los archivos).
+### Dónde NO (manos) — con una excepción condicional (Fase 2, v3.10)
+- **Build / Front / Back** → un solo autor por defecto (paralelizar rompe: se pisan los archivos).
+  **Excepción:** si la tarea requiere Front Y Back a la vez, y el Orquestador verificó que
+  los archivos que cada uno va a tocar NO se cruzan (ningún archivo en común) → invocar
+  `.agentic/agentes/03-front.md` y `.agentic/agentes/04-back.md` EN PARALELO, mismo
+  mecanismo que ya usa `audit:` (Agent tool, una sola invocación por cada uno, en el mismo
+  mensaje). Esperar los dos resultados antes de seguir a TDD/QA — ninguno dispara al otro
+  como en el flujo secuencial. Si hay CUALQUIER duda de que los archivos se crucen, o la
+  tarea es solo front o solo back → un solo autor, secuencial, como siempre. Ante la duda,
+  secuencial — nunca arriesgar un archivo pisado por ganar velocidad.
 - **Memoria / post-cycle** → escritura única coherente.
 
 ### Regla de degradación (OBLIGATORIA — no rompe nada)
