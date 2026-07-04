@@ -873,7 +873,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       ${godNodes.length > 0 ? `
       <div class="god-section">
         <div class="god-title">⚡ <span data-i="divine_nodes">Divine nodes</span></div>
-        ${godNodes.slice(0,3).map(n => `<div class="god-item" onclick="selectNode(${n.id})"><div class="god-ring"></div><span>${n.titulo.slice(0,36)}${n.titulo.length>36?'…':''}</span></div>`).join('')}
+        ${godNodes.slice(0,3).map(n => `<div class="god-item" onclick="selectNode(${n.id})"><div class="god-ring"></div><span>${escHtml(n.titulo.slice(0,36))}${n.titulo.length>36?'…':''}</span></div>`).join('')}
       </div>` : ''}
       ${surprisingEdges.length > 0 ? `
       <div class="sur-section">
@@ -903,7 +903,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div style="margin-bottom:14px">
         <div style="font-size:10px;color:var(--amber);font-weight:600;margin-bottom:6px">⚡ Divine Nodes</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.5">Most connected — everything flows through them</div>
-        ${godNodes.map(n => `<div style="padding:5px 7px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:5px;margin-bottom:3px;cursor:pointer" onclick="selectNode(${n.id})"><div style="font-size:11px;color:var(--amber)">${n.titulo.slice(0,44)}${n.titulo.length>44?'…':''}</div><div style="font-size:10px;color:var(--text3)">${degreeMap[n.id]||0} connections · ${n.area}</div></div>`).join('')}
+        ${godNodes.map(n => `<div style="padding:5px 7px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:5px;margin-bottom:3px;cursor:pointer" onclick="selectNode(${n.id})"><div style="font-size:11px;color:var(--amber)">${escHtml(n.titulo.slice(0,44))}${n.titulo.length>44?'…':''}</div><div style="font-size:10px;color:var(--text3)">${degreeMap[n.id]||0} connections · ${escHtml(n.area)}</div></div>`).join('')}
       </div>` : ''}
       ${surprisingEdges.length > 0 ? `
       <div style="margin-bottom:14px">
@@ -1020,10 +1020,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         </div>
         <div class="report-section">
           <div class="report-title">📊 Graph Report <span style="font-size:10px;color:var(--text3);font-weight:400">— like Graphify's GRAPH_REPORT.md</span></div>
-          ${godNodes.length > 0 ? `<div class="report-item"><span class="report-key">Divine nodes</span><span>${godNodes.map(n=>n.titulo.slice(0,30)).join(', ')}</span></div>` : ''}
+          ${godNodes.length > 0 ? `<div class="report-item"><span class="report-key">Divine nodes</span><span>${escHtml(godNodes.map(n=>n.titulo.slice(0,30)).join(', '))}</span></div>` : ''}
           ${surprisingEdges.length > 0 ? `<div class="report-item"><span class="report-key">Surprising</span><span>${surprisingEdges.length} cross-area connections found</span></div>` : ''}
-          <div class="report-item"><span class="report-key">HIGH rules</span><span>${patrones.filter(p=>p.confianza==='ALTA').map(p=>p.titulo.slice(0,25)).join(' · ') || 'None yet'}</span></div>
-          <div class="report-item"><span class="report-key">Most errors</span><span>${errores.length > 0 ? errores.sort((a,b)=>b.aplicado-a.aplicado)[0].titulo.slice(0,40) : 'None yet'}</span></div>
+          <div class="report-item"><span class="report-key">HIGH rules</span><span>${escHtml(patrones.filter(p=>p.confianza==='ALTA').map(p=>p.titulo.slice(0,25)).join(' · ')) || 'None yet'}</span></div>
+          <div class="report-item"><span class="report-key">Most errors</span><span>${errores.length > 0 ? escHtml(errores.sort((a,b)=>b.aplicado-a.aplicado)[0].titulo.slice(0,40)) : 'None yet'}</span></div>
         </div>
         <div class="docs-h2">🚀 Getting started</div>
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;color:var(--text2);line-height:2.2">
@@ -1141,7 +1141,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-decisions">
         <div class="docs-h1">Architectural Decisions</div>
         <div class="docs-sub">Why things are the way they are. The most important layer of project knowledge.</div>
-        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${d.titulo}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${d.area} · ${d.confianza}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
+        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${escHtml(d.titulo)}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${escHtml(d.area)} · ${d.confianza}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
       </div>
 
       <!-- ERRORS -->
@@ -1160,18 +1160,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="docs-sub">Everything a new team member needs to get up to speed.</div>
         <div class="report-section">
           <div class="report-title">💡 Suggested Questions to explore</div>
-          ${suggestedQuestions.map(q => `<div class="question-card">${q}<span class="question-arrow">↗</span></div>`).join('')}
+          ${suggestedQuestions.map(q => `<div class="question-card">${escHtml(q)}<span class="question-arrow">↗</span></div>`).join('')}
         </div>
         <div class="docs-h2">🔑 Key things to know</div>
         ${patrones.filter(p=>p.confianza==='ALTA').length>0 ? `
         <div style="background:rgba(16,185,129,.05);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:600;color:#34d399;margin-bottom:8px">★ Permanent rules (HIGH confidence)</div>
-          ${patrones.filter(p=>p.confianza==='ALTA').map(p=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${p.titulo}</div>`).join('')}
+          ${patrones.filter(p=>p.confianza==='ALTA').map(p=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${escHtml(p.titulo)}</div>`).join('')}
         </div>` : ''}
         ${errores.length>0 ? `
         <div style="background:rgba(239,68,68,.04);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:14px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:600;color:#f87171;margin-bottom:8px">⚠️ Errors to avoid</div>
-          ${errores.slice(0,3).map(e=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${e.titulo}</div>`).join('')}
+          ${errores.slice(0,3).map(e=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${escHtml(e.titulo)}</div>`).join('')}
         </div>` : ''}
       </div>
 
@@ -1296,12 +1296,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           ${decisiones.map((d,i) => `<div style="position:relative;margin-bottom:16px">
             <div style="position:absolute;left:-20px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--blue);border:2px solid var(--bg)"></div>
             <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:8px;padding:12px 14px">
-              <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">${d.titulo}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">${escHtml(d.titulo)}</div>
               <div style="display:flex;gap:8px;margin-bottom:6px">
-                <span style="font-size:10px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:1px 6px">${d.area}</span>
+                <span style="font-size:10px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:1px 6px">${escHtml(d.area)}</span>
                 <span style="font-size:10px;color:var(--text3)">${d.confianza}</span>
               </div>
-              ${d.contenido && d.contenido.split('\n').find(l=>l.startsWith('Razón:')) ? `<div style="font-size:11px;color:var(--text2);line-height:1.5">${d.contenido.split('\n').find(l=>l.startsWith('Razón:')).replace('Razón:','').trim()}</div>` : ''}
+              ${d.contenido && d.contenido.split('\n').find(l=>l.startsWith('Razón:')) ? `<div style="font-size:11px;color:var(--text2);line-height:1.5">${escHtml(d.contenido.split('\n').find(l=>l.startsWith('Razón:')).replace('Razón:','').trim())}</div>` : ''}
             </div>
           </div>`).join('')}
         </div>`}
@@ -1451,6 +1451,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 </div>
 
 <script>
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 const NODES = ${JSON.stringify(nodes)};
 const EDGES = ${JSON.stringify(edges)};
 const M_NODES = ${JSON.stringify(mNodes)};
@@ -1568,7 +1569,7 @@ function renderNodeList(){
   const tl={error:T[lang].l_err,patron:T[lang].l_pat,decision:T[lang].l_dec};
   if(!filtered.length){list.innerHTML='<div class="empty-state">📭 No nodes found</div>';return;}
   list.innerHTML=filtered.map(n=>{
-    const title=n.titulo.length>48?n.titulo.slice(0,48)+'…':n.titulo;
+    const title=escHtml(n.titulo.length>48?n.titulo.slice(0,48)+'…':n.titulo);
     const isGod=(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
     const deg=DEGREE_MAP[n.id]||0;
     return \`<div class="nitem\${n.id===selectedNodeId?' selected':''}\${isGod?' god-node':''}" onclick="selectNode(\${n.id})" id="nitem-\${n.id}">
@@ -1606,7 +1607,7 @@ function showDetail(node){
   const relHTML=rels.map(r=>{
     const other=r.dir==='out'?nodeMap[r.hacia_id]:nodeMap[r.desde_id];
     if(!other)return'';
-    const t=other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo;
+    const t=escHtml(other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo);
     const relLabel=r.dir==='out'?r.tipo:'← '+r.tipo;
     return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${COLORS[other.tipo]||'#8b5cf6'};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${relLabel}</span></div>\`;
   }).filter(Boolean).join('');
@@ -1617,7 +1618,7 @@ function showDetail(node){
       \${isGod?'<span class="mb" style="background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid rgba(245,158,11,.3)">⚡ divine</span>':''}
       <span class="mb t-\${node.tipo}" style="font-size:11px;padding:3px 8px">\${node.tipo}</span>
       <span class="mb c\${node.confianza}" style="font-size:11px;padding:3px 8px">\${node.confianza}</span>
-      <span class="ab" style="font-size:11px;padding:3px 8px">\${node.area}</span>
+      <span class="ab" style="font-size:11px;padding:3px 8px">\${escHtml(node.area)}</span>
     </div>
     <div class="dp-section">
       <div class="dp-label">Connections · Confidence tag</div>
@@ -1628,7 +1629,7 @@ function showDetail(node){
       <div class="dp-val">\${node.aplicado}x applied · \${node.util}x useful</div>
       \${node.aplicado>0?'<div class="conf-progress"><div class="conf-progress-fill" style="width:'+confPct+'%;background:'+( confPct>=80?'#10b981':confPct>=50?'#f59e0b':'#ef4444')+'"></div></div>':''}
     </div>
-    \${cl?'<div class="dp-section"><div class="dp-label">Details</div><div class="dp-val" style="font-size:10px;background:var(--bg3);border-radius:6px;padding:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto">'+cl+'</div></div>':''}
+    \${cl?'<div class="dp-section"><div class="dp-label">Details</div><div class="dp-val" style="font-size:10px;background:var(--bg3);border-radius:6px;padding:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto">'+escHtml(cl)+'</div></div>':''}
     \${rels.length>0?'<div class="dp-section"><div class="dp-label">Connected nodes ('+rels.length+')</div>'+relHTML+'</div>':''}
   \`;
   document.getElementById('detail-panel').classList.add('visible');
@@ -1802,7 +1803,7 @@ function renderGraph(){
       const tt=document.getElementById('gtt');
       const deg=DEGREE_MAP[d.id]||0;
       const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
-      tt.innerHTML=\`<strong style="color:var(--text)">\${isGod?'⚡ ':''}\${d.titulo.slice(0,40)}\${d.titulo.length>40?'…':''}</strong><br><span style="color:var(--text3);font-size:10px">\${d.tipo} · \${d.area} · \${d.confianza} · \${deg} connections</span>\`;
+      tt.innerHTML=\`<strong style="color:var(--text)">\${isGod?'⚡ ':''}\${escHtml(d.titulo.slice(0,40))}\${d.titulo.length>40?'…':''}</strong><br><span style="color:var(--text3);font-size:10px">\${d.tipo} · \${escHtml(d.area)} · \${d.confianza} · \${deg} connections</span>\`;
       tt.style.opacity=1;
       const r=container.getBoundingClientRect();
       tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
@@ -1978,17 +1979,17 @@ function selectModule(label,area,d){
   html+='<div style="font-size:10px;color:var(--text3);margin-bottom:8px">'+(d?d.tipo==='impl'?'Done':'Pending':'')+'</div>';
   if(errs.length>0){
     html+='<div style="margin-bottom:8px"><div style="font-size:10px;color:#f87171;font-weight:600;margin-bottom:4px">Errors ('+errs.length+')</div>';
-    errs.slice(0,3).forEach(function(e){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+e.titulo.slice(0,42)+'</div>';});
+    errs.slice(0,3).forEach(function(e){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(e.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(pats.length>0){
     html+='<div style="margin-bottom:8px"><div style="font-size:10px;color:#34d399;font-weight:600;margin-bottom:4px">HIGH patterns ('+pats.length+')</div>';
-    pats.slice(0,3).forEach(function(p){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+p.titulo.slice(0,42)+'</div>';});
+    pats.slice(0,3).forEach(function(p){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(p.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(decs.length>0){
     html+='<div><div style="font-size:10px;color:#60a5fa;font-weight:600;margin-bottom:4px">Decisions ('+decs.length+')</div>';
-    decs.slice(0,2).forEach(function(dec){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+dec.titulo.slice(0,42)+'</div>';});
+    decs.slice(0,2).forEach(function(dec){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(dec.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(!errs.length&&!pats.length&&!decs.length) html+='<div style="font-size:11px;color:#64748b">No knowledge recorded yet.</div>';
