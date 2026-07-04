@@ -334,10 +334,11 @@ guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
 
 ### Regla de degradación (OBLIGATORIA — no rompe nada)
 La Legión es una **optimización, no un requisito**:
-- Si el entorno soporta sub-agentes en paralelo (Claude Code) → desplegar la Legión.
-- Si NO los soporta o es limitado (Cursor u otros) → correr esos pasos
-  **SECUENCIALMENTE** como siempre. El resultado debe ser **idéntico**, solo un poco
-  más lento. **Jamás bloquear, fallar ni cambiar el veredicto por no poder paralelizar.**
+- Si el entorno soporta sub-agentes en paralelo (Claude Code, Cursor — confirmado en
+  producción con benchmarks 100% Cursor desde el origen de Agentix) → desplegar la Legión.
+- Si NO los soporta o es más limitado (algún entorno específico sin esa capacidad) → correr
+  esos pasos **SECUENCIALMENTE** como siempre. El resultado debe ser **idéntico**, solo un
+  poco más lento. **Jamás bloquear, fallar ni cambiar el veredicto por no poder paralelizar.**
 
 ### Control (no es swarm)
 - Solo lectura/análisis/juicio en paralelo — nunca escritura.
