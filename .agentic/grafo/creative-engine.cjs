@@ -368,6 +368,7 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
         title: `${c.n} errores activos sin resolver en "${c.area}" — posible causa raíz común`,
         description: `Se acumularon ${c.n} errores distintos en el área "${c.area}" sin marcar como resueltos. Aunque se vean distintos, vale la pena revisar si comparten una misma causa de fondo antes de que sigan creciendo. Ejemplos:\n- ${examples.join('\n- ')}`,
         module: c.area,
+        area: c.area,
         risk_level: 'HIGH',
         evidence: [{ type: 'error_cluster', area: c.area, count: c.n, examples }],
       }, cicloId);

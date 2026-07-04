@@ -15,6 +15,8 @@ Cada ciclo `aa:` ejecuta este flujo sin pedir confirmación al usuario:
 ```
 aa: [tarea]
   ↓
+Context Enricher → node .agentic/grafo/context-enricher.cjs "[tarea]" → lee el brief
+  ↓
 ¿Es un sprint? → si contiene "sprint" → leer 09-sprint.md y ejecutar protocolo sprint
   ↓
 Context Guard → valida que pertenece al proyecto
@@ -50,6 +52,36 @@ aa: sprint → leer .agentic/agentes/09-sprint.md y ejecutar protocolo completo
 aa: sprint skip → saltar tarea actual del sprint y continuar con la siguiente
 aa: sprint abort → cancelar sprint, mantener lo completado
 ```
+
+---
+
+## CONTEXT ENRICHER — Paso 0, antes de cualquier otra cosa
+
+**Fase 1 del Sistema de Agentes Lite.** Antes de leer nada más, correr:
+
+```bash
+node .agentic/grafo/context-enricher.cjs "[tarea tal cual la escribió el usuario]"
+```
+
+Esto consulta memoria episódica/procedimental (BM25 + vectorial), contratos activos en
+las áreas relacionadas, y alertas pendientes de Creative Engine (incluye causa raíz
+recurrente — errores sin resolver acumulados en la misma área) — y devuelve un brief en
+Markdown. Leer ese brief e incorporarlo al razonamiento antes de seguir:
+
+- Si el **riesgo estimado es ALTO** → tratar la tarea con más cautela, doble-chequear antes
+  de tocar los archivos de esa área.
+- Si hay **avisos de contratos protegidos** → no romperlos en silencio, son código con
+  garantía activa.
+- Si hay **reglas ya establecidas** en el brief → seguirlas, no las reinventes ni las
+  contradigas sin razón.
+- Si el brief dice que **no hay contexto previo** → es territorio nuevo, documentar bien
+  las decisiones que se tomen para que el próximo ciclo sí tenga de dónde partir.
+
+**Regla no negociable: esto nunca bloquea el pipeline.** Si el script falla, no encuentra
+nada, o la memoria está vacía, igual imprime algo (aunque sea "sin contexto disponible") y
+sale con código 0. Si por lo que sea no corre o da error de cualquier tipo, seguir con el
+pipeline normal como si este paso no existiera — el enriquecimiento es un plus, nunca un
+requisito para poder trabajar.
 
 ---
 
