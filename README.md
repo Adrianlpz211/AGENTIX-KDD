@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.11.2-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.11.3-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -23,6 +23,9 @@ English · [Español](README.es.md)
 **Agentix KDD** isn't another AI that codes for you. It's the **armor** you put on the AI you already use — natively on **Claude Code and Cursor** — so it **remembers, doesn't break what was working, and doesn't contradict itself**.
 
 It lives **inside your project**: it reads your code, saves every decision and every error to a persistent memory, and uses all of it to make the next task safer than the last. You keep using your editor; Agentix shields it from underneath.
+
+> Agentix makes AI coding agents **remember, respect, and preserve the project as it evolves.**
+> It turns your project's own code into an **operational memory that governs the AI's future behavior.**
 
 > *KDD = Knowledge-Driven Development — development guided by the project's own accumulated knowledge. (npm package: `agentic-kdd`.)*
 

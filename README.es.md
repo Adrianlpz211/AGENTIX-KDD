@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.8.4-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.11.3-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -23,6 +23,9 @@
 **Agentix KDD** no es otra IA que programa por ti. Es la **armadura** que se le pone a la IA que ya usas — de forma nativa en **Claude Code y Cursor** — para que **recuerde, no rompa lo que funcionaba, y no se contradiga**.
 
 Vive **dentro de tu proyecto**: lee tu código, guarda cada decisión y cada error en una memoria persistente, y usa todo eso para que la siguiente tarea sea más segura que la anterior. Tú sigues con tu editor de siempre; Agentix lo blinda por debajo.
+
+> Agentix hace que la IA de código **recuerde, respete y preserve el proyecto mientras evoluciona.**
+> Convierte el código del proyecto en una **memoria operativa que gobierna el comportamiento futuro de la IA.**
 
 > *KDD = Knowledge-Driven Development — desarrollo guiado por el conocimiento acumulado del propio proyecto. (Paquete npm: `agentic-kdd`.)*
 

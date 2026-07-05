@@ -1,5 +1,20 @@
 # Changelog — Agentic KDD
 
+## [3.11.3] — 2026-07-05
+
+### Creative Engine — detección automática de errores resueltos
+- Nuevo tipo de sugerencia `ERROR_LIKELY_FIXED`: cada sync compara la tarea de
+  los últimos ciclos completados contra los errores que siguen `ACTIVO` en el
+  grafo, cruzando por palabras clave compartidas (no por área — área de ciclo
+  y área de error no siempre coinciden). Nunca cierra nada solo: deja una
+  sugerencia que se confirma con `creative-engine.cjs apply <id>`.
+- Al aplicarla, el nodo de error pasa a `estado='OBSOLETO'` — desaparece
+  automáticamente de todos los conteos/alertas de "errores activos" que ya
+  existían (cluster de causa raíz, dashboard, etc.) sin tocar cada uno aparte.
+- Fix: `applySuggestion()` bloqueaba la aplicación manual vía CLI en Nivel < 2
+  aunque su propio mensaje de error decía "aplícalo manualmente" — ahora
+  `apply <id>` (invocación explícita) ya no queda sujeto al gate de nivel.
+
 ## [3.8.4] — 2026-07-01
 
 ### 🛡️ MARK 6 — Escudo de seguridad (Security Gate reforzado)

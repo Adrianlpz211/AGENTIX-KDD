@@ -72,7 +72,28 @@ const SUGGESTION_TYPES = {
   OPPORTUNITY:      { label: 'Opportunity',       risk: 'LOW',    auto_apply_at: 2 },
   ARCHITECTURE:     { label: 'Architecture',      risk: 'HIGH',   auto_apply_at: null },
   ROOT_CAUSE:       { label: 'Root cause',        risk: 'HIGH',   auto_apply_at: null }, // nunca auto-aplica
+  ERROR_LIKELY_FIXED: { label: 'Error likely fixed', risk: 'MEDIUM', auto_apply_at: null }, // nunca auto-aplica — cambia estado en memoria, siempre requiere confirmación
 };
+
+// Mismo criterio de "palabras clave compartidas" que reasoning-bank.cjs usa para
+// fusionar estrategias parecidas — duplicado aquí (no importado) a propósito:
+// cada módulo de .agentic/grafo/ es standalone y se apaga solo si falla, nunca
+// se lleva a otro módulo consigo.
+const STOPWORDS = new Set([
+  'fix', 'real', 'critico', 'crítico', 'bug', 'error', 'feature', 'chore', 'ux', 'ui',
+  'de', 'la', 'el', 'en', 'no', 'se', 'y', 'a', 'un', 'una', 'del', 'con', 'para', 'por',
+  'que', 'los', 'las', 'al', 'sin', 'ya', 'su', 'lo', 'es', 'o', 'u', 'e',
+  'the', 'and', 'to', 'of', 'for', 'in', 'on', 'is', 'it', 'be', 'was', 'were', 'are',
+]);
+const MIN_SHARED_TOKENS = 2;
+
+function tokenize(s) {
+  return [...new Set((String(s || '').toLowerCase().match(/[a-z0-9áéíóúñü]{2,}/gi) || []))];
+}
+
+function significantTokens(s) {
+  return tokenize(s).filter(t => !STOPWORDS.has(t) && t.length >= 2);
+}
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
 
@@ -376,6 +397,56 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
     }
   } catch {}
 
+  // ── 6. Ciclo reciente coincide con error(es) activos → posible resuelto ──
+  // Cuando un ciclo soluciona un bug, casi nadie vuelve al grafo a marcar el
+  // nodo de error como resuelto — se queda ACTIVO para siempre aunque ya no
+  // exista. No cruzamos por área porque no coincide de forma confiable (ej.
+  // un fix de WhatsApp cae en ciclos.area='whatsapp' pero el error real quedó
+  // archivado en nodos.area='auth'); en vez de eso cruzamos por palabras clave
+  // compartidas entre la tarea del ciclo y el título del error — mismo umbral
+  // (>=2 tokens de dominio) que reasoning-bank.cjs usa para fusionar
+  // estrategias parecidas. Nunca marca nada solo: crea una sugerencia que hay
+  // que confirmar con `creative-engine.cjs apply <id>`.
+  try {
+    const recentCycles = db.prepare(`
+      SELECT id, tarea, area FROM ciclos
+      WHERE estado = 'COMPLETADO' AND tarea IS NOT NULL
+      ORDER BY fecha_inicio DESC LIMIT 5
+    `).all();
+
+    const activeErrors = db.prepare(`
+      SELECT id, titulo, area FROM nodos
+      WHERE tipo = 'error' AND estado = 'ACTIVO'
+      ORDER BY fecha_creacion DESC LIMIT 200
+    `).all();
+
+    for (const cycle of recentCycles) {
+      const cTerms = significantTokens(cycle.tarea);
+      if (cTerms.length < MIN_SHARED_TOKENS) continue;
+
+      const matches = [];
+      for (const node of activeErrors) {
+        const nTerms = significantTokens(node.titulo);
+        const shared = cTerms.filter(t => nTerms.includes(t));
+        if (shared.length >= MIN_SHARED_TOKENS) matches.push({ node, shared });
+      }
+      matches.sort((a, b) => b.shared.length - a.shared.length);
+
+      for (const { node, shared } of matches.slice(0, 3)) {
+        const s = addSuggestion(db, {
+          type: 'ERROR_LIKELY_FIXED',
+          title: `Ciclo #${cycle.id} parece resolver el error activo #${node.id}: "${node.titulo.slice(0, 70)}"`,
+          description: `La tarea del ciclo #${cycle.id} ("${cycle.tarea.slice(0, 140)}") comparte palabras clave (${shared.join(', ')}) con un error que sigue marcado ACTIVO en memoria. Si el fix realmente lo cubrió, aplica esta sugerencia para archivarlo como resuelto (pasa a OBSOLETO) — si no, descártala y no vuelve a aparecer.`,
+          module: node.area,
+          area: node.area,
+          risk_level: 'MEDIUM',
+          evidence: [{ type: 'cycle_fix_match', ciclo_id: cycle.id, error_node_id: node.id, shared_tokens: shared, area_ciclo: cycle.area, area_error: node.area }],
+        }, cicloId);
+        if (s) suggestions.push(s);
+      }
+    }
+  } catch {}
+
   return suggestions;
 }
 
@@ -385,7 +456,8 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
  * Aplica una sugerencia si es auto_aplicable y el nivel lo permite.
  * Level 2: aplica si blast_radius ≤ 3 y no toca contratos PROTECTED.
  */
-function applySuggestion(db, suggestionId, projectRoot, cicloId) {
+function applySuggestion(db, suggestionId, projectRoot, cicloId, opts = {}) {
+  const { manual = false } = opts;
   if (!db) return { applied: false, reason: 'DB unavailable' };
 
   const suggestion = db.prepare('SELECT * FROM creative_suggestions WHERE id = ?').get(suggestionId);
@@ -395,14 +467,18 @@ function applySuggestion(db, suggestionId, projectRoot, cicloId) {
 
   const level = getCurrentLevel(db, projectRoot);
 
-  // Verificar que el nivel permite auto-aplicar
-  if (level.level < 2 && !suggestion.auto_applicable) {
-    return { applied: false, reason: `Level ${level.level} (${level.name}) — apply manually or upgrade to Level 2` };
-  }
-
-  // Verificar blast radius
-  if (suggestion.blast_radius > 3) {
-    return { applied: false, reason: `Blast radius ${suggestion.blast_radius} > 3 — requires manual review` };
+  // Estos dos gates existen para el camino AUTOMÁTICO (runCreativePass decidiendo
+  // solo, sin humano de por medio). Cuando `manual` viene de un humano invocando
+  // `creative-engine.cjs apply <id>` explícitamente, ese comando YA ES la revisión
+  // manual que el mensaje de error pide — bloquearlo también sería contradictorio
+  // (nunca habría forma de aplicar nada por debajo de Nivel 2).
+  if (!manual) {
+    if (level.level < 2 && !suggestion.auto_applicable) {
+      return { applied: false, reason: `Level ${level.level} (${level.name}) — apply manually (creative-engine.cjs apply <id>) or upgrade to Level 2` };
+    }
+    if (suggestion.blast_radius > 3) {
+      return { applied: false, reason: `Blast radius ${suggestion.blast_radius} > 3 — requires manual review` };
+    }
   }
 
   // Marcar como aplicada
@@ -433,7 +509,29 @@ function applySuggestion(db, suggestionId, projectRoot, cicloId) {
     );
   } catch {}
 
-  return { applied: true, suggestion_id: suggestionId, level_used: level.level };
+  // Efecto real de un ERROR_LIKELY_FIXED: archivar el nodo de error en memoria.
+  // Se marca OBSOLETO (valor ya existente en el schema, no uno nuevo) para que
+  // desaparezca automáticamente de todas las consultas `estado='ACTIVO'` que ya
+  // existen en el proyecto (clusters de causa raíz, contadores del dashboard,
+  // etc.) sin tener que tocar cada una de ellas por separado.
+  if (suggestion.type === 'ERROR_LIKELY_FIXED') {
+    try {
+      const evidence = JSON.parse(suggestion.evidence || '[]');
+      const match = evidence.find(e => e.type === 'cycle_fix_match');
+      if (match && match.error_node_id) {
+        db.prepare(`
+          UPDATE nodos
+          SET estado = 'OBSOLETO',
+              ultima_validacion = datetime('now'),
+              fecha_update = datetime('now'),
+              contenido = COALESCE(contenido, '') || ?
+          WHERE id = ? AND tipo = 'error'
+        `).run(`\n\n[Marcado OBSOLETO por creative-engine — sugerencia ${suggestionId}, ciclo #${match.ciclo_id}]`, match.error_node_id);
+      }
+    } catch {}
+  }
+
+  return { applied: true, suggestion_id: suggestionId, level_used: level.level, manual };
 }
 
 // ─── REPORTE DE SUGERENCIAS ───────────────────────────────────────────────────
@@ -524,7 +622,7 @@ if (require.main === module) {
 
     case 'suggest': {
       const suggestions = getSuggestions(db, args[0]);
-      const icons = { FRAGILITY: '⚠️', MISSING_TEST: '🧪', REFACTOR: '🔧', PATTERN: '📐', OPPORTUNITY: '💡', ABSTRACTION: '🏗️', DEAD_CODE: '🗑️', SIMPLIFICATION: '✂️', ARCHITECTURE: '🏛️' };
+      const icons = { FRAGILITY: '⚠️', MISSING_TEST: '🧪', REFACTOR: '🔧', PATTERN: '📐', OPPORTUNITY: '💡', ABSTRACTION: '🏗️', DEAD_CODE: '🗑️', SIMPLIFICATION: '✂️', ARCHITECTURE: '🏛️', ROOT_CAUSE: '🕵️', ERROR_LIKELY_FIXED: '✅' };
       console.log(`\nCreative Suggestions${args[0] ? ` [${args[0]}]` : ''} (${suggestions.length}):\n`);
       suggestions.forEach(s => {
         const icon = icons[s.type] || '💡';
@@ -541,7 +639,7 @@ if (require.main === module) {
     case 'apply': {
       const id = args[0];
       if (!id) { console.error('Uso: creative-engine.cjs apply <suggestion_id>'); break; }
-      const result = applySuggestion(db, id, projectRoot, `manual-${Date.now()}`);
+      const result = applySuggestion(db, id, projectRoot, `manual-${Date.now()}`, { manual: true });
       console.log(result.applied
         ? `✅ Applied suggestion ${id}`
         : `❌ Not applied: ${result.reason}`
