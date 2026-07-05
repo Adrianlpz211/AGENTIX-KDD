@@ -65,6 +65,35 @@ Sobre esa memoria corren los **gates** que protegen tu trabajo:
 
 ---
 
+## Despacho de sub-agentes — con correa, no un swarm aparte
+
+Sobre el pipeline secuencial, Agentix puede desplegar sub-agentes especializados en
+paralelo para 3 momentos concretos del ciclo `aa:` — reusando exactamente el mismo
+mecanismo que ya usaba `audit: auditar` (el asistente invocando su propia herramienta de
+sub-agentes varias veces en un mensaje), sin infraestructura nueva ni depender de un
+swarm externo.
+
+1. **Context Enricher** — antes de que arranque cualquier `aa:`, consulta memoria
+   episódica/procedimental, contratos activos y alertas pendientes, y le entrega al
+   pipeline un brief de riesgo en vez de una tarea pelada. Nunca bloquea: si no encuentra
+   nada, el pipeline sigue exactamente igual que antes.
+2. **Front/Back en paralelo** — cuando una tarea de verdad necesita frontend y backend a
+   la vez, y sus archivos no se cruzan, los dos se construyen al mismo tiempo en vez de
+   que uno dispare al otro — mismo mecanismo de sub-agentes, con verificación explícita
+   de que ningún archivo lo toquen los dos.
+3. **QA con 4 lentes** — antes de aprobar una fase, corren 4 revisores independientes en
+   paralelo (seguridad, decisiones/patrones, errores conocidos, cumplimiento de spec) en
+   vez de un solo criterio juzgando todo. En una prueba real, esto encontró un bug de
+   concurrencia en un fix de sesión de WhatsApp que una revisión de un solo autor se
+   había saltado — el diff se veía bien por sí solo; el bug solo apareció al cruzarlo
+   contra el código fuente de la librería externa.
+
+Misma regla de degradación que todo lo demás aquí: si el entorno no soporta sub-agentes
+en paralelo, cae a secuencial — mismo resultado, solo más lento, nunca se rompe por no
+poder paralelizar.
+
+---
+
 ## Inicio rápido
 
 ```bash
@@ -273,6 +302,8 @@ En una prueba de 19 fases construyendo un SaaS multi-tenant real (mismo modelo C
 Agentix es software **joven y en evolución**. Se auditaron los 48 archivos del motor y se repararon **30+ bugs** (memoria, gates, búsqueda vectorial, publicación). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
 
 Lo que **sí funciona hoy**: el pipeline `aa:`, el registro automático de ciclos y contratos (vía gatillo de git), la memoria persistente con búsqueda semántica real, los gates (Spec / Regression / TDD / Security), el dashboard con métricas reales, el servidor MCP y la coordinación multi-instancia.
+
+**El despacho de sub-agentes es más nuevo (v3.10–v3.11)** y cada pieza tiene un nivel de confianza distinto: Context Enricher y QA con 4 lentes están **confirmados contra tareas reales** (el de QA encontró de hecho un bug real de concurrencia que una revisión de un solo autor se había saltado). Front/Back en paralelo está implementado y conectado con el mismo mecanismo, pero todavía no tiene una confirmación limpia de que se dispare en paralelo de verdad en el mundo real — la única prueba real salió con un solo autor, por razones defendibles (una feature chica y muy acoplada), no por un bug conocido. Trátalo como "debería funcionar" y no como "comprobado" hasta que se confirme con una tarea que de verdad separe front de back.
 
 ---
 

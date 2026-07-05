@@ -111,6 +111,27 @@ Instructions in `.agentic/agentes/` — these define HOW each agent behaves insi
 | `09-sprint.md` | Chains multiple tasks with shared memory |
 | `pro/` | Specialized agents: review, refactor, test, doc |
 
+### How parallel dispatch actually works (v3.10–v3.11)
+
+There is **no JavaScript orchestration engine** deciding when to run agents in parallel —
+this is a common misreading of the architecture. `audit: auditar`, the QA 4-lens review,
+and the Front/Back parallel path all work the same way: **imperative instructions in the
+root `CLAUDE.md`** (the one file every compatible assistant loads automatically, without
+being asked) tell the assistant to invoke its own sub-agent tool (Task/Agent in Claude
+Code, the equivalent in Cursor) multiple times in a single message, one persona file per
+invocation. The assistant itself is the "engine" — the `.agentic/agentes/*.md` files are
+prompts it reads, not modules a scheduler calls.
+
+This matters for anyone extending the system: adding a new "agent" almost never means
+writing a `.js` file that gets invoked by pipeline code — it means (1) writing a new
+persona `.md` file, and (2) adding an imperative, mechanical trigger for it directly in
+`CLAUDE.md` (not just in `01-orquestador.md` or another sub-file, which the assistant
+isn't guaranteed to re-read before every task). The one exception: `.agentic/grafo/
+context-enricher.cjs` is real Node.js code — it's a **helper tool** the assistant is
+instructed to run via shell (Step 0 of `## CUANDO VES aa:` in `CLAUDE.md`), not an
+autonomous agent itself. It queries memory deterministically and prints a Markdown brief;
+the assistant reads that output and reasons over it.
+
 ---
 
 ## Memory Schema — 4-layer CoALA

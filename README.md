@@ -65,6 +65,33 @@ On top of that memory run the **gates** that protect your work:
 
 ---
 
+## Multi-agent dispatch — sub-agents on a leash, not a separate swarm
+
+On top of the sequential pipeline, Agentix can dispatch specialized sub-agents in
+parallel for three specific moments in the `aa:` cycle — reusing the exact same
+mechanism `audit: auditar` already used (the assistant invoking its own sub-agent tool
+several times in one message), with no new infrastructure and no external swarm
+dependency.
+
+1. **Context Enricher** — before any `aa:` starts, queries episodic/procedural memory,
+   active contracts and pending alerts, and hands the pipeline a risk brief instead of a
+   bare task. Never blocks: if it finds nothing, the pipeline continues exactly as before.
+2. **Parallel front/back** — when a task genuinely needs both frontend and backend, and
+   their files don't overlap, both get built at the same time instead of one triggering
+   the other — same sub-agent mechanism, with an explicit check that no file gets touched
+   by both.
+3. **4-lens QA** — before approving a phase, 4 independent reviewers run in parallel
+   (security, decisions/patterns, known errors, spec compliance) instead of one pass
+   judging everything. In a real test, this caught a concurrency bug in a WhatsApp
+   session fix that a single-reviewer pass had missed — the diff looked fine on its own;
+   the bug only showed up when cross-checking it against the upstream library's source.
+
+Same degradation rule as everything else here: if the environment doesn't support
+parallel sub-agents, it falls back to sequential — identical result, just slower, never
+breaks because it can't parallelize.
+
+---
+
 ## Quick start
 
 ```bash
@@ -273,6 +300,8 @@ Across a 19-phase run building a real multi-tenant SaaS (same Claude model in bo
 Agentix is **young, evolving software**. All 48 engine files were audited and **30+ bugs were fixed** (memory, gates, vector search, packaging). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
 What **does work today**: the `aa:` pipeline, automatic registration of cycles and contracts (via the git hook), persistent memory with real semantic search, the gates (Spec / Regression / TDD / Security), the dashboard with real metrics, the MCP server, and multi-instance coordination.
+
+**Multi-agent dispatch is newer (v3.10–v3.11)** and each piece has a different confidence level: Context Enricher and 4-lens QA are **confirmed against real tasks** (the 4-lens QA specifically caught a real concurrency bug a single-reviewer pass had missed). Parallel front/back is implemented and wired the same way, but hasn't yet had a clean real-world confirmation of actually triggering in parallel — the one real test went single-author, for defensible reasons (a small, tightly-coupled feature), not a known bug. Treat it as "should work" rather than "proven" until it's confirmed on a genuinely split front+back task.
 
 ---
 
