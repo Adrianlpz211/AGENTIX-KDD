@@ -436,7 +436,7 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
         const s = addSuggestion(db, {
           type: 'ERROR_LIKELY_FIXED',
           title: `Ciclo #${cycle.id} parece resolver el error activo #${node.id}: "${node.titulo.slice(0, 70)}"`,
-          description: `La tarea del ciclo #${cycle.id} ("${cycle.tarea.slice(0, 140)}") comparte palabras clave (${shared.join(', ')}) con un error que sigue marcado ACTIVO en memoria. Si el fix realmente lo cubrió, aplica esta sugerencia para archivarlo como resuelto (pasa a OBSOLETO) — si no, descártala y no vuelve a aparecer.`,
+          description: `La tarea del ciclo #${cycle.id} ("${cycle.tarea.slice(0, 140)}") comparte palabras clave (${shared.join(', ')}) con un error que sigue marcado ACTIVO en memoria. Si el fix realmente lo cubrió, aplica esta sugerencia para marcarlo RESUELTO — si no, descártala y no vuelve a aparecer.`,
           module: node.area,
           area: node.area,
           risk_level: 'MEDIUM',
@@ -448,6 +448,42 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
   } catch {}
 
   return suggestions;
+}
+
+// ─── MARCAR RESUELTO EN LA FUENTE (.md) ───────────────────────────────────────
+
+/**
+ * .agentic/memoria/errores.md es la fuente de verdad real — grafo.cjs
+ * `sincronizar()` reconstruye `nodos` releyéndolo en cada sync (ver
+ * parsearEntradas/sincronizar en grafo.cjs). Si solo tocamos SQLite, el
+ * siguiente sync revierte el cambio porque el .md sigue diciendo "Estado: ACTIVO".
+ * Busca la sección `## <titulo>` (match exacto, mismo criterio que usa
+ * parsearEntradas para extraer el título) y actualiza sus campos in-place.
+ */
+function marcarResueltoEnMarkdown(projectRoot, titulo, nota) {
+  try {
+    const mdPath = path.join(projectRoot, '.agentic/memoria/errores.md');
+    if (!fs.existsSync(mdPath)) return false;
+    const content = fs.readFileSync(mdPath, 'utf8');
+    const header = `## ${titulo}`;
+    const start = content.indexOf(header);
+    if (start === -1) return false;
+
+    const bodyStart = start + header.length;
+    let end = content.indexOf('\n## ', bodyStart);
+    if (end === -1) end = content.length;
+
+    const hoy = new Date().toISOString().slice(0, 10);
+    const block = content.slice(bodyStart, end).split('\n').map(line => {
+      if (/^Estado:/.test(line)) return 'Estado: RESUELTO';
+      if (/^(Última validación|Ultima validacion):/.test(line)) return `Última validación: ${hoy}`;
+      if (/^(Solución|Solucion):/.test(line) && /pendiente/i.test(line)) return `Solución: ${nota}`;
+      return line;
+    }).join('\n');
+
+    fs.writeFileSync(mdPath, content.slice(0, bodyStart) + block + content.slice(end), 'utf8');
+    return true;
+  } catch { return false; }
 }
 
 // ─── APLICAR SUGERENCIA ───────────────────────────────────────────────────────
@@ -510,23 +546,34 @@ function applySuggestion(db, suggestionId, projectRoot, cicloId, opts = {}) {
   } catch {}
 
   // Efecto real de un ERROR_LIKELY_FIXED: archivar el nodo de error en memoria.
-  // Se marca OBSOLETO (valor ya existente en el schema, no uno nuevo) para que
-  // desaparezca automáticamente de todas las consultas `estado='ACTIVO'` que ya
-  // existen en el proyecto (clusters de causa raíz, contadores del dashboard,
-  // etc.) sin tener que tocar cada una de ellas por separado.
+  // Se marca RESUELTO — no OBSOLETO — porque esa es la convención que YA usa
+  // este proyecto para "error corregido" (17 nodos reales resueltos a mano vía
+  // `aa: aprende` ya la usan); OBSOLETO tiene otro significado ya ocupado (decay
+  // automático de nodos viejos de baja confianza nunca aplicados, ver grafo.cjs).
+  //
+  // Crítico: `nodos` NO es la fuente de verdad — grafo.cjs `sincronizar()` la
+  // reconstruye en cada sync releyendo .agentic/memoria/errores.md y pisa
+  // `estado`/`contenido` con lo que diga el .md. Confirmado con un caso real:
+  // un UPDATE que solo tocaba SQLite volvió solo a ACTIVO en el siguiente sync.
+  // Por eso este bloque edita TAMBIÉN el .md — sin eso el "resuelto" no sobrevive.
   if (suggestion.type === 'ERROR_LIKELY_FIXED') {
     try {
       const evidence = JSON.parse(suggestion.evidence || '[]');
       const match = evidence.find(e => e.type === 'cycle_fix_match');
       if (match && match.error_node_id) {
-        db.prepare(`
-          UPDATE nodos
-          SET estado = 'OBSOLETO',
-              ultima_validacion = datetime('now'),
-              fecha_update = datetime('now'),
-              contenido = COALESCE(contenido, '') || ?
-          WHERE id = ? AND tipo = 'error'
-        `).run(`\n\n[Marcado OBSOLETO por creative-engine — sugerencia ${suggestionId}, ciclo #${match.ciclo_id}]`, match.error_node_id);
+        const node = db.prepare("SELECT titulo FROM nodos WHERE id = ? AND tipo = 'error'").get(match.error_node_id);
+        if (node) {
+          const nota = `Resuelto por el ciclo #${match.ciclo_id} (confirmado vía creative-engine, sugerencia ${suggestionId}).`;
+          db.prepare(`
+            UPDATE nodos
+            SET estado = 'RESUELTO',
+                ultima_validacion = datetime('now'),
+                fecha_update = datetime('now'),
+                contenido = COALESCE(contenido, '') || ?
+            WHERE id = ? AND tipo = 'error'
+          `).run(`\n\n[${nota}]`, match.error_node_id);
+          marcarResueltoEnMarkdown(projectRoot, node.titulo, nota);
+        }
       }
     } catch {}
   }

@@ -8,12 +8,18 @@
   grafo, cruzando por palabras clave compartidas (no por área — área de ciclo
   y área de error no siempre coinciden). Nunca cierra nada solo: deja una
   sugerencia que se confirma con `creative-engine.cjs apply <id>`.
-- Al aplicarla, el nodo de error pasa a `estado='OBSOLETO'` — desaparece
+- Al aplicarla, el nodo de error pasa a `estado='RESUELTO'` (la misma convención
+  que ya usaban los fixes marcados a mano vía `aa: aprende`) — desaparece
   automáticamente de todos los conteos/alertas de "errores activos" que ya
   existían (cluster de causa raíz, dashboard, etc.) sin tocar cada uno aparte.
 - Fix: `applySuggestion()` bloqueaba la aplicación manual vía CLI en Nivel < 2
   aunque su propio mensaje de error decía "aplícalo manualmente" — ahora
   `apply <id>` (invocación explícita) ya no queda sujeto al gate de nivel.
+- Fix (encontrado probando contra datos reales): la primera versión solo
+  actualizaba SQLite, y `grafo.cjs sincronizar()` la revertía en el siguiente
+  sync porque reconstruye `nodos` releyendo `.agentic/memoria/errores.md` (la
+  fuente de verdad real). Ahora también edita el `.md` — confirmado que el
+  cambio sobrevive un `sync` real.
 
 ## [3.8.4] — 2026-07-01
 
