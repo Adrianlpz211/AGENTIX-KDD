@@ -309,7 +309,7 @@ resultados de forma determinista**. En los pasos de **MANOS** (escribir código,
 guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
 
 ### Dónde SÍ (ojos)
-- **Analista** → exploración en paralelo (ver `.agentic/agentes/02-analista.md`, MODO LEGIÓN).
+- **Analista** → exploración en paralelo con piso objetivo (v3.11.5): si la tarea afecta ≤ 2 archivos no críticos y el cambio es cosmético/textual, explora sin sub-agentes (solo `grafo.cjs buscar` inline). Si no → 4 sub-agentes en paralelo. Ver `.agentic/agentes/02-analista.md`, MODO LEGIÓN.
 - **QA / Review — proporcional al tamaño real, con un piso objetivo (Fase 3, v3.11.2 → v3.11.4):**
   en el Paso 4 (Review KDD) de `.agentic/agentes/05-qa.md`, después de que los tests pasan y
   ANTES de aprobar la fase, mide el changeset real (el mismo diff que ya usa `tdd-gate.cjs` vía

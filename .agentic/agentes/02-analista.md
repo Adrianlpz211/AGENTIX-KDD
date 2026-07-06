@@ -320,6 +320,25 @@ Los lookups del "Orden final de lectura" (buscar, impacto, AST, ADRs, gotchas,
 spec, causales) son **independientes entre sí** → se pueden correr EN PARALELO.
 Solo aplica a esta fase de **exploración** (leer/analizar). NUNCA para escribir código.
 
+### Piso objetivo — ¿4 sub-agentes o exploración propia? (v3.11.5)
+Antes de desplegar la Legión, evalúa la tarea. Es **TRIVIAL** — exploras tú mismo,
+sin sub-agentes, pasando directo a planificar — SOLO si TODO esto es cierto:
+  1. La tarea afecta ≤ 2 archivos (según descripción o clasificación del Orquestador)
+  2. Ninguno de esos archivos aparece en CRITICAL/SENSITIVE del SECURITY GATE
+     (auth, middleware, .env, secrets, jwt, token, routes/, lib/prisma)
+  3. El cambio es cosmético o textual: rename, label, string literal, CSS, typo, comentario
+     — O el Orquestador lo clasificó con impacto BAJO y el archivo ya está identificado
+  4. No existe spec activo del módulo en `.agentic/specs/` que pueda ser contradicted
+
+Si TRIVIAL: corre solo `grafo.cjs buscar "[tarea]" [área]` inline (sin sub-agentes).
+Es suficiente contexto para un cambio de ese tamaño — si no hay nada en memoria,
+planifica directo sin más lookups.
+
+Si falla UNA sola condición → Legión completa, sin excepción.
+Evalúas la descripción de la tarea (no un diff, que aún no existe). Ante la duda → Legión
+completa. Equivocarse hacia la cautela no cuesta nada; análisis incompleto en un cambio
+con riesgo real sí lo hace.
+
 ### Si tu entorno soporta sub-agentes en paralelo (ej. Claude Code)
 Despliega hasta **4 sub-agentes concurrentes**, cada uno con un encargo autónomo, y
 que devuelva un **resumen compacto** (no volcar archivos crudos):
