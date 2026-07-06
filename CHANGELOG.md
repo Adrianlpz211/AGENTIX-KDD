@@ -1,5 +1,23 @@
 # Changelog — Agentic KDD
 
+## [3.11.4] — 2026-07-05
+
+### QA de 4 lentes ahora es proporcional al tamaño real del cambio
+- La regla de v3.11.2 hacía la Legión de QA (4 sub-agentes en paralelo)
+  obligatoria para **cualquier** cambio, sin importar el tamaño — un fix de
+  una línea disparaba lo mismo que un cambio de 300 líneas en `auth`. Eso
+  no era robustez, era desproporción, y costaba tiempo real en cada tarea.
+- Ahora el Paso 4 (Review KDD) mide el diff real de la fase (mismo mecanismo
+  que ya usa `tdd-gate.cjs`) contra un piso **objetivo y numérico**: ≤2
+  archivos, ≤20 líneas, ningún archivo CRITICAL/SENSITIVE, ningún valor de
+  negocio del SPEC GATE. Si el changeset es así de chico, se revisa en una
+  sola pasada sin sub-agentes — sigue siendo revisión real, no se salta.
+  Si falla cualquiera de esas condiciones, corre la Legión completa igual
+  que antes, sin excepción.
+- El criterio es deliberadamente numérico y no "a juicio": la versión
+  anterior a v3.11.2 decía "si parece riesgoso" y nunca se disparaba en la
+  práctica — un número no se puede racionalizar para saltárselo.
+
 ## [3.11.3] — 2026-07-05
 
 ### Creative Engine — detección automática de errores resueltos

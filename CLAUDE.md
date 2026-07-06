@@ -310,18 +310,33 @@ guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
 
 ### Dónde SÍ (ojos)
 - **Analista** → exploración en paralelo (ver `.agentic/agentes/02-analista.md`, MODO LEGIÓN).
-- **QA / Review — IMPERATIVO, NO OPCIONAL (Fase 3, v3.11.2):** en el Paso 4 (Review KDD)
-  de `.agentic/agentes/05-qa.md`, después de que los tests pasan y ANTES de aprobar la
-  fase, **NO revises el cambio tú mismo con un solo criterio.** Tienes que invocar tu
+- **QA / Review — proporcional al tamaño real, con un piso objetivo (Fase 3, v3.11.2 → v3.11.4):**
+  en el Paso 4 (Review KDD) de `.agentic/agentes/05-qa.md`, después de que los tests pasan y
+  ANTES de aprobar la fase, mide el changeset real (el mismo diff que ya usa `tdd-gate.cjs` vía
+  `git-context.cjs`) y decide con un criterio MEDIBLE — no con "¿esto parece riesgoso?". Esa
+  pregunta subjetiva YA falló una vez en este proyecto (nunca se disparaba, el agente siempre
+  se convencía de que no hacía falta), así que no se puede volver a usar como criterio.
+
+  **Es TRIVIAL (revisa tú mismo, en una sola pasada, sin sub-agentes) SOLO si TODO esto es cierto:**
+    1. ≤ 2 archivos tocados en el diff de esta fase
+    2. ≤ 20 líneas cambiadas en total (agregadas + eliminadas)
+    3. Ningún archivo del diff aparece en la lista CRITICAL o SENSITIVE del SECURITY GATE
+    4. La tarea no toca ninguno de los valores de negocio que vigila el SPEC GATE
+  Sigue siendo una revisión real — no es saltártela, es hacerla tú en vez de con 4 lentes.
+
+  **Si falla UNA sola de esas 4 condiciones → el proceso completo, sin excepción:** invoca tu
   herramienta de sub-agentes (Task/Agent) **4 VECES, en el mismo mensaje** — un lente por
-  invocación (seguridad, decisiones/patrones, errores, spec — ver el detalle de cada uno
-  en `05-qa.md` MODO LEGIÓN), cada uno con SOLO el diff/changeset de esta fase, ninguno
-  toca código. Espera los 4 resultados, verifica tú mismo cualquier hallazgo HIGH/BLOCKER
-  antes de confiar en un solo lente (no te fíes a ciegas de un subagente en algo de fondo),
-  y fusiona el veredicto de forma determinista — igual que ya haces con `audit:`. Esto
-  aplica siempre en el Paso 4, no solo si "parece" riesgoso — el bug real que esto
-  encontró (fix incompleto de una race de concurrencia en sesión de WhatsApp) no se veía
-  leyendo el diff superficial, se vio cruzando 4 ángulos distintos contra la fuente.
+  invocación (seguridad, decisiones/patrones, errores, spec — ver el detalle de cada uno en
+  `05-qa.md` MODO LEGIÓN), cada uno con SOLO el diff/changeset de esta fase, ninguno toca código.
+  Espera los 4 resultados, verifica tú mismo cualquier hallazgo HIGH/BLOCKER antes de confiar en
+  un solo lente, y fusiona el veredicto de forma determinista — igual que ya haces con `audit:`.
+  El bug real que esto encontró (fix incompleto de una race de concurrencia en sesión de
+  WhatsApp) no se veía leyendo el diff superficial, se vio cruzando 4 ángulos distintos contra
+  la fuente — por eso el piso de los 4 lentes nunca se salta cuando el changeset no es
+  objetivamente trivial. La diferencia con v3.11.2: antes esto corría SIEMPRE, para cualquier
+  tamaño — un fix de una línea disparaba 4 sub-agentes igual que un cambio de 300 líneas en
+  auth. Eso no era robustez, era desproporción — costaba tiempo real sin ganar nada donde el
+  riesgo objetivamente no está.
 - **audit:** → ya es Legión (7 subagentes en paralelo).
 
 ### Dónde NO (manos) — con una excepción condicional (Fase 2, v3.11.1)
