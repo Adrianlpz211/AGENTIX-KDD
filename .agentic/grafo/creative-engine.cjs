@@ -581,6 +581,89 @@ function applySuggestion(db, suggestionId, projectRoot, cicloId, opts = {}) {
   return { applied: true, suggestion_id: suggestionId, level_used: level.level, manual };
 }
 
+// ─── AUTO-CONFIRMAR ERRORES PROBABLEMENTE RESUELTOS ────────────────────────────
+
+/**
+ * Confirma automáticamente sugerencias ERROR_LIKELY_FIXED que llevan más de
+ * `maxAgeDays` días pendientes sin que el error haya reaparecido con tokens
+ * similares. Se llama en runCreativePass() y también vía CLI `auto-confirm`.
+ */
+function autoConfirmStaleErrorFixes(db, projectRoot, maxAgeDays) {
+  maxAgeDays = maxAgeDays || 3;
+  if (!db) return [];
+  const confirmed = [];
+  try {
+    const stale = db.prepare(`
+      SELECT * FROM creative_suggestions
+      WHERE type = 'ERROR_LIKELY_FIXED'
+        AND applied = 0 AND dismissed = 0
+        AND created_at < datetime('now', '-' || ? || ' days')
+    `).all(maxAgeDays);
+
+    for (const s of stale) {
+      let evidence;
+      try { evidence = JSON.parse(s.evidence || '[]'); } catch { continue; }
+      const match = evidence.find(function(e){ return e.type === 'cycle_fix_match'; });
+      if (!match || !match.error_node_id) continue;
+
+      const errorNode = db.prepare(
+        "SELECT titulo FROM nodos WHERE id = ? AND tipo = 'error'"
+      ).get(match.error_node_id);
+      if (!errorNode) continue;
+
+      const errorTerms = significantTokens(errorNode.titulo);
+      if (errorTerms.length < MIN_SHARED_TOKENS) continue;
+
+      // Verificar que el error no haya reaparecido con título similar
+      // desde que se generó la sugerencia
+      const recentErrors = db.prepare(`
+        SELECT titulo FROM nodos
+        WHERE tipo = 'error' AND estado = 'ACTIVO'
+          AND fecha_creacion > ? AND id != ?
+      `).all(s.created_at, match.error_node_id);
+
+      const recurred = recentErrors.some(function(row) {
+        const shared = errorTerms.filter(function(t){
+          return significantTokens(row.titulo).indexOf(t) !== -1;
+        });
+        return shared.length >= MIN_SHARED_TOKENS;
+      });
+
+      if (recurred) continue;
+
+      const result = applySuggestion(db, s.id, projectRoot, 'auto-confirm-stale', { manual: true });
+      if (result.applied) confirmed.push({ id: s.id, title: s.title });
+    }
+  } catch {}
+  return confirmed;
+}
+
+// ─── AGRUPAR ERRORES POR SIMILITUD ────────────────────────────────────────────
+
+/**
+ * Agrupa una lista de errores en clusters por tokens compartidos.
+ * Mismo umbral (MIN_SHARED_TOKENS) que usa ROOT_CAUSE detection.
+ */
+function clusterErrors(errors) {
+  const clusters = [];
+  const assigned = new Set();
+  for (let i = 0; i < errors.length; i++) {
+    if (assigned.has(i)) continue;
+    const cluster = [errors[i]];
+    assigned.add(i);
+    const ti = significantTokens(errors[i].titulo);
+    for (let j = i + 1; j < errors.length; j++) {
+      if (assigned.has(j)) continue;
+      const shared = ti.filter(function(t){
+        return significantTokens(errors[j].titulo).indexOf(t) !== -1;
+      });
+      if (shared.length >= MIN_SHARED_TOKENS) { cluster.push(errors[j]); assigned.add(j); }
+    }
+    clusters.push(cluster);
+  }
+  return clusters.sort(function(a, b){ return b.length - a.length; });
+}
+
 // ─── REPORTE DE SUGERENCIAS ───────────────────────────────────────────────────
 
 function getSuggestions(db, module) {
@@ -616,6 +699,10 @@ function runCreativePass(db, projectRoot, cicloId, context = {}) {
 
   const autoApplied = [];
 
+  // Auto-confirmar ERROR_LIKELY_FIXED con ≥3 días sin recurrencia
+  const autoConfirmed = autoConfirmStaleErrorFixes(db, projectRoot, 3);
+  for (const c of autoConfirmed) autoApplied.push(c.id);
+
   // En nivel 2+, aplicar auto-aplicables
   if (level.level >= 2) {
     const autoApplicable = db.prepare(`
@@ -637,6 +724,7 @@ function runCreativePass(db, projectRoot, cicloId, context = {}) {
     level_source: level.source,
     new_suggestions: suggestions.length,
     auto_applied: autoApplied.length,
+    auto_confirmed_errors: autoConfirmed.length,
     contracts_needed_for_level2: level.contracts_needed || 0,
   };
 }
@@ -724,8 +812,51 @@ if (require.main === module) {
       break;
     }
 
+    case 'auto-confirm': {
+      const maxDays = parseInt(args[0]) || 3;
+      const confirmed = autoConfirmStaleErrorFixes(db, projectRoot, maxDays);
+      if (confirmed.length === 0) {
+        console.log(`\n✅ auto-confirm: ningún error pendiente supera los ${maxDays} días sin recurrencia.\n`);
+      } else {
+        console.log(`\n✅ auto-confirm: ${confirmed.length} error(es) marcados como RESUELTO:\n`);
+        confirmed.forEach(function(c){ console.log(`   • [${c.id}] ${c.title}`); });
+        console.log();
+      }
+      break;
+    }
+
+    case 'resolve-errors': {
+      const area = args[0] || null;
+      if (!db) { console.log('No hay base de datos disponible.'); break; }
+      const query = area
+        ? "SELECT id, titulo, area, fecha_creacion FROM nodos WHERE tipo='error' AND estado='ACTIVO' AND area=? ORDER BY fecha_creacion DESC"
+        : "SELECT id, titulo, area, fecha_creacion FROM nodos WHERE tipo='error' AND estado='ACTIVO' ORDER BY fecha_creacion DESC";
+      const errors = area ? db.prepare(query).all(area) : db.prepare(query).all();
+      if (errors.length === 0) {
+        console.log(`\n✅ No hay errores activos${area ? ` en área "${area}"` : ''}.\n`);
+        break;
+      }
+      const clusters = clusterErrors(errors);
+      console.log(`\n╔══════════════════════════════════════════════════╗`);
+      console.log(`║  Resolver Errores${area ? ` — ${area}` : ''}  (${errors.length} activos, ${clusters.length} grupo${clusters.length !== 1 ? 's' : ''})`);
+      console.log(`╚══════════════════════════════════════════════════╝\n`);
+      clusters.forEach(function(cluster, i) {
+        console.log(`  Grupo ${i + 1} (${cluster.length} error${cluster.length !== 1 ? 'es' : ''}):`);
+        cluster.forEach(function(e){ console.log(`    • ${e.titulo} [${e.area || 'global'}]`); });
+        console.log();
+      });
+      console.log('─────────────────────────────────────────────────');
+      const taskList = clusters.map(function(cluster, i){
+        return `${i + 1}. Resolver grupo "${cluster[0].titulo}" (${cluster.length} error${cluster.length !== 1 ? 'es' : ''})`;
+      }).join('\n');
+      const sprintArea = area || (errors[0] && errors[0].area) || 'proyecto';
+      console.log(`\nSprint sugerido para resolver todos:\n`);
+      console.log(`aa: sprint — resolver errores en ${sprintArea}\n${taskList}\n`);
+      break;
+    }
+
     default:
-      console.log('Uso: node creative-engine.cjs [level | suggest [module] | apply <id> | dismiss <id> | wins | run]');
+      console.log('Uso: node creative-engine.cjs [level | suggest [module] | apply <id> | dismiss <id> | wins | run | auto-confirm [days] | resolve-errors [area]]');
   }
 }
 
@@ -738,6 +869,8 @@ module.exports = {
   runCreativePass,
   getSuggestions,
   getCreativeWins,
+  autoConfirmStaleErrorFixes,
+  clusterErrors,
   LEVEL_NAMES,
   SUGGESTION_TYPES,
 };

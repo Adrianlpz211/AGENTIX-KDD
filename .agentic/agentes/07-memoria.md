@@ -134,6 +134,19 @@ Al terminar CADA ciclo `aa:`, ejecutas esto en orden sin excepción:
 node .agentic/grafo/grafo.cjs sync
 ```
 
+```markdown
+// 1b. OBLIGATORIO antes de rellenar el JSON: leer la sección "KDD aplicado" del PLAN.md
+//     y extraer las listas concretas para patrones_aplicados y errores_evitados.
+//     Si PLAN.md no existe o la sección está vacía → usar arrays vacíos, no inventar.
+//
+//     Sección a leer en PLAN.md:
+//     ## KDD aplicado (cargado selectivamente)
+//     Patrones ALTA confianza: [lista]            → usar como patrones_aplicados
+//     Patrones área [módulo]: [lista]             → agregar a patrones_aplicados
+//     Errores a evitar área [módulo]: [lista]     → usar como errores_evitados
+//     Decisiones relevantes: [lista]              → usar como decisiones_usadas
+```
+
 ```javascript
 // 2. Registrar ciclo — SIEMPRE usando archivo temporal (funciona en PowerShell, CMD y bash)
 // Crear archivo .agentic/_ciclo_tmp.json con los datos del ciclo:
@@ -147,8 +160,8 @@ const datos = {
   context_guard: "OK | CONCEPTO_NUEVO | STOP",
   fases_total: N,
   fases_completadas: N,
-  patrones_aplicados: ["patrón ALTA aplicado 1"],
-  errores_evitados: ["error evitado 1"],
+  patrones_aplicados: ["[extraído de PLAN.md → KDD aplicado → Patrones]"],
+  errores_evitados: ["[extraído de PLAN.md → KDD aplicado → Errores a evitar]"],
   decisiones_usadas: ["decisión usada 1"],
   memory_trace: [
     {"area": "[area]", "tipo": "[tipo]", "nodos_retornados": N, "titulos": ["título 1"]}
