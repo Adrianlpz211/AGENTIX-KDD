@@ -99,7 +99,9 @@ function yaExisteEnMemoria(titulo) {
 // ─── Cadena estructural real del error (nativo, sin herramienta externa) ─────
 function obtenerCadenaEstructural(ubicacion) {
   if (!ubicacion) return null;
-  const archivo = ubicacion.split(':')[0];
+  // Cortar solo el ":línea" final — no el primer ':', que en Windows puede ser
+  // la letra de unidad (ej. "C:\lumo\public\panel\js\core.js:15").
+  const archivo = ubicacion.replace(/:(\d+)$/, '');
   const dbPath = path.join(ROOT, '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) return null;
 
@@ -238,32 +240,39 @@ function procesarLinea(linea) {
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-log('Agentic KDD Watch — escuchando errores...');
-log(`Registrando en: .agentic/memoria/errores.md`);
-log('Ctrl+C para detener\n');
+// Solo arrancar el watcher (listener de stdin + logs) cuando este archivo se
+// ejecuta directo (`node watch-errors.cjs`), NO cuando se hace require() de él
+// para usar sus funciones (registrarError, obtenerCadenaEstructural, etc.) —
+// de lo contrario cualquier script que solo quiera esas funciones queda con
+// un listener de stdin colgado y ruido de logs no solicitado.
+if (require.main === module) {
+  log('Agentic KDD Watch — escuchando errores...');
+  log(`Registrando en: .agentic/memoria/errores.md`);
+  log('Ctrl+C para detener\n');
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  terminal: false
-});
+  const rl = readline.createInterface({
+    input: process.stdin,
+    terminal: false
+  });
 
-rl.on('line', procesarLinea);
+  rl.on('line', procesarLinea);
 
-rl.on('close', () => {
-  if (erroresRegistrados > 0) {
-    log(`\n✅ Sesión terminada — ${erroresRegistrados} errores registrados en memoria KDD`);
-    sincronizarGrafo();
-  } else {
-    log('\n✅ Sesión terminada — sin errores nuevos detectados');
-  }
-});
+  rl.on('close', () => {
+    if (erroresRegistrados > 0) {
+      log(`\n✅ Sesión terminada — ${erroresRegistrados} errores registrados en memoria KDD`);
+      sincronizarGrafo();
+    } else {
+      log('\n✅ Sesión terminada — sin errores nuevos detectados');
+    }
+  });
 
-process.on('SIGINT', () => {
-  if (erroresRegistrados > 0) {
-    log(`\n✅ Detenido — ${erroresRegistrados} errores registrados en memoria KDD`);
-    sincronizarGrafo();
-  }
-  process.exit(0);
-});
+  process.on('SIGINT', () => {
+    if (erroresRegistrados > 0) {
+      log(`\n✅ Detenido — ${erroresRegistrados} errores registrados en memoria KDD`);
+      sincronizarGrafo();
+    }
+    process.exit(0);
+  });
+}
 
 module.exports = { registrarError, obtenerCadenaEstructural, detectarArea, extraerUbicacion };
