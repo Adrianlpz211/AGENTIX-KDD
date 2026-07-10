@@ -96,6 +96,31 @@ function yaExisteEnMemoria(titulo) {
   return contenido.toLowerCase().includes(tituloShort);
 }
 
+// ─── Cadena estructural real del error (nativo, sin herramienta externa) ─────
+function obtenerCadenaEstructural(ubicacion) {
+  if (!ubicacion) return null;
+  const archivo = ubicacion.split(':')[0];
+  const dbPath = path.join(ROOT, '.agentic', 'memoria.db');
+  if (!fs.existsSync(dbPath)) return null;
+
+  let db = null;
+  try {
+    try { db = new (require('better-sqlite3'))(dbPath, { readonly: true }); }
+    catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { readonly: true }); }
+
+    const { analyzeImpact } = require('./ast-indexer.cjs');
+    const impact = analyzeImpact(db, archivo);
+    if (!impact || !impact.direct || impact.direct.length === 0) return null;
+
+    const cadena = impact.direct.slice(0, 5).map(d => d.from_file).join(' → ');
+    return { cadena, severidad: impact.severity };
+  } catch {
+    return null;
+  } finally {
+    try { db && db.close && db.close(); } catch {}
+  }
+}
+
 // ─── Registrar error en errores.md ────────────────────────────────────────────
 function registrarError(errorInfo) {
   const { tipo, mensaje, area, ubicacion, raw } = errorInfo;
@@ -110,6 +135,8 @@ function registrarError(errorInfo) {
     return false;
   }
 
+  const estructural = obtenerCadenaEstructural(ubicacion);
+
   const entrada = `
 ## ${fecha} [${tipo.toUpperCase()}] ${titulo}
 Área: ${area}
@@ -123,6 +150,7 @@ Origen: watch-errors — detectado ${hora}
 Tipo: ${tipo}
 Error: ${mensaje.slice(0, 200)}
 ${ubicacion ? `Ubicación: ${ubicacion}` : ''}
+${estructural ? `Cadena estructural: ${estructural.cadena} (severidad: ${estructural.severidad})` : ''}
 Solución: [pendiente — cuando lo resuelvas corre: aa: aprende — error: ${titulo.slice(0, 40)}]
 Raw: ${(raw||'').slice(0, 150).replace(/\n/g, ' ')}
 `;
@@ -134,7 +162,7 @@ Raw: ${(raw||'').slice(0, 150).replace(/\n/g, ' ')}
   }
 
   fs.appendFileSync(ERRORES_PATH, entrada, 'utf8');
-  log(`✓ Error registrado: [${tipo}] ${titulo.slice(0, 50)}`);
+  log(`✓ Error registrado: [${tipo}] ${titulo.slice(0, 50)}${estructural ? ' (con cadena estructural)' : ''}`);
   return true;
 }
 
@@ -237,3 +265,5 @@ process.on('SIGINT', () => {
   }
   process.exit(0);
 });
+
+module.exports = { registrarError, obtenerCadenaEstructural, detectarArea, extraerUbicacion };
