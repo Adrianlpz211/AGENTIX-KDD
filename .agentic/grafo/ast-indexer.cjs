@@ -151,6 +151,55 @@ const EXTRACTORS = {
   ruby:       extractRuby,
 };
 
+// ─── EDGES CALLS (función-a-función, DENTRO del mismo archivo) ────────────────
+// Heurística por regex + ventana de líneas — NO es un parser real. Solo
+// detecta llamadas a símbolos ya conocidos de este mismo archivo (funciones/
+// clases extraídas arriba). Llamadas cruzadas entre archivos siguen
+// representándose únicamente a nivel de archivo vía edges IMPORTS.
+const JS_KEYWORDS = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof',
+  'instanceof', 'new', 'delete', 'void', 'in', 'of', 'do', 'else', 'try',
+  'finally', 'throw', 'yield', 'await', 'async', 'class', 'extends', 'super',
+  'this', 'import', 'export', 'from', 'const', 'let', 'var', 'with',
+]);
+
+function extractCallsWithinFile(content, knownSymbols) {
+  const edges = [];
+  if (!knownSymbols || knownSymbols.length === 0) return edges;
+
+  const symbolNames = new Set(knownSymbols.map(s => s.symbol_name));
+  const sorted = [...knownSymbols].sort((a, b) => a.line_start - b.line_start);
+
+  // A qué símbolo "pertenece" una línea: el último símbolo cuyo line_start
+  // sea <= esa línea. Es una ventana, no un parseo real de llaves — suficiente
+  // para atribuir la llamada al bloque más probable sin la fragilidad de
+  // hacer brace-matching sobre JS/TS con template literals y regex literales.
+  function ownerAt(line) {
+    let owner = null;
+    for (const s of sorted) {
+      if (s.line_start <= line) owner = s;
+      else break;
+    }
+    return owner;
+  }
+
+  const callPattern = /\b([a-zA-Z_$][\w$]*)\s*\(/g;
+  let m;
+  while ((m = callPattern.exec(content)) !== null) {
+    const name = m[1];
+    if (JS_KEYWORDS.has(name)) continue;
+    if (!symbolNames.has(name)) continue;
+
+    const line = content.substring(0, m.index).split('\n').length;
+    const owner = ownerAt(line);
+    if (!owner) continue;
+    if (owner.symbol_name === name) continue; // no contar la propia declaración
+
+    edges.push({ kind: 'CALLS', from_symbol: owner.symbol_name, to_symbol: name, weight: 1.0 });
+  }
+  return edges;
+}
+
 function extractJS(content, filePath) {
   const symbols = [];
   const edges   = [];
@@ -210,6 +259,10 @@ function extractJS(content, filePath) {
     const line = content.substring(0, m.index).split('\n').length;
     symbols.push({ symbol_name: m[1], kind: 'type', line_start: line, exported: 1 });
   }
+
+  const callableSymbols = symbols.filter(s => s.kind === 'function' || s.kind === 'class');
+  const callEdges = extractCallsWithinFile(content, callableSymbols);
+  edges.push(...callEdges);
 
   return { symbols, edges };
 }
@@ -433,8 +486,9 @@ function indexFile(db, filePath, projectRoot) {
 
   for (const edge of edges) {
     let toFile = null;
-    // Resolver import relativo a ruta de archivo real
-    if (edge.to_symbol?.startsWith('.')) {
+    if (edge.kind === 'CALLS') {
+      toFile = relPath; // llamada local — mismo archivo, por construcción
+    } else if (edge.to_symbol?.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filePath), edge.to_symbol);
       const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
       for (const ext of extensions) {
@@ -688,4 +742,5 @@ module.exports = {
   initASTSchema,
   AST_SCHEMA,
   LANGUAGE_MAP,
+  extractCallsWithinFile,
 };
