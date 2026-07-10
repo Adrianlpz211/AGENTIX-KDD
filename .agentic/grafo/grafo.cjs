@@ -729,45 +729,55 @@ async function _autoIndexEmbeddings() {
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────
-const cmd  = process.argv[2]||'sync';
-const arg1 = process.argv[3];
-const arg2 = process.argv[4];
+// Guard (Task 5, fix de causa raíz): sin `require.main === module`, hacer
+// require() de este archivo desde CUALQUIER script disparaba este dispatcher
+// igual — process.argv[2] es el argv del script que hace el require, no de este
+// archivo, así que caía casi siempre en el default 'sync' y corría sincronizar()
+// de verdad contra la DB real, sin que nadie lo pidiera. Esto mordió a la Tarea 5
+// (test que hacía require() insertó nodos de prueba en memoria.db real). Con este
+// guard, el bloque solo corre cuando grafo.cjs se ejecuta directamente como CLI
+// (`node grafo.cjs ...`), igual que antes; un require() normal ya no dispara nada.
+if (require.main === module) {
+  const cmd  = process.argv[2]||'sync';
+  const arg1 = process.argv[3];
+  const arg2 = process.argv[4];
 
-switch(cmd) {
-  case 'sync':     sincronizar(); _autoIndexEmbeddings();
-                   // sincronizar() es la referencia local sin envolver — los hooks de
-                   // abajo ("Hook into existing exports") solo parchan
-                   // module.exports.sincronizar, que este switch nunca llama. Sin esta
-                   // llamada directa, Creative Engine nunca corre en un sync real
-                   // (confirmado: la tabla creative_suggestions nunca se crea).
-                   try { _autoRunCreativeEngine(`sync-${Date.now()}`); } catch {}
-                   try { require('./install-hooks.cjs').installHooks({ quiet: true }); } catch {}
-                   break;
-  case 'sync-stats':
-    sincronizar();
-    stats();
-    break;
-  case 'query':
-    const {resultados,trace} = consultar(arg1,arg2);
-    console.log(JSON.stringify({resultados,trace},null,2)); break;
-  case 'stats':    stats(); break;
-  case 'metricas': console.log(JSON.stringify(metricas(),null,2)); break;
-  case 'ciclo':
-    try {
-      const d = JSON.parse(arg1||'{}');
-      const id = registrarCiclo(d);
-      console.log(id?`Ciclo registrado: ${id}`:'Error al registrar');
-    } catch(e) { console.log('JSON invalido'); } break;
-  case 'semantico':
-    if (!arg1) { console.log('Uso: node grafo.cjs semantico "query" [topK]'); break; }
-    buscarSemantico(arg1,parseInt(arg2)||5).then(r=>console.log(JSON.stringify(r,null,2)));
-    break;
-  case 'snapshot':
-    const db2=initDB(); console.log(JSON.stringify(snapshotMemoria(db2),null,2)); db2.close(); break;
-  case 'analizar':
-    analizarProyecto(); break;
-  default:
-    console.log('Uso: node grafo.cjs [sync|query|stats|metricas|ciclo|semantico|snapshot|analizar]');
+  switch(cmd) {
+    case 'sync':     sincronizar(); _autoIndexEmbeddings();
+                     // sincronizar() es la referencia local sin envolver — los hooks de
+                     // abajo ("Hook into existing exports") solo parchan
+                     // module.exports.sincronizar, que este switch nunca llama. Sin esta
+                     // llamada directa, Creative Engine nunca corre en un sync real
+                     // (confirmado: la tabla creative_suggestions nunca se crea).
+                     try { _autoRunCreativeEngine(`sync-${Date.now()}`); } catch {}
+                     try { require('./install-hooks.cjs').installHooks({ quiet: true }); } catch {}
+                     break;
+    case 'sync-stats':
+      sincronizar();
+      stats();
+      break;
+    case 'query':
+      const {resultados,trace} = consultar(arg1,arg2);
+      console.log(JSON.stringify({resultados,trace},null,2)); break;
+    case 'stats':    stats(); break;
+    case 'metricas': console.log(JSON.stringify(metricas(),null,2)); break;
+    case 'ciclo':
+      try {
+        const d = JSON.parse(arg1||'{}');
+        const id = registrarCiclo(d);
+        console.log(id?`Ciclo registrado: ${id}`:'Error al registrar');
+      } catch(e) { console.log('JSON invalido'); } break;
+    case 'semantico':
+      if (!arg1) { console.log('Uso: node grafo.cjs semantico "query" [topK]'); break; }
+      buscarSemantico(arg1,parseInt(arg2)||5).then(r=>console.log(JSON.stringify(r,null,2)));
+      break;
+    case 'snapshot':
+      const db2=initDB(); console.log(JSON.stringify(snapshotMemoria(db2),null,2)); db2.close(); break;
+    case 'analizar':
+      analizarProyecto(); break;
+    default:
+      console.log('Uso: node grafo.cjs [sync|query|stats|metricas|ciclo|semantico|snapshot|analizar]');
+  }
 }
 
 

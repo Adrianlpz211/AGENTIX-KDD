@@ -38,14 +38,10 @@ fs.writeFileSync(path.join(tmpRoot, '.agentic', 'memoria', 'errores.md'), errore
 
 process.env.AGENTIC_MEMORIA_PATH_OVERRIDE = path.join(tmpRoot, '.agentic', 'memoria');
 
-// grafo.cjs corre su dispatcher CLI (switch sobre process.argv[2], default 'sync')
-// de forma incondicional al hacer require() — no tiene guard `require.main === module`
-// (comportamiento preexistente, no introducido por esta tarea). Sin neutralizarlo,
-// require() dispararía sincronizar() -> promoverPatronesEstructurales() UNA VEZ antes
-// de que este test la invoque explícitamente, dejando la primera aserción en 0 en vez
-// de 1 (falso negativo). Se fuerza un cmd que cae al caso `default` (solo imprime uso,
-// no toca memoria ni DB) para que el require() sea puramente una carga de módulo.
-process.argv[2] = '__noop_for_test__';
+// grafo.cjs envuelve su dispatcher CLI en `if (require.main === module)`, así que
+// require() aquí es una carga de módulo pura — no dispara sincronizar() ni toca
+// memoria/DB por su cuenta. La única llamada a promoverPatronesEstructurales() es
+// la explícita de abajo.
 delete require.cache[require.resolve('../.agentic/grafo/grafo.cjs')];
 const { promoverPatronesEstructurales } = require('../.agentic/grafo/grafo.cjs');
 
