@@ -168,9 +168,17 @@ function createAdapter(dbPath) {
 }
 
 const ROOT        = path.join(__dirname, '..', '..');
-const DB_PATH     = path.join(ROOT, '.agentic', 'memoria.db');
+// NOTA (Task 5): cuando AGENTIC_MEMORIA_PATH_OVERRIDE está seteado (sandbox de test),
+// DB_PATH también debe sandboxearse. Sin esto, sincronizar() — que corre sola al
+// hacer require() de este módulo vía el dispatcher CLI de abajo, sin guard de
+// require.main — seguiría escribiendo nodos de prueba en la memoria.db REAL del
+// proyecto aunque los .md de origen ya estén aislados. Visto en vivo: 3 nodos
+// de prueba ("Fallo 1/2/3") quedaron insertados en la DB real antes de este fix.
+const DB_PATH     = process.env.AGENTIC_MEMORIA_PATH_OVERRIDE
+  ? path.join(process.env.AGENTIC_MEMORIA_PATH_OVERRIDE, '..', 'memoria.db')
+  : path.join(ROOT, '.agentic', 'memoria.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
-const MEMORIA_PATH= path.join(ROOT, '.agentic', 'memoria');
+const MEMORIA_PATH= process.env.AGENTIC_MEMORIA_PATH_OVERRIDE || path.join(ROOT, '.agentic', 'memoria');
 
 // ─── INIT ──────────────────────────────────────────────────────────────────────
 function initDB() {
@@ -326,6 +334,55 @@ function parsearEntradas(contenido, tipo) {
   return entradas;
 }
 
+// ─── PROMOCIÓN DE PATRONES ESTRUCTURALES ──────────────────────────────────────
+// Si la misma "Cadena estructural" (ver Task 4 de watch-errors.cjs) aparece en
+// 3+ entradas de errores.md, se promueve automáticamente a patrón HIGH
+// confidence en patrones.md. Corre sola, dentro de sincronizar() — nada manual.
+function promoverPatronesEstructurales() {
+  const erroresPath = path.join(MEMORIA_PATH, 'errores.md');
+  const patronesPath = path.join(MEMORIA_PATH, 'patrones.md');
+  if (!fs.existsSync(erroresPath)) return { promovidos: 0 };
+
+  const contenido = fs.readFileSync(erroresPath, 'utf8');
+  const cadenaRe = /^Cadena estructural: (.+?) \(severidad: (\w+)\)/gm;
+  const conteo = {};
+  let m;
+  while ((m = cadenaRe.exec(contenido)) !== null) {
+    const cadena = m[1].trim();
+    conteo[cadena] = (conteo[cadena] || 0) + 1;
+  }
+
+  const patronesExistente = fs.existsSync(patronesPath) ? fs.readFileSync(patronesPath, 'utf8') : '';
+  let promovidos = 0;
+
+  for (const [cadena, count] of Object.entries(conteo)) {
+    if (count < 3) continue;
+    const marcador = `[ESTRUCTURAL] ${cadena}`;
+    if (patronesExistente.includes(marcador)) continue;
+
+    const fecha = new Date().toISOString().split('T')[0];
+    const entrada = `
+## ${fecha} ${marcador}
+Área: global
+Confianza: ALTA
+Aplicado: ${count}
+Útil: ${count}
+Estado: ACTIVO
+Origen: promoción automática — cadena estructural repetida ${count} veces
+Patrón: la cadena de archivos ${cadena} ha causado fallos repetidos.
+Antes de tocar cualquiera de estos archivos, revisar el historial de esta cadena.
+`;
+    if (!fs.existsSync(patronesPath)) {
+      fs.mkdirSync(path.dirname(patronesPath), { recursive: true });
+      fs.writeFileSync(patronesPath, '# Patrones — Agentic KDD\n\n', 'utf8');
+    }
+    fs.appendFileSync(patronesPath, entrada, 'utf8');
+    promovidos++;
+  }
+
+  return { promovidos };
+}
+
 // ─── SINCRONIZAR ──────────────────────────────────────────────────────────────
 function sincronizar() {
   const db = initDB();
@@ -407,6 +464,17 @@ Razón: ${ep.razon_resultado || 'ver episodio original'}`;
   db.close();
   console.log(`\n  Grafo sincronizado — ${total} nodos (${nuevos} nuevos, ${actualizados} actualizados)`);
   console.log(`  Motor: ${dbAdapter === 'better-sqlite3' ? 'nativo (<5ms)' : dbAdapter === 'node-sqlite' ? 'node:sqlite (Node.js 22+)' : 'sql.js (<20ms)'}\n`);
+
+  // Promoción automática de patrones estructurales (Task 5) — corre siempre,
+  // sin comando manual, como parte del sync normal del grafo.
+  try {
+    const promo = promoverPatronesEstructurales();
+    if (promo.promovidos > 0) {
+      console.log(`[GRAFO] ${promo.promovidos} patrón(es) estructural(es) promovido(s) a ALTA confianza`);
+    }
+  } catch (e) {
+    console.error('[GRAFO] Error en promoción estructural (no bloqueante):', e.message);
+  }
 }
 
 // ─── RELACIONES ────────────────────────────────────────────────────────────────
@@ -1110,7 +1178,7 @@ Razón: Inferido del código — verificar con el equipo\n`;
   } catch(e) {}
 }
 
-module.exports = { sincronizar, consultar, stats, metricas, registrarCiclo, buscarSemantico, snapshotMemoria, analizarProyecto };
+module.exports = { sincronizar, consultar, stats, metricas, registrarCiclo, buscarSemantico, snapshotMemoria, analizarProyecto, promoverPatronesEstructurales };
 
 // ─── CoALA v3: MEMORIA EPISÓDICA ──────────────────────────────────────────
 function registrarEpisodio(datos) {
