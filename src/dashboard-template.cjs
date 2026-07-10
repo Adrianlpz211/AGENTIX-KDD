@@ -354,6 +354,58 @@ function getGraphData() {
   } catch { return { nodes: [], edges: [], ciclos: [], fases: [] }; }
 }
 
+function getCodeStructureGraph() {
+  const empty = { nodes: [], edges: [] };
+  if (!fs.existsSync(dbPath)) return empty;
+  let _db;
+  try {
+    const BS3 = require('better-sqlite3');
+    _db = new BS3(dbPath, { readonly: true });
+
+    // Agregación a nivel de ARCHIVO (no función individual) para que el
+    // grafo sea legible — cientos de archivos es manejable, miles de funciones no.
+    const files = _db.prepare(`
+      SELECT file,
+             MAX(pagerank) as pagerank,
+             COUNT(*) as symbol_count,
+             SUM(CASE WHEN kind='function' THEN 1 ELSE 0 END) as functions,
+             SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes
+      FROM ast_symbols
+      GROUP BY file
+      ORDER BY pagerank DESC
+    `).all();
+
+    const nodes = files.map((f, i) => ({
+      id: `code-${i}`,
+      file: f.file,
+      titulo: f.file.split(/[\\/]/).pop(),
+      tipo: f.classes > 0 ? 'clase' : 'archivo',
+      symbol_count: f.symbol_count,
+      functions: f.functions,
+      pagerank: f.pagerank || 0,
+    }));
+    const fileToId = {};
+    nodes.forEach(n => { fileToId[n.file] = n.id; });
+
+    const rawEdges = _db.prepare(`
+      SELECT DISTINCT from_file, to_file, kind, COUNT(*) as weight
+      FROM ast_edges
+      WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
+      GROUP BY from_file, to_file, kind
+    `).all();
+
+    const edges = rawEdges
+      .filter(e => fileToId[e.from_file] && fileToId[e.to_file] && e.from_file !== e.to_file)
+      .map(e => ({ source: fileToId[e.from_file], target: fileToId[e.to_file], tipo: e.kind, weight: e.weight }));
+
+    return { nodes, edges };
+  } catch {
+    return empty;
+  } finally {
+    try { _db && _db.close(); } catch {}
+  }
+}
+
 
 // ─── v3.3: CONTRACT GUARD DATA ────────────────────────────────────────────────
 function getContractData() {
@@ -424,6 +476,7 @@ function getEffectivenessData() {
 
 
 const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
+const codeStructure = getCodeStructureGraph();
 
 // Calcular grado de conexiones por nodo (como Graphify — nodos divinos)
 const degreeMap = {};
@@ -685,6 +738,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* Graph area */
 .graph-area{flex:1;position:relative;overflow:hidden;background:var(--bg)}
 #gc{width:100%;height:100%}
+#code-gc{width:100%;height:100%}
 .gtt{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:15;max-width:240px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .graph-legend{position:absolute;top:10px;left:10px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;backdrop-filter:blur(4px)}
 .lg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2)}
@@ -1007,19 +1061,26 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
   </div><!-- /graph-sub-kdd -->
 
-  <!-- Code Structure view -->
-  <div id="graph-sub-code">
-    <div style="width:100%;height:100%;position:relative;display:flex;flex-direction:column">
-      <div id="code-frame-wrap" style="flex:1;position:relative">
-        <iframe id="code-struct-iframe" style="width:100%;height:100%;border:none;display:none"></iframe>
-        <div id="code-unavail-msg" class="code-unavail" style="position:absolute;inset:0">
-          <div style="font-size:48px">🔬</div>
-          <h3>Code Structure — esperando indexación</h3>
-          <p style="font-size:12px;max-width:340px;line-height:1.7;margin:0">Este módulo muestra el grafo estructural del código (funciones, clases, dependencias) generado por el AST-indexer propio de Agentic KDD.</p>
-          <button onclick="reloadCodeFrame()" style="margin-top:4px;background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);color:#00e5ff;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer">↺ Reintentar</button>
-        </div>
-      </div>
+  <!-- Code Structure view — nativo, sin herramienta externa -->
+  <div id="graph-sub-code" style="position:relative">
+    <svg id="code-gc"></svg>
+    <div class="gtt" id="code-gtt"></div>
+    <div class="graph-legend">
+      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>
     </div>
+    <div class="graph-controls">
+      <button class="gc-btn" onclick="resetCodeGraph()">⟳ Reset</button>
+      <button class="gc-btn" onclick="centerCodeGraph()">⊙ Center</button>
+    </div>
+    <div class="detail-panel" id="code-detail-panel">
+      <div class="dp-header">
+        <div class="dp-title" id="code-dp-title"></div>
+        <div class="dp-close" onclick="closeCodeDetail()">×</div>
+      </div>
+      <div class="dp-body" id="code-dp-body"></div>
+    </div>
+    ${codeStructure.nodes.length === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🔬</div><div>Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div></div>' : ''}
   </div>
 
   <!-- Combined view -->
@@ -1500,6 +1561,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <script>
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 const NODES = ${JSON.stringify(nodes)};
+const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
+const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
+const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
 const EDGES = ${JSON.stringify(edges)};
 const M_NODES = ${JSON.stringify(mNodes)};
 const M_EDGES = ${JSON.stringify(mEdges)};
@@ -1540,17 +1604,8 @@ function setGraphTab(tab,el){
   document.getElementById('graph-sub-kdd').style.display=tab==='kdd'?'flex':'none';
   document.getElementById('graph-sub-code').style.display=tab==='code'?'flex':'none';
   document.getElementById('graph-sub-combined').style.display=tab==='combined'?'flex':'none';
-  if(tab==='code')checkCodeStructure();
+  if(tab==='code'&&!codeSimulation)renderCodeGraph();
 }
-
-function checkCodeStructure(){
-  const msg=document.getElementById('code-unavail-msg');
-  const iframe=document.getElementById('code-struct-iframe');
-  fetch('http://localhost:9749',{signal:AbortSignal.timeout(2000)})
-    .then(r=>{msg.style.display='none';iframe.src='http://localhost:9749';iframe.style.display='block';})
-    .catch(()=>{msg.style.display='flex';iframe.style.display='none';});
-}
-function reloadCodeFrame(){ checkCodeStructure(); }
 
 function showDoc(section,el){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -1907,6 +1962,97 @@ function renderGraph(){
   });
 
   svgEl.on('click',()=>closeDetail());
+}
+
+// ─── D3 Code Structure Graph (nativo) ─────────────────────────────────────────
+let codeSimulation, codeSvgEl, codeLinkSel, codeNodeSel;
+
+function getCodeNodeRadius(d){
+  const base=d.tipo==='clase'?11:7;
+  const bonus=Math.round((d.pagerank||0)*400);
+  return Math.min(base+bonus,22);
+}
+
+function renderCodeGraph(){
+  if(!CODE_NODES.length)return;
+  const container=document.getElementById('graph-sub-code');
+  const W=container.clientWidth||1280,H=container.clientHeight||600;
+
+  codeSvgEl=d3.select('#code-gc').attr('width',W).attr('height',H)
+    .call(d3.zoom().scaleExtent([0.15,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
+
+  const g=codeSvgEl.append('g');
+  const defs=codeSvgEl.append('defs');
+  const glowFilter=defs.append('filter').attr('id','code-neon-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
+  const feMerge=glowFilter.append('feMerge');
+  feMerge.append('feMergeNode').attr('in','blur');
+  feMerge.append('feMergeNode').attr('in','SourceGraphic');
+
+  defs.append('marker').attr('id','code-arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
+    .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
+    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','rgba(139,92,246,0.4)');
+
+  const nodeMapCode={};
+  CODE_NODES.forEach(n=>nodeMapCode[n.id]=n);
+  const links=CODE_EDGES.filter(e=>nodeMapCode[e.source]&&nodeMapCode[e.target]);
+
+  codeSimulation=d3.forceSimulation(CODE_NODES)
+    .force('link',d3.forceLink(links).id(d=>d.id).distance(90))
+    .force('charge',d3.forceManyBody().strength(-260))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(d=>getCodeNodeRadius(d)+4))
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
+
+  codeLinkSel=g.append('g').selectAll('line').data(links).enter().append('line')
+    .attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1).attr('stroke-opacity',0.6)
+    .attr('marker-end','url(#code-arrow)');
+
+  codeNodeSel=g.append('g').selectAll('circle.code-node').data(CODE_NODES).enter().append('circle')
+    .attr('class','code-node')
+    .attr('r',d=>getCodeNodeRadius(d))
+    .attr('fill',d=>CODE_COLORS[d.tipo]||'#00e5ff')
+    .attr('filter','url(#code-neon-glow)')
+    .style('cursor','pointer')
+    .call(d3.drag()
+      .on('start',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
+      .on('end',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0);}))
+    .on('click',(ev,d)=>{ev.stopPropagation();showCodeDetail(d);})
+    .on('mouseover',(ev,d)=>{
+      const tt=document.getElementById('code-gtt');
+      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(d.titulo)}</strong><br><span style="color:var(--text3);font-size:10px">\${d.functions} funciones · \${d.symbol_count} símbolos</span>\`;
+      tt.style.opacity=1;
+      const r=container.getBoundingClientRect();
+      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
+    })
+    .on('mouseout',()=>{document.getElementById('code-gtt').style.opacity=0;});
+
+  codeSimulation.on('tick',()=>{
+    codeLinkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    codeNodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
+  });
+
+  codeSvgEl.on('click',()=>closeCodeDetail());
+}
+
+function showCodeDetail(node){
+  document.getElementById('code-dp-title').textContent=node.file;
+  document.getElementById('code-dp-body').innerHTML=\`
+    <div class="dp-section"><div class="dp-label">Tipo</div><div class="dp-val">\${escHtml(node.tipo)}</div></div>
+    <div class="dp-section"><div class="dp-label">Funciones</div><div class="dp-val">\${node.functions}</div></div>
+    <div class="dp-section"><div class="dp-label">Símbolos totales</div><div class="dp-val">\${node.symbol_count}</div></div>
+    <div class="dp-section"><div class="dp-label">PageRank</div><div class="dp-val">\${(node.pagerank||0).toFixed(4)}</div></div>
+  \`;
+  document.getElementById('code-detail-panel').classList.add('visible');
+}
+function closeCodeDetail(){document.getElementById('code-detail-panel').classList.remove('visible');}
+function resetCodeGraph(){if(codeSimulation)codeSimulation.alpha(0.5).restart();}
+function centerCodeGraph(){
+  if(!codeSvgEl||!codeSimulation)return;
+  const c=document.getElementById('graph-sub-code');
+  codeSimulation.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();
 }
 
 // ─── D3 Module Neural Graph (fullscreen) ─────────────────────
