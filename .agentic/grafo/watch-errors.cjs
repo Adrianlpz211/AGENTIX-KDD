@@ -102,6 +102,12 @@ function obtenerCadenaEstructural(ubicacion) {
   // Cortar solo el ":línea" final — no el primer ':', que en Windows puede ser
   // la letra de unidad (ej. "C:\lumo\public\panel\js\core.js:15").
   const archivo = ubicacion.replace(/:(\d+)$/, '');
+  // ast-indexer.cjs guarda ast_edges.to_file siempre RELATIVO a la raíz del
+  // proyecto. Los stack traces reales de Node.js siempre dan rutas absolutas,
+  // así que si no normalizamos, analyzeImpact hace `to_file LIKE '%absoluta%'`
+  // y una ruta absoluta larga nunca puede estar contenida en la relativa corta
+  // guardada en la DB — nunca matchearía nada en producción.
+  const archivoNormalizado = path.isAbsolute(archivo) ? path.relative(ROOT, archivo) : archivo;
   const dbPath = path.join(ROOT, '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) return null;
 
@@ -111,7 +117,7 @@ function obtenerCadenaEstructural(ubicacion) {
     catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { readonly: true }); }
 
     const { analyzeImpact } = require('./ast-indexer.cjs');
-    const impact = analyzeImpact(db, archivo);
+    const impact = analyzeImpact(db, archivoNormalizado);
     if (!impact || !impact.direct || impact.direct.length === 0) return null;
 
     const cadena = impact.direct.slice(0, 5).map(d => d.from_file).join(' → ');
