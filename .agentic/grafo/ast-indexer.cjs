@@ -640,6 +640,13 @@ function getAllSourceFiles(dir, projectRoot, results = []) {
 function indexProject(projectRoot, targetDir = null) {
   const db = openDB(projectRoot);
   initASTSchema(db);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ast_index_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ran_at TEXT DEFAULT (datetime('now')),
+      changed_files TEXT
+    );
+  `);
 
   const searchDir = targetDir ? path.join(projectRoot, targetDir) : projectRoot;
   const files = getAllSourceFiles(searchDir, projectRoot);
@@ -647,6 +654,7 @@ function indexProject(projectRoot, targetDir = null) {
   console.log(`[AST-INDEXER] Indexando ${files.length} archivos en ${path.relative(process.cwd(), searchDir) || '.'}`);
 
   let indexed = 0, skipped = 0, cached = 0, errors = 0;
+  const changedFiles = [];
 
   for (const file of files) {
     const result = indexFile(db, file, projectRoot);
@@ -655,6 +663,7 @@ function indexProject(projectRoot, targetDir = null) {
     else if (result.error) errors++;
     else {
       indexed++;
+      changedFiles.push(path.relative(projectRoot, file));
       if (indexed % 50 === 0) process.stdout.write(`\r[AST-INDEXER] ${indexed}/${files.length}...`);
     }
   }
@@ -663,8 +672,13 @@ function indexProject(projectRoot, targetDir = null) {
   console.log('[AST-INDEXER] Calculando PageRank...');
   computePageRank(db);
 
+  try {
+    db.prepare('INSERT INTO ast_index_runs (changed_files) VALUES (?)').run(JSON.stringify(changedFiles));
+  } catch {}
+
   console.log(`[AST-INDEXER] ✅ Completado: ${indexed} indexados, ${cached} en caché, ${skipped} omitidos`);
-  return { indexed, cached, skipped, errors };
+  try { db.close(); } catch {}
+  return { indexed, cached, skipped, errors, changedFiles };
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────

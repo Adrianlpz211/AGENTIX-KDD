@@ -441,6 +441,64 @@ async function traceCodePath(from, to, port = 9749) {
   });
 }
 
+// ─── VERSIONES NATIVAS (sin codebase-memory-mcp) ─────────────────────────────
+// Usan ast_symbols/ast_edges, ya poblados por ast-indexer.cjs. Cero
+// dependencia de herramientas externas ni de un puerto HTTP.
+
+/**
+ * Detecta qué archivos cambiaron en el último `ast-indexer.cjs index` corrido.
+ * Reemplazo nativo de detectStructuralChanges() (que dependía de codebase-memory-mcp).
+ */
+function detectRecentChangesNative(db) {
+  try {
+    const last = db.prepare('SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1').get();
+    if (!last) return { ran_at: null, changed: [] };
+    return { ran_at: last.ran_at, changed: JSON.parse(last.changed_files || '[]') };
+  } catch {
+    return { ran_at: null, changed: [] };
+  }
+}
+
+/**
+ * Traza la ruta de dependencias (imports) entre dos archivos usando el grafo
+ * AST nativo (ast_edges, kind='IMPORTS'). BFS simple, máximo maxHops saltos.
+ * Reemplazo nativo de traceCodePath() (que dependía de codebase-memory-mcp).
+ *
+ * @returns {string[]|null} lista de archivos en la ruta, o null si no hay ruta
+ */
+function tracePathNative(db, fromFile, toFile, maxHops = 8) {
+  try {
+    const adjacency = db.prepare(`
+      SELECT DISTINCT from_file, to_file FROM ast_edges
+      WHERE kind = 'IMPORTS' AND to_file IS NOT NULL
+    `).all();
+
+    const graph = {};
+    for (const { from_file, to_file } of adjacency) {
+      if (!graph[from_file]) graph[from_file] = [];
+      graph[from_file].push(to_file);
+    }
+
+    const queue = [[fromFile]];
+    const visited = new Set([fromFile]);
+    while (queue.length > 0) {
+      const currentPath = queue.shift();
+      if (currentPath.length > maxHops) continue;
+      const last = currentPath[currentPath.length - 1];
+      if (last === toFile || last.endsWith(toFile) || last.includes(toFile)) return currentPath;
+
+      for (const next of (graph[last] || [])) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        queue.push([...currentPath, next]);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
@@ -560,6 +618,8 @@ module.exports = {
   traceCodePath,
   migrateRelacionesBiTemporal,
   CAUSAL_TYPES,
+  detectRecentChangesNative,
+  tracePathNative,
 };
 
 // ─── v1.1: CAUSAL EDGE PRUNING ────────────────────────────────────────────────
