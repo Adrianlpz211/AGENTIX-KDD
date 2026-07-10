@@ -578,27 +578,39 @@ if (require.main === module) {
       break;
     }
     case 'detect-changes': {
-      console.log('\n[CAUSAL] Detectando cambios estructurales recientes...');
-      detectStructuralChanges().then(changes => {
-        if (!changes) {
-          console.log('  ⚠️  codebase-memory-mcp no disponible (puerto 9749).');
+      const useExternal = args.includes('--use-external');
+      console.log(`\n[CAUSAL] Detectando cambios estructurales recientes${useExternal ? ' (vía codebase-memory-mcp)' : ' (nativo)'}...`);
+      if (useExternal) {
+        detectStructuralChanges().then(changes => {
+          if (!changes) console.log('  ⚠️  codebase-memory-mcp no disponible (puerto 9749).');
+          else console.log(`  Cambios detectados: ${JSON.stringify(changes, null, 2)}`);
+        });
+      } else {
+        const changes = detectRecentChangesNative(db);
+        if (!changes.ran_at) {
+          console.log('  ⚠️  Sin índice AST todavía. Corre: node .agentic/grafo/ast-indexer.cjs index');
         } else {
-          console.log(`  Cambios detectados: ${JSON.stringify(changes, null, 2)}`);
+          console.log(`  Último index: ${changes.ran_at}`);
+          console.log(`  Archivos cambiados (${changes.changed.length}): ${changes.changed.slice(0, 10).join(', ')}${changes.changed.length > 10 ? '...' : ''}`);
         }
-      });
+      }
       break;
     }
     case 'trace': {
-      const [from, to] = args;
-      if (!from || !to) { console.error('Uso: causal-edges.cjs trace <desde> <hasta>'); process.exit(1); }
-      console.log(`\n[CAUSAL] Trazando ruta: ${from} → ${to}...`);
-      traceCodePath(from, to).then(path => {
-        if (!path) {
-          console.log('  ⚠️  No disponible o sin ruta encontrada.');
-        } else {
-          console.log(`  Ruta: ${JSON.stringify(path, null, 2)}`);
-        }
-      });
+      const [from, to, ...traceFlags] = args;
+      const useExternal = traceFlags.includes('--use-external');
+      if (!from || !to) { console.error('Uso: causal-edges.cjs trace <desde> <hasta> [--use-external]'); process.exit(1); }
+      console.log(`\n[CAUSAL] Trazando ruta: ${from} → ${to}${useExternal ? ' (vía codebase-memory-mcp)' : ' (nativo)'}...`);
+      if (useExternal) {
+        traceCodePath(from, to).then(routePath => {
+          if (!routePath) console.log('  ⚠️  No disponible o sin ruta encontrada.');
+          else console.log(`  Ruta: ${JSON.stringify(routePath, null, 2)}`);
+        });
+      } else {
+        const routePath = tracePathNative(db, from, to);
+        if (!routePath) console.log('  ⚠️  Sin ruta encontrada en el grafo AST nativo.');
+        else console.log(`  Ruta (${routePath.length} archivos): ${routePath.join(' → ')}`);
+      }
       break;
     }
     default:
