@@ -323,6 +323,124 @@ function extractCausalsFromEpisode(episodio) {
   return suggested;
 }
 
+// ─── ENRIQUECIMIENTO CON CODEBASE-MEMORY-MCP ─────────────────────────────────
+
+/**
+ * Llama a codebase-memory-mcp (puerto 9749) para enriquecer los edges causales
+ * con datos reales del call-chain estructural del código.
+ *
+ * Retorna { added, skipped } si port 9749 está activo, o null si no está disponible.
+ */
+async function enrichWithCodeStructure(db, projectRoot, opts = {}) {
+  const { port = 9749, module: moduleName, dryRun = false } = opts;
+  const http = require('http');
+
+  function fetchJSON(path) {
+    return new Promise((resolve, reject) => {
+      const req = http.get({ host: 'localhost', port, path, timeout: 3000 }, res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { reject(new Error('Invalid JSON')); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    });
+  }
+
+  let graphData;
+  try {
+    graphData = await fetchJSON('/api/graph');
+  } catch {
+    return null; // codebase-memory-mcp no disponible — skip silencioso
+  }
+
+  if (!graphData || !graphData.edges) return null;
+
+  const { edges: structEdges = [] } = graphData;
+  let added = 0, skipped = 0;
+
+  migrateRelacionesBiTemporal(db);
+
+  for (const e of structEdges) {
+    const { source, target, type = 'calls' } = e;
+    if (!source || !target) continue;
+    if (moduleName && !source.includes(moduleName) && !target.includes(moduleName)) {
+      skipped++; continue;
+    }
+
+    // Mapear tipos estructurales de codebase-memory-mcp a CAUSAL_TYPES
+    const tipoMapped = {
+      'calls': 'llama',
+      'imports': 'importa',
+      'extends': 'extiende',
+      'uses': 'usa',
+      'defines': 'define',
+    }[type] || 'usa';
+
+    try {
+      if (!dryRun) {
+        addCausalEdge(db, {
+          desde_entidad: source,
+          tipo: tipoMapped,
+          hacia_entidad: target,
+          descripcion: `[codebase-memory] ${type} — structural call chain`,
+          confidence: 'ALTA',
+          context: 'codebase-memory-mcp',
+          source: 'code-structure',
+        });
+      }
+      added++;
+    } catch { skipped++; }
+  }
+
+  return { added, skipped };
+}
+
+/**
+ * Detecta cambios estructurales recientes consultando codebase-memory-mcp.
+ * Retorna lista de archivos con su impacto downstream.
+ */
+async function detectStructuralChanges(port = 9749) {
+  const http = require('http');
+  return new Promise((resolve) => {
+    const req = http.get({ host: 'localhost', port, path: '/api/changes', timeout: 3000 }, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/**
+ * Traza la ruta de llamadas entre dos entidades de código.
+ * Retorna el path como array, o null si no disponible.
+ */
+async function traceCodePath(from, to, port = 9749) {
+  const http = require('http');
+  const encodedFrom = encodeURIComponent(from);
+  const encodedTo = encodeURIComponent(to);
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: 'localhost', port, path: `/api/trace?from=${encodedFrom}&to=${encodedTo}`, timeout: 4000 },
+      res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(null); }
+        });
+      }
+    );
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
@@ -385,8 +503,48 @@ if (require.main === module) {
       console.log(`Migración bi-temporal: ${migrated} columnas agregadas`);
       break;
     }
+    case 'enrich': {
+      // Enriquecer edges con datos de codebase-memory-mcp (puerto 9749)
+      const module = args[0] || null;
+      const dryRun = args.includes('--dry');
+      console.log(`\n[CAUSAL] Enriqueciendo con codebase-memory-mcp${module ? ` (módulo: ${module})` : ''}${dryRun ? ' — dry-run' : ''}...`);
+      enrichWithCodeStructure(db, projectRoot, { module, dryRun }).then(result => {
+        if (!result) {
+          console.log('  ⚠️  codebase-memory-mcp no disponible (puerto 9749). Skipping.');
+          console.log('  → Abre codebase-memory-mcp-ui.exe para activar el análisis estructural.');
+        } else {
+          console.log(`  ✅ Edges estructurales: ${result.added} agregados, ${result.skipped} saltados`);
+          if (dryRun) console.log('  (dry-run — no se escribió nada)');
+        }
+      });
+      break;
+    }
+    case 'detect-changes': {
+      console.log('\n[CAUSAL] Detectando cambios estructurales recientes...');
+      detectStructuralChanges().then(changes => {
+        if (!changes) {
+          console.log('  ⚠️  codebase-memory-mcp no disponible (puerto 9749).');
+        } else {
+          console.log(`  Cambios detectados: ${JSON.stringify(changes, null, 2)}`);
+        }
+      });
+      break;
+    }
+    case 'trace': {
+      const [from, to] = args;
+      if (!from || !to) { console.error('Uso: causal-edges.cjs trace <desde> <hasta>'); process.exit(1); }
+      console.log(`\n[CAUSAL] Trazando ruta: ${from} → ${to}...`);
+      traceCodePath(from, to).then(path => {
+        if (!path) {
+          console.log('  ⚠️  No disponible o sin ruta encontrada.');
+        } else {
+          console.log(`  Ruta: ${JSON.stringify(path, null, 2)}`);
+        }
+      });
+      break;
+    }
     default:
-      console.log('Uso: node causal-edges.cjs [add | query | history | invalidate | migrate]');
+      console.log('Uso: node causal-edges.cjs [add | query | history | invalidate | migrate | enrich | detect-changes | trace]');
   }
 }
 
@@ -397,6 +555,9 @@ module.exports = {
   getEntityHistory,
   getEdgesAtTime,
   extractCausalsFromEpisode,
+  enrichWithCodeStructure,
+  detectStructuralChanges,
+  traceCodePath,
   migrateRelacionesBiTemporal,
   CAUSAL_TYPES,
 };

@@ -541,7 +541,19 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .content{flex:1;overflow:hidden;display:flex}
 
 /* ════════ KNOWLEDGE GRAPH MODE ════════ */
-#mode-graph{flex:1;display:flex;overflow:hidden}
+#mode-graph{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.graph-sub-tabs{display:flex;gap:2px;padding:6px 10px;background:rgba(7,9,13,.95);border-bottom:1px solid rgba(139,92,246,.2);flex-shrink:0}
+.gst{font-size:11px;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;color:rgba(255,255,255,.45);border:1px solid transparent;transition:all .2s;letter-spacing:.02em}
+.gst:hover{color:rgba(255,255,255,.75);background:rgba(139,92,246,.08)}
+.gst.active{color:#c4b5fd;background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.35)}
+#graph-sub-kdd{flex:1;display:flex;overflow:hidden;min-height:0}
+#graph-sub-code{flex:1;display:none;overflow:hidden;position:relative;background:#07090d}
+#graph-sub-combined{flex:1;display:none;overflow:hidden;position:relative;background:#07090d}
+.combined-left{flex:1;position:relative;overflow:hidden}
+.combined-right{width:45%;position:relative;border-left:1px solid rgba(139,92,246,.2);display:flex;flex-direction:column}
+.code-unavail{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,.35);text-align:center;gap:12px}
+.code-unavail h3{color:rgba(0,229,255,.6);font-size:15px;margin:0}
+.code-unavail code{font-size:11px;background:rgba(255,255,255,.06);padding:4px 10px;border-radius:5px;color:#a5b4fc}
 .sidebar{width:272px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .sb-tabs{display:flex;border-bottom:1px solid var(--border)}
 .sb-tab{flex:1;padding:9px 6px;text-align:center;font-size:11px;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s}
@@ -568,9 +580,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nitem.selected{background:rgba(139,92,246,.1);border-color:var(--purple)}
 .nitem.god-node{border-left:2px solid var(--amber)}
 .ntb{font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;flex-shrink:0}
-.t-error{background:rgba(239,68,68,.15);color:#f87171}
-.t-patron{background:rgba(16,185,129,.15);color:#34d399}
-.t-decision{background:rgba(59,130,246,.15);color:#60a5fa}
+.t-error{background:rgba(255,68,85,.15);color:#ff6677}
+.t-patron{background:rgba(0,229,255,.12);color:#00e5ff}
+.t-decision{background:rgba(216,138,255,.12);color:#d88aff}
+.t-contrato{background:rgba(255,224,64,.12);color:#ffe040}
+.t-ciclo{background:rgba(80,250,123,.12);color:#50fa7b}
 .mb{font-size:9px;padding:1px 4px;border-radius:3px;font-weight:500}
 .cALTA{background:rgba(16,185,129,.2);color:#34d399}
 .cMEDIA{background:rgba(245,158,11,.2);color:#fbbf24}
@@ -599,7 +613,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sur-dot{color:var(--pink);flex-shrink:0}
 
 /* Graph area */
-.graph-area{flex:1;position:relative;overflow:hidden;background:var(--bg)}
+.graph-area{flex:1;position:relative;overflow:hidden;background:#07090d}
 #gc{width:100%;height:100%}
 .gtt{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:15;max-width:240px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .graph-legend{position:absolute;top:10px;left:10px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;backdrop-filter:blur(4px)}
@@ -754,6 +768,16 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <!-- ════════ KNOWLEDGE GRAPH ════════ -->
 <div id="mode-graph">
+
+  <!-- Graph sub-tabs -->
+  <div class="graph-sub-tabs">
+    <div class="gst active" onclick="setGraphTab('kdd',this)">🧠 KDD Memory</div>
+    <div class="gst" onclick="setGraphTab('code',this)">🔬 Code Structure</div>
+    <div class="gst" onclick="setGraphTab('combined',this)">⚡ Combined</div>
+  </div>
+
+  <!-- KDD Memory view -->
+  <div id="graph-sub-kdd">
   <div class="sidebar">
     <div class="sb-tabs">
       <div class="sb-tab active" onclick="showSbTab('nodes',this)" data-i="sb_nodes">Nodes</div>
@@ -830,21 +854,22 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">By type</div>
         <div style="font-size:12px;color:var(--text2);line-height:2.2">
-          <span style="color:#f87171">errors:</span> ${stats.errors} &nbsp; <span style="color:#34d399">patterns:</span> ${stats.patterns} &nbsp; <span style="color:#60a5fa">decisions:</span> ${stats.decisions}
+          <span style="color:#ff6677">errors:</span> ${stats.errors} &nbsp; <span style="color:#00e5ff">patterns:</span> ${stats.patterns} &nbsp; <span style="color:#d88aff">decisions:</span> ${stats.decisions}
         </div>
       </div>
     </div>
   </div>
 
   <!-- GRAPH -->
-  <div class="graph-area">
+  <div class="graph-area" id="graph-area-main">
     <svg id="gc"></svg>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend">
-      <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span data-i="l_err">error</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#10b981"></div><span data-i="l_pat">pattern</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#3b82f6"></div><span data-i="l_dec">decision</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:transparent;border:2px solid #f59e0b;box-sizing:border-box"></div><span style="color:var(--amber)" data-i="l_divine">divine</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#ff4455;box-shadow:0 0 6px #ff4455"></div><span data-i="l_err">error</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff;box-shadow:0 0 6px #00e5ff"></div><span data-i="l_pat">pattern</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#d88aff;box-shadow:0 0 6px #d88aff"></div><span data-i="l_dec">decision</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#ffe040;box-shadow:0 0 6px #ffe040"></div><span style="color:#ffe040">contrato</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:transparent;border:2px solid #f59e0b;box-sizing:border-box;box-shadow:0 0 6px rgba(245,158,11,.6)"></div><span style="color:var(--amber)" data-i="l_divine">divine</span></div>
     </div>
     <div class="graph-controls">
       <button class="gc-btn" onclick="resetGraph()" data-i="btn_reset">⟳ Reset</button>
@@ -867,6 +892,44 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     </div>
     ${stats.total === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🧠</div><div>No nodes yet — use aa: to start</div></div>' : ''}
   </div>
+  </div><!-- /graph-sub-kdd -->
+
+  <!-- Code Structure view -->
+  <div id="graph-sub-code">
+    <div style="width:100%;height:100%;position:relative;display:flex;flex-direction:column">
+      <div id="code-frame-wrap" style="flex:1;position:relative">
+        <iframe id="code-struct-iframe" src="http://localhost:9749" style="width:100%;height:100%;border:none;display:none" onload="document.getElementById('code-unavail-msg').style.display='none';this.style.display='block'"></iframe>
+        <div id="code-unavail-msg" class="code-unavail" style="position:absolute;inset:0">
+          <div style="font-size:48px">🔬</div>
+          <h3>Code Structure — esperando indexación</h3>
+          <p style="font-size:12px;max-width:340px;line-height:1.7;margin:0">Este módulo muestra el grafo estructural del código (funciones, clases, dependencias). Para activarlo, corre <code>codebase-memory-mcp-ui.exe</code> que expone el puerto 9749.</p>
+          <code>akdd graph-viz → abre KDD Memory</code>
+          <div style="font-size:11px;color:rgba(255,255,255,.2);margin-top:8px">Puerto 9749 no detectado — vuelve a intentar con el botón de abajo</div>
+          <button onclick="reloadCodeFrame()" style="margin-top:4px;background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);color:#00e5ff;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer">↺ Reintentar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Combined view -->
+  <div id="graph-sub-combined">
+    <div class="combined-left" id="combined-graph-left">
+      <!-- graph-area-main moves here when combined is active -->
+    </div>
+    <div class="combined-right">
+      <div style="padding:6px 10px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(0,229,255,.45);border-bottom:1px solid rgba(139,92,246,.15)">Code Structure</div>
+      <div style="flex:1;position:relative">
+        <iframe id="code-struct-iframe2" src="http://localhost:9749" style="width:100%;height:100%;border:none;display:none" onload="document.getElementById('combined-unavail').style.display='none';this.style.display='block'"></iframe>
+        <div id="combined-unavail" class="code-unavail" style="position:absolute;inset:0">
+          <div style="font-size:32px">🔗</div>
+          <h3 style="font-size:13px">Estructura de código</h3>
+          <p style="font-size:11px;max-width:260px;line-height:1.6;margin:0;color:rgba(255,255,255,.3)">Activa codebase-memory-mcp en el puerto 9749 para ver el grafo estructural del código aquí.</p>
+          <button onclick="reloadCombinedFrame()" style="margin-top:4px;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.2);color:#00e5ff;border-radius:6px;padding:5px 12px;font-size:10px;cursor:pointer">↺ Reintentar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ════════ PROJECT DOCS ════════ -->
@@ -1270,7 +1333,7 @@ const M_EDGES = ${JSON.stringify(mEdges)};
 const DEGREE_MAP = ${JSON.stringify(degreeMap)};
 const MAX_DEGREE = ${maxDegree};
 const GOD_THRESHOLD = ${godThreshold};
-const COLORS = {error:'#ef4444',patron:'#10b981',decision:'#3b82f6'};
+const COLORS = {error:'#ff4455',patron:'#00e5ff',decision:'#d88aff',entidad:'#ffaa44',contrato:'#ffe040',ciclo:'#50fa7b',global:'#8b5cf6'};
 let lang='en', isDark=true, currentFilter='all', searchVal='', selectedNodeId=null;
 let simulation, svgEl, linkSel, nodeSel, labelSel, labelsVisible=false;
 let modGraphRendered=false;
@@ -1295,6 +1358,42 @@ function setMode(mode,el){
   document.getElementById('mode-graph').style.display=mode==='graph'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
+}
+
+function setGraphTab(tab,el){
+  document.querySelectorAll('.gst').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('graph-sub-kdd').style.display='none';
+  document.getElementById('graph-sub-code').style.display='none';
+  document.getElementById('graph-sub-combined').style.display='none';
+  const gcMain=document.getElementById('graph-area-main');
+  if(tab==='kdd'){
+    document.getElementById('graph-sub-kdd').style.display='flex';
+    const kdd=document.getElementById('graph-sub-kdd');
+    if(gcMain && gcMain.parentElement!==kdd) kdd.appendChild(gcMain);
+    setTimeout(()=>{if(simulation)simulation.alpha(0.1).restart();},50);
+  } else if(tab==='code'){
+    document.getElementById('graph-sub-code').style.display='flex';
+  } else if(tab==='combined'){
+    document.getElementById('graph-sub-combined').style.display='flex';
+    document.getElementById('graph-sub-combined').style.flexDirection='row';
+    const combLeft=document.getElementById('combined-graph-left');
+    if(gcMain && gcMain.parentElement!==combLeft) combLeft.appendChild(gcMain);
+    setTimeout(()=>{if(simulation)simulation.alpha(0.1).restart();},50);
+  }
+}
+
+function reloadCodeFrame(){
+  const iframe=document.getElementById('code-struct-iframe');
+  iframe.src='http://localhost:9749';
+  iframe.style.display='none';
+  document.getElementById('code-unavail-msg').style.display='flex';
+}
+function reloadCombinedFrame(){
+  const iframe=document.getElementById('code-struct-iframe2');
+  iframe.src='http://localhost:9749';
+  iframe.style.display='none';
+  document.getElementById('combined-unavail').style.display='flex';
 }
 
 function showDoc(section,el){
@@ -1449,35 +1548,35 @@ function closeDetail(){
   document.getElementById('detail-panel').classList.remove('visible');
   selectedNodeId=null;
   renderNodeList();
-  if(nodeSel)nodeSel.attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d)).attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75);
-  if(linkSel)linkSel.attr('stroke-opacity',0.35).attr('stroke','#2a3050').attr('stroke-width',1);
+  if(nodeSel)nodeSel.attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d)).attr('fill-opacity',d=>d.confianza==='ALTA'?0.95:0.65).attr('filter','url(#neon-glow)');
+  if(linkSel)linkSel.attr('stroke-opacity',0.6).attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1);
 }
 
 function focusNode(id){
   if(!nodeSel)return;
   nodeSel.attr('stroke',d=>d.id===id?'#fff':getNodeStroke(d))
          .attr('stroke-width',d=>d.id===id?3:getNodeStrokeW(d))
-         .attr('fill-opacity',d=>d.id===id?1:selectedNodeId?0.2:d.confianza==='ALTA'?1:0.75);
+         .attr('fill-opacity',d=>d.id===id?1:selectedNodeId?0.15:d.confianza==='ALTA'?0.95:0.65);
   if(linkSel){
-    linkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?0.9:0.06)
-           .attr('stroke',e=>e.source.id===id||e.target.id===id?'#a78bfa':'#2a3050')
+    linkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?1:0.04)
+           .attr('stroke',e=>e.source.id===id||e.target.id===id?'rgba(196,181,253,0.8)':'rgba(139,92,246,0.2)')
            .attr('stroke-width',e=>e.source.id===id||e.target.id===id?2:1);
   }
 }
 
 function highlightEdge(srcId,tgtId){
   if(!linkSel)return;
-  linkSel.attr('stroke-opacity',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?1:0.06)
-         .attr('stroke',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?'#ec4899':'#2a3050')
+  linkSel.attr('stroke-opacity',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?1:0.04)
+         .attr('stroke',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?'#00e5ff':'rgba(139,92,246,0.2)')
          .attr('stroke-width',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?3:1);
-  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.id===srcId||d.id===tgtId?1:0.15);
+  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.id===srcId||d.id===tgtId?1:0.1);
 }
 
 function highlightByFilter(){
   if(!nodeSel)return;
   const ids=getFiltered().map(n=>n.id);
-  nodeSel.attr('fill-opacity',d=>ids.includes(d.id)?(d.confianza==='ALTA'?1:0.85):0.1);
-  if(linkSel)linkSel.attr('stroke-opacity',e=>ids.includes(e.source.id)&&ids.includes(e.target.id)?0.5:0.03);
+  nodeSel.attr('fill-opacity',d=>ids.includes(d.id)?(d.confianza==='ALTA'?0.95:0.8):0.08);
+  if(linkSel)linkSel.attr('stroke-opacity',e=>ids.includes(e.source.id)&&ids.includes(e.target.id)?0.6:0.02);
 }
 
 function getNodeStroke(d){
@@ -1570,9 +1669,16 @@ function renderGraph(){
     .selectAll('stop').data([{o:'0%',c:'rgba(245,158,11,0.4)'},{o:'100%',c:'rgba(245,158,11,0)'}])
     .enter().append('stop').attr('offset',d=>d.o).attr('stop-color',d=>d.c);
 
+  // Neon glow filter for all nodes
+  const glowFilter=defs.append('filter').attr('id','neon-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
+  const feMerge=glowFilter.append('feMerge');
+  feMerge.append('feMergeNode').attr('in','blur');
+  feMerge.append('feMergeNode').attr('in','SourceGraphic');
+
   defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
     .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
-    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#3a4060');
+    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','rgba(139,92,246,0.4)');
 
   const links=EDGES.map(e=>({...e,source:e.desde_id,target:e.hacia_id})).filter(e=>nodeMap[e.source]&&nodeMap[e.target]);
 
@@ -1586,7 +1692,7 @@ function renderGraph(){
     .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4));
 
   linkSel=g.append('g').selectAll('line').data(links).enter().append('line')
-    .attr('stroke','#2a3050').attr('stroke-width',1).attr('stroke-opacity',0.35)
+    .attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1).attr('stroke-opacity',0.6)
     .attr('marker-end','url(#arrow)');
 
   // God node glow circles
@@ -1597,9 +1703,10 @@ function renderGraph(){
     .attr('class','node')
     .attr('r',d=>getNodeRadius(d))
     .attr('fill',d=>COLORS[d.tipo]||'#8b5cf6')
-    .attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75)
+    .attr('fill-opacity',d=>d.confianza==='ALTA'?0.95:0.65)
     .attr('stroke',d=>getNodeStroke(d))
     .attr('stroke-width',d=>getNodeStrokeW(d))
+    .attr('filter','url(#neon-glow)')
     .style('cursor','pointer')
     .call(d3.drag()
       .on('start',(ev,d)=>{if(!ev.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})

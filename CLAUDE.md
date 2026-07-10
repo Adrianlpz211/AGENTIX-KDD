@@ -125,6 +125,9 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd resolve-errors [area]` | correr `node .agentic/grafo/creative-engine.cjs resolve-errors [area]` |
 | `akdd auto-confirm [days]` | correr `node .agentic/grafo/creative-engine.cjs auto-confirm [days]` |
 | `akdd graph-viz` | correr `node .agentic/grafo/graph-server.cjs [cwd]` |
+| `akdd causal-enrich [módulo]` | correr `node .agentic/grafo/causal-edges.cjs enrich [módulo]` |
+| `akdd causal-trace <desde> <hasta>` | correr `node .agentic/grafo/causal-edges.cjs trace <desde> <hasta>` |
+| `akdd detect-changes` | correr `node .agentic/grafo/causal-edges.cjs detect-changes` |
 
 Los comandos que SÍ requieren terminal (solo estos dos):
 - `npm install -g agentic-kdd` → instalar el CLI por primera vez

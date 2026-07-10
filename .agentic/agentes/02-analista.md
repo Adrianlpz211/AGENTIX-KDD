@@ -271,16 +271,46 @@ node .agentic/grafo/causal-edges.cjs history [archivo]
 Si hay `caused_failure` en la memoria: incluir precaución en el plan.
 Si hay `was_fixed_by`: anotar el fix conocido como referencia.
 
-### Orden final de lectura (v3.1)
+### PASO 4.5 — Estructura del código con codebase-memory-mcp (OPCIONAL)
+
+Solo si codebase-memory-mcp está activo (puerto 9749):
+
+**trace_path** — Traza la ruta de llamadas real entre el punto de entrada y el módulo a tocar.
+Úsalo cuando la tarea toca un módulo que otros módulos llaman — para entender el chain completo.
+
+```bash
+node .agentic/grafo/causal-edges.cjs trace [archivo_entrada] [módulo_destino]
+```
+
+**detect_changes** — Detecta qué archivos cambiaron estructuralmente y qué downstream impactan.
+Úsalo antes de planificar para no perderte dependencias no declaradas.
+
+```bash
+node .agentic/grafo/causal-edges.cjs detect-changes
+```
+
+**enrich** — Enriquece los edges causales de KDD con datos reales del call-graph.
+Corre después de indexar el proyecto con codebase-memory-mcp.
+
+```bash
+node .agentic/grafo/causal-edges.cjs enrich [módulo]
+```
+
+Si el puerto 9749 no responde → ignorar silenciosamente, continuar sin este contexto.
+El análisis estructural enriquece pero nunca es bloqueante.
+
+### Orden final de lectura (v3.2 + codebase-memory)
 
 ```
-1. grafo.cjs buscar "[tarea]" [área]          → memoria KDD general
-2. impact-analyzer.cjs precheck [módulo]       → severidad antes de actuar
-3. ast-indexer.cjs impacto "[archivo/módulo]"  → dependencias estructurales
-4. adr-ingestor.cjs query [módulo]             → decisiones arquitectónicas
-5. knowledge-ingestor.cjs query [módulo]       → gotchas y restricciones
-6. spec-manager.cjs waves [módulo]             → tareas ordenadas por wave
-7. causal-edges.cjs query [módulo]             → historial de fallos
+1. grafo.cjs buscar "[tarea]" [área]                  → memoria KDD general
+2. impact-analyzer.cjs precheck [módulo]               → severidad antes de actuar
+3. ast-indexer.cjs impacto "[archivo/módulo]"          → dependencias estructurales
+4. adr-ingestor.cjs query [módulo]                     → decisiones arquitectónicas
+5. knowledge-ingestor.cjs query [módulo]               → gotchas y restricciones
+6. spec-manager.cjs waves [módulo]                     → tareas ordenadas por wave
+7. causal-edges.cjs query [módulo]                     → historial de fallos
+8. causal-edges.cjs detect-changes          (OPCIONAL) → cambios estructurales recientes
+9. causal-edges.cjs trace [entrada] [módulo](OPCIONAL) → ruta de llamadas real
 ```
 
 
@@ -351,6 +381,9 @@ que devuelva un **resumen compacto** (no volcar archivos crudos):
   ADRs vigentes, gotchas ALTO/MEDIO.
 - 📋 **Sub-agente SPEC** → `spec-manager.cjs status/waves` + `causal-edges.cjs query` →
   criterios del spec, waves, historial de fallos.
+- 🔬 **Sub-agente ESTRUCTURA** (OPCIONAL, si puerto 9749 activo) →
+  `causal-edges.cjs detect-changes` + `causal-edges.cjs trace [entrada] [módulo]` →
+  call-chain real, cambios estructurales recientes, downstream no declarado.
 
 Luego TÚ (orquestador) **fusionas los 4 resúmenes** en el PLAN.md de forma
 determinista: dedup, prioriza por `_score`/severidad, y arma las fases.
