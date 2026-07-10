@@ -49,10 +49,67 @@ function readConfig() {
       return result.join('\n').trim();
     };
 
-    // Leer yaml block para stack
+    // Leer stack — soporta múltiples formatos de config.md
     const getYaml = (key) => {
-      const m = c.match(new RegExp('  ' + key + ': (.+)'));
-      return m ? m[1].trim() : '—';
+      // Formato 1: yaml "  key: value"
+      let m = c.match(new RegExp('  ' + key + ': (.+)'));
+      if (m) return m[1].trim();
+      // Formato 2: markdown bold "**KEY:** value" (case insensitive)
+      m = c.match(new RegExp('\\*\\*' + key + '\\*\\*:?\\s*(.+)', 'i'));
+      if (m) return m[1].replace(/\*\*/g,'').trim();
+      // Formato 3: uppercase "KEY: value"
+      m = c.match(new RegExp('(?:^|\n)' + key.toUpperCase() + ': (.+)'));
+      if (m) return m[1].trim();
+      return '—';
+    };
+
+    // Extraer stack completo si existe como campo STACK
+    const getStack = () => {
+      const m = c.match(/(?:STACK|stack|Stack):?\s*(.+)/);
+      return m ? m[1].replace(/\*\*/g,'').trim() : null;
+    };
+    const stackFull = getStack();
+
+    // Para framework: intentar detectar de package.json si config.md no lo tiene
+    const getPkgJson = (field) => {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
+        const deps = {...(pkg.dependencies||{}), ...(pkg.devDependencies||{})};
+        if (field === 'framework') {
+          if (deps['next']) return 'Next.js ' + (deps['next']||'');
+          if (deps['express']) return 'Express';
+          if (deps['fastify']) return 'Fastify';
+          if (deps['@nestjs/core']) return 'NestJS';
+          if (deps['hono']) return 'Hono';
+        }
+        if (field === 'language') {
+          if (deps['typescript'] || deps['ts-node']) return 'TypeScript';
+          return 'JavaScript';
+        }
+        if (field === 'runtime') {
+          return 'Node.js ' + (pkg.engines?.node || '18+');
+        }
+        if (field === 'base_datos') {
+          if (deps['@prisma/client']) return 'Prisma';
+          if (deps['pg'] || deps['postgres']) return 'PostgreSQL';
+          if (deps['mysql2']) return 'MySQL';
+          if (deps['better-sqlite3']) return 'SQLite';
+        }
+        if (field === 'package_manager') {
+          if (fs.existsSync(path.join(projectPath, 'yarn.lock'))) return 'yarn';
+          if (fs.existsSync(path.join(projectPath, 'pnpm-lock.yaml'))) return 'pnpm';
+          return 'npm';
+        }
+      } catch {}
+      return null;
+    };
+
+    const smartGet = (key) => {
+      const fromYaml = getYaml(key);
+      if (fromYaml && fromYaml !== '—') return fromYaml;
+      const fromPkg = getPkgJson(key);
+      if (fromPkg) return fromPkg;
+      return stackFull || '—';
     };
 
     return {
@@ -64,11 +121,12 @@ function readConfig() {
         return get('Descripción');
       })(),
       tipo: get('Tipo'),
-      framework: getYaml('framework'),
-      language: getYaml('language'),
-      runtime: getYaml('runtime'),
-      base_datos: getYaml('base_datos'),
-      package_manager: getYaml('package_manager'),
+      framework: smartGet('framework'),
+      language: smartGet('language'),
+      runtime: smartGet('runtime'),
+      base_datos: smartGet('base_datos'),
+      package_manager: smartGet('package_manager'),
+      stack: stackFull,
       cmd_dev: getYaml('dev'),
       cmd_test: getYaml('test'),
       cmd_build: getYaml('build'),
@@ -90,7 +148,12 @@ function readSpecs() {
       const c = fs.readFileSync(path.join(specsPath, f), 'utf8');
       const estado = (c.match(/Estado: (.+)/) || [])[1]?.trim() || 'DESCONOCIDO';
       const fecha = (c.match(/ltima actualización: (.+)/) || [])[1]?.trim() || '—';
-      const tests = (c.match(/PASS/g) || []).length;
+      // La tabla "Suite | Tests | Estado" del spec siempre tiene 1 sola fila con
+      // "PASS" en la plantilla, así que contar ocurrencias de PASS siempre da 1
+      // sin importar cuántos tests reales tenga el módulo. El número real está
+      // en la línea "Tests: N pasando" que sí se actualiza por ciclo.
+      const testsLine = c.match(/Tests:\s*(\d+)\s*pasando/);
+      const tests = testsLine ? parseInt(testsLine[1], 10) : (c.match(/PASS/g) || []).length;
       return { name: f.replace('.md',''), estado, fecha, tests };
     });
   } catch { return []; }
@@ -217,20 +280,27 @@ function calcOnboarding(config, mImpl, dec, pat, specsArr) {
     { label: 'Módulos documentados', ok: mImpl.length > 0 },
     { label: 'Primera decisión registrada', ok: dec.length > 0 },
     { label: 'Primer patrón registrado', ok: pat.length > 0 },
-    { label: 'Primer ciclo aa: completado', ok: readMemoria('trabajo.md').includes('COMPLETADO') },
+    { label: 'Primer ciclo aa: completado', ok: (ciclosDB && ciclosDB.length > 0) || readMemoria('trabajo.md').includes('COMPLETADO') },
     { label: 'Specs generadas', ok: specsArr.length > 0 },
   ];
   const done = checks.filter(c => c.ok).length;
   return { checks, done, total: checks.length, pct: Math.round(done/checks.length*100) };
 }
 
+const PLACEHOLDER_TITLES = /^(Título de la decisión|Título del patrón|Nombre del patrón|Nombre del error|Nombre del error o patrón)$/i;
+
 function parseEntries(content) {
   return content.split(/^## /m)
+    // El header y las instrucciones de formato de cada .md viven dentro de un
+    // comentario HTML <!-- ... -->; como el split corta por "## " sin saber de
+    // comentarios, el título de archivo y el ejemplo de formato ("## [FECHA]
+    // Título de la decisión") se colaban como si fueran entradas reales.
     .filter(s => s.trim() && !s.startsWith('<!--') && !s.startsWith('Cómo') && !s.startsWith('Formato') && !s.startsWith('Registro') && !s.startsWith('Patrones') && s.length > 10)
+    .filter(s => !s.includes('<!--') && !s.includes('-->'))
     .map(s => {
       const lines = s.split('\n');
       const titulo = lines[0].trim().replace(/^\[.*?\]\s*/, '').trim();
-      if (!titulo || titulo.length < 5) return null;
+      if (!titulo || titulo.length < 5 || PLACEHOLDER_TITLES.test(titulo)) return null;
       const get = (k) => { for (const l of lines) { if (l.startsWith(k + ':')) return l.split(':').slice(1).join(':').trim(); } return ''; };
       return { titulo, area: get('Área') || get('Area') || 'global', confianza: get('Confianza') || 'BAJA', aplicado: parseInt(get('Aplicado')) || 0, util: parseInt(get('Útil') || get('Util')) || 0, estado: get('Estado') || 'ACTIVO', contenido: s };
     }).filter(Boolean);
@@ -248,10 +318,7 @@ function getGraphData() {
     // Intentar better-sqlite3 primero, fallback a sql.js
     try {
       const BS3 = require('better-sqlite3');
-      db = { 
-        all: (sql, ...p) => BS3(dbPath, {readonly:true}).prepare(sql).all(...p),
-        close: () => {}
-      };
+      // (Se eliminó un wrapper `db` muerto que abría una conexión nueva por query sin cerrarla.)
       const _db = new BS3(dbPath, { readonly: true });
       const nodes = _db.prepare('SELECT * FROM nodos ORDER BY fecha_creacion DESC').all();
       const edges = _db.prepare('SELECT * FROM relaciones').all();
@@ -290,63 +357,69 @@ function getGraphData() {
 
 // ─── v3.3: CONTRACT GUARD DATA ────────────────────────────────────────────────
 function getContractData() {
+  const empty = { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] };
+  if (!fs.existsSync(dbPath)) return empty;
+  let _db;
   try {
-    if (!fs.existsSync(dbPath)) return { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] };
     const BS3 = require('better-sqlite3');
-    const _db = new BS3(dbPath, { readonly: true });
-    let result = { total:0, protected:0, verified:0, candidate:0, invalidated:0, violations:0, recent:[] };
-    try {
-      result.total     = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts").get()?.n || 0;
-      result.protected = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='protected'").get()?.n || 0;
-      result.verified  = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='verified'").get()?.n || 0;
-      result.candidate = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='candidate'").get()?.n || 0;
-      result.invalidated= _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='invalidated'").get()?.n || 0;
-      result.violations= _db.prepare("SELECT COUNT(*) as n FROM contract_violations WHERE recovered=0").get()?.n || 0;
-      result.recent    = _db.prepare("SELECT id, module, name, status, verification_count, failure_count FROM verified_contracts ORDER BY updated_at DESC LIMIT 8").all();
-    } catch {}
-    _db.close();
-    return result;
-  } catch { return { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] }; }
+    _db = new BS3(dbPath, { readonly: true });
+    const safe = (fn) => { try { return fn(); } catch { return null; } };
+    return {
+      total:     safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts").get()?.n) || 0,
+      protected: safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='protected'").get()?.n) || 0,
+      verified:  safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='verified'").get()?.n) || 0,
+      candidate: safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='candidate'").get()?.n) || 0,
+      violations:safe(() => _db.prepare("SELECT COUNT(*) as n FROM contract_violations WHERE recovered=0").get()?.n) || 0,
+      recent:    safe(() => _db.prepare("SELECT id, module, name, status, verification_count, failure_count FROM verified_contracts ORDER BY updated_at DESC LIMIT 8").all()) || [],
+    };
+  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
 }
 
-// ─── v3.3: CREATIVE ENGINE DATA ───────────────────────────────────────────────
 function getCreativeData() {
+  const empty = { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[], protected_for_level2:0 };
+  if (!fs.existsSync(dbPath)) return empty;
+  let _db;
   try {
-    if (!fs.existsSync(dbPath)) return { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] };
     const BS3 = require('better-sqlite3');
-    const _db = new BS3(dbPath, { readonly: true });
-    let result = { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] };
-    try {
-      result.suggestions     = _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE applied=0 AND dismissed=0").get()?.n || 0;
-      result.wins            = _db.prepare("SELECT COUNT(*) as n FROM creative_wins").get()?.n || 0;
-      result.auto_applicable = _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE auto_applicable=1 AND applied=0 AND dismissed=0").get()?.n || 0;
-      // Determine level from protected contracts
-      const protected_count = _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status IN ('protected','verified')").get()?.n || 0;
-      result.level = protected_count >= 10 ? 2 : 1;
-      result.protected_for_level2 = protected_count;
-      result.recent_suggestions = _db.prepare("SELECT id, type, title, risk_level, module, auto_applicable FROM creative_suggestions WHERE applied=0 AND dismissed=0 ORDER BY created_at DESC LIMIT 5").all();
-    } catch {}
-    _db.close();
-    return result;
-  } catch { return { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[] }; }
+    _db = new BS3(dbPath, { readonly: true });
+    const safe = (fn) => { try { return fn(); } catch { return null; } };
+    const protCount = safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status IN ('protected','verified')").get()?.n) || 0;
+    return {
+      level:              protCount >= 10 ? 2 : 1,
+      protected_for_level2: protCount,
+      suggestions:        safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE applied=0 AND dismissed=0").get()?.n) || 0,
+      wins:               safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_wins").get()?.n) || 0,
+      auto_applicable:    safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE auto_applicable=1 AND applied=0 AND dismissed=0").get()?.n) || 0,
+      recent_suggestions: safe(() => _db.prepare("SELECT id, type, title, risk_level, module, auto_applicable FROM creative_suggestions WHERE applied=0 AND dismissed=0 ORDER BY created_at DESC LIMIT 5").all()) || [],
+    };
+  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
 }
 
-// ─── v3.3: MEM CURATOR DATA ───────────────────────────────────────────────────
 function getCuratorData() {
   try {
     const logPath = path.join(projectPath, '.agentic', 'curator.log');
-    let lastRun = 'nunca', actions = 0;
+    let lastRun = 'nunca';
     if (fs.existsSync(logPath)) {
       const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
       if (lines.length > 0) {
-        const last = lines[lines.length-1];
-        const match = last.match(/\[([^\]]+)\]/);
+        const match = lines[lines.length-1].match(/\[([^\]]+)\]/);
         if (match) lastRun = match[1].split('T')[0];
-        actions = lines.filter(l => l.includes('mergeados') || l.includes('comprimidos') || l.includes('resueltos')).length;
       }
     }
-    return { lastRun, actions };
-  } catch { return { lastRun: 'nunca', actions: 0 }; }
+    return { lastRun };
+  } catch { return { lastRun: 'nunca' }; }
+}
+
+
+// ─── v3.3: EFFECTIVENESS REPORT DATA ─────────────────────────────────────────
+function getEffectivenessData() {
+  const empty = { total_cycles:0, metrics:{}, summary:{ improving:[], needs_work:[], stable:[] } };
+  if (!fs.existsSync(dbPath)) return empty;
+  try {
+    const { generateReport } = require(path.join(__dirname, '.agentic/grafo/effectiveness-report.cjs'));
+    const r = generateReport(__dirname);
+    return r.error ? empty : r;
+  } catch { return empty; }
 }
 
 
@@ -401,6 +474,7 @@ function parseModulos(text) {
 }
 
 const contractData   = getContractData();
+const effectData     = getEffectivenessData();
 const creativeData   = getCreativeData();
 const curatorData    = getCuratorData();
 const modulosImpl = parseModulos(config.implementados);
@@ -429,7 +503,7 @@ function buildModuleGraph() {
   // Crear nodos de módulos implementados
   modulosImpl.forEach((m, i) => {
     const area = m.toLowerCase().replace(/\s+/g, '-').split(/[\s\/\-]/)[0];
-    const stats = areaCount[area] || areaCount['global'] || { errors: 0, patterns: 0, decisions: 0, high: 0 };
+    const stats = areaCount[area] || { errors: 0, patterns: 0, decisions: 0, high: 0 };
     mNodes.push({ id: 'impl-' + i, label: m, tipo: 'impl', area, errors: stats.errors, patterns: stats.patterns, high: stats.high, degree: stats.errors + stats.patterns + stats.decisions });
   });
 
@@ -510,7 +584,7 @@ const HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Agentic KDD — ${config.nombre}</title>
+<title>Agentic KDD — ${escHtml(config.nombre)}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <style>
 :root{--bg:#0a0d14;--bg2:#111520;--bg3:#1a1f2e;--bg4:#232840;--border:#2a3050;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--purple:#8b5cf6;--pl:#a78bfa;--green:#10b981;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b;--cyan:#06b6d4;--pink:#ec4899;--r:12px}
@@ -543,14 +617,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* ════════ KNOWLEDGE GRAPH MODE ════════ */
 #mode-graph{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .graph-sub-tabs{display:flex;gap:2px;padding:6px 10px;background:rgba(7,9,13,.95);border-bottom:1px solid rgba(139,92,246,.2);flex-shrink:0}
-.gst{font-size:11px;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;color:rgba(255,255,255,.45);border:1px solid transparent;transition:all .2s;letter-spacing:.02em}
+.gst{font-size:11px;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;color:rgba(255,255,255,.45);border:1px solid transparent;transition:all .2s}
 .gst:hover{color:rgba(255,255,255,.75);background:rgba(139,92,246,.08)}
 .gst.active{color:#c4b5fd;background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.35)}
 #graph-sub-kdd{flex:1;display:flex;overflow:hidden;min-height:0}
 #graph-sub-code{flex:1;display:none;overflow:hidden;position:relative;background:#07090d}
-#graph-sub-combined{flex:1;display:none;overflow:hidden;position:relative;background:#07090d}
-.combined-left{flex:1;position:relative;overflow:hidden}
-.combined-right{width:45%;position:relative;border-left:1px solid rgba(139,92,246,.2);display:flex;flex-direction:column}
+#graph-sub-combined{flex:1;display:none;overflow:hidden;position:relative;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#07090d}
 .code-unavail{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,.35);text-align:center;gap:12px}
 .code-unavail h3{color:rgba(0,229,255,.6);font-size:15px;margin:0}
 .code-unavail code{font-size:11px;background:rgba(255,255,255,.06);padding:4px 10px;border-radius:5px;color:#a5b4fc}
@@ -580,11 +652,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .nitem.selected{background:rgba(139,92,246,.1);border-color:var(--purple)}
 .nitem.god-node{border-left:2px solid var(--amber)}
 .ntb{font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;flex-shrink:0}
-.t-error{background:rgba(255,68,85,.15);color:#ff6677}
-.t-patron{background:rgba(0,229,255,.12);color:#00e5ff}
-.t-decision{background:rgba(216,138,255,.12);color:#d88aff}
-.t-contrato{background:rgba(255,224,64,.12);color:#ffe040}
-.t-ciclo{background:rgba(80,250,123,.12);color:#50fa7b}
+.t-error{background:rgba(239,68,68,.15);color:#f87171}
+.t-patron{background:rgba(16,185,129,.15);color:#34d399}
+.t-decision{background:rgba(59,130,246,.15);color:#60a5fa}
 .mb{font-size:9px;padding:1px 4px;border-radius:3px;font-weight:500}
 .cALTA{background:rgba(16,185,129,.2);color:#34d399}
 .cMEDIA{background:rgba(245,158,11,.2);color:#fbbf24}
@@ -613,7 +683,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sur-dot{color:var(--pink);flex-shrink:0}
 
 /* Graph area */
-.graph-area{flex:1;position:relative;overflow:hidden;background:#07090d}
+.graph-area{flex:1;position:relative;overflow:hidden;background:var(--bg)}
 #gc{width:100%;height:100%}
 .gtt{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:15;max-width:240px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .graph-legend{position:absolute;top:10px;left:10px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;backdrop-filter:blur(4px)}
@@ -759,9 +829,54 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </header>
 
+<style>
+  #mode-intel { background: var(--bg); }
+  .il-title { font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);margin:0 0 12px }
+  .il-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:20px }
+  .il-card { background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px }
+  .il-card-head { display:flex;align-items:center;gap:9px;margin-bottom:12px }
+  .il-card-icon { width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0 }
+  .icon-p { background:rgba(127,119,221,.15) }
+  .icon-g { background:rgba(29,158,117,.15) }
+  .icon-a { background:rgba(239,159,39,.15) }
+  .il-card-name { font-size:13px;font-weight:700;color:var(--text) }
+  .il-card-sub  { font-size:11px;color:var(--text3);margin-top:1px }
+  .il-stat-row { display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px }
+  .il-stat { background:rgba(255,255,255,.03);border-radius:7px;padding:9px;text-align:center }
+  .il-stat-val { font-size:20px;font-weight:800;line-height:1.1 }
+  .il-stat-lbl { font-size:10px;color:var(--text3);margin-top:2px }
+  .vp { color:#9f99e8 } .vg { color:#34d399 } .va { color:#fbbf24 } .vr { color:#f87171 } .vx { color:var(--text2) }
+  .il-list { display:flex;flex-direction:column;gap:5px }
+  .il-row { display:flex;align-items:center;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px }
+  .il-badge { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;white-space:nowrap;flex-shrink:0 }
+  .bp { background:rgba(127,119,221,.2);color:#9f99e8 }
+  .bv { background:rgba(29,158,117,.2);color:#34d399 }
+  .bc { background:rgba(239,159,39,.2);color:#fbbf24 }
+  .bi { background:rgba(248,113,113,.2);color:#f87171 }
+  .il-row-name { flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .il-row-mod  { font-size:10px;color:var(--text3) }
+  .sug-row { display:flex;align-items:flex-start;gap:7px;padding:6px 9px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px;margin-bottom:4px }
+  .sug-type { font-size:9px;font-weight:700;padding:2px 6px;border-radius:9px;background:rgba(239,159,39,.15);color:#fbbf24;white-space:nowrap;flex-shrink:0 }
+  .sug-auto { background:rgba(29,158,117,.15);color:#34d399 }
+  .sug-txt  { color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+  .lvl-bar { display:flex;align-items:center;gap:8px;margin-bottom:10px }
+  .lvl-track { height:5px;flex:1;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden }
+  .lvl-fill  { height:100%;border-radius:3px }
+  .cur-row { display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px }
+  .cur-row:last-child { border-bottom:none }
+  .cur-k { color:var(--text3) } .cur-v { color:var(--text2);font-weight:600 }
+  .empty-state { font-size:12px;color:var(--text3);text-align:center;padding:12px 0 }
+  .obs-panel { background:var(--surface);border:1px solid #3730a3;border-radius:12px;padding:14px 18px;margin-bottom:20px }
+  .obs-head  { display:flex;align-items:center;gap:9px;margin-bottom:9px }
+  .obs-badge { font-size:10px;padding:2px 7px;border-radius:9px;background:rgba(99,91,255,.15);color:#818cf8;font-weight:600 }
+  .obs-txt   { font-size:13px;color:var(--text2);line-height:1.5 }
+  .obs-cmd   { font-family:monospace;font-size:11px;background:rgba(255,255,255,.05);color:#a5b4fc;padding:6px 10px;border-radius:6px;margin-top:8px;display:block }
+  #mode-intel { display:none;flex:1;overflow-y:auto;padding:24px;flex-direction:column;gap:0;align-items:stretch;justify-content:flex-start;box-sizing:border-box; }
+</style>
 <div class="mode-tabs">
   <div class="mode-tab active" onclick="setMode('graph',this)">🧠 <span data-i="tab_graph">Knowledge Graph</span></div>
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
+  <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
 </div>
 
 <div class="content">
@@ -776,7 +891,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="gst" onclick="setGraphTab('combined',this)">⚡ Combined</div>
   </div>
 
-  <!-- KDD Memory view -->
   <div id="graph-sub-kdd">
   <div class="sidebar">
     <div class="sb-tabs">
@@ -790,7 +904,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       ${godNodes.length > 0 ? `
       <div class="god-section">
         <div class="god-title">⚡ <span data-i="divine_nodes">Divine nodes</span></div>
-        ${godNodes.slice(0,3).map(n => `<div class="god-item" onclick="selectNode(${n.id})"><div class="god-ring"></div><span>${n.titulo.slice(0,36)}${n.titulo.length>36?'…':''}</span></div>`).join('')}
+        ${godNodes.slice(0,3).map(n => `<div class="god-item" onclick="selectNode(${n.id})"><div class="god-ring"></div><span>${escHtml(n.titulo.slice(0,36))}${n.titulo.length>36?'…':''}</span></div>`).join('')}
       </div>` : ''}
       ${surprisingEdges.length > 0 ? `
       <div class="sur-section">
@@ -820,7 +934,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div style="margin-bottom:14px">
         <div style="font-size:10px;color:var(--amber);font-weight:600;margin-bottom:6px">⚡ Divine Nodes</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.5">Most connected — everything flows through them</div>
-        ${godNodes.map(n => `<div style="padding:5px 7px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:5px;margin-bottom:3px;cursor:pointer" onclick="selectNode(${n.id})"><div style="font-size:11px;color:var(--amber)">${n.titulo.slice(0,44)}${n.titulo.length>44?'…':''}</div><div style="font-size:10px;color:var(--text3)">${degreeMap[n.id]||0} connections · ${n.area}</div></div>`).join('')}
+        ${godNodes.map(n => `<div style="padding:5px 7px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:5px;margin-bottom:3px;cursor:pointer" onclick="selectNode(${n.id})"><div style="font-size:11px;color:var(--amber)">${escHtml(n.titulo.slice(0,44))}${n.titulo.length>44?'…':''}</div><div style="font-size:10px;color:var(--text3)">${degreeMap[n.id]||0} connections · ${escHtml(n.area)}</div></div>`).join('')}
       </div>` : ''}
       ${surprisingEdges.length > 0 ? `
       <div style="margin-bottom:14px">
@@ -854,7 +968,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">By type</div>
         <div style="font-size:12px;color:var(--text2);line-height:2.2">
-          <span style="color:#ff6677">errors:</span> ${stats.errors} &nbsp; <span style="color:#00e5ff">patterns:</span> ${stats.patterns} &nbsp; <span style="color:#d88aff">decisions:</span> ${stats.decisions}
+          <span style="color:#f87171">errors:</span> ${stats.errors} &nbsp; <span style="color:#34d399">patterns:</span> ${stats.patterns} &nbsp; <span style="color:#60a5fa">decisions:</span> ${stats.decisions}
         </div>
       </div>
     </div>
@@ -865,11 +979,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <svg id="gc"></svg>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend">
-      <div class="lg-item"><div class="lg-dot" style="background:#ff4455;box-shadow:0 0 6px #ff4455"></div><span data-i="l_err">error</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff;box-shadow:0 0 6px #00e5ff"></div><span data-i="l_pat">pattern</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#d88aff;box-shadow:0 0 6px #d88aff"></div><span data-i="l_dec">decision</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#ffe040;box-shadow:0 0 6px #ffe040"></div><span style="color:#ffe040">contrato</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:transparent;border:2px solid #f59e0b;box-sizing:border-box;box-shadow:0 0 6px rgba(245,158,11,.6)"></div><span style="color:var(--amber)" data-i="l_divine">divine</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span data-i="l_err">error</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#10b981"></div><span data-i="l_pat">pattern</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#3b82f6"></div><span data-i="l_dec">decision</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:transparent;border:2px solid #f59e0b;box-sizing:border-box"></div><span style="color:var(--amber)" data-i="l_divine">divine</span></div>
     </div>
     <div class="graph-controls">
       <button class="gc-btn" onclick="resetGraph()" data-i="btn_reset">⟳ Reset</button>
@@ -898,13 +1011,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div id="graph-sub-code">
     <div style="width:100%;height:100%;position:relative;display:flex;flex-direction:column">
       <div id="code-frame-wrap" style="flex:1;position:relative">
-        <iframe id="code-struct-iframe" src="http://localhost:9749" style="width:100%;height:100%;border:none;display:none" onload="document.getElementById('code-unavail-msg').style.display='none';this.style.display='block'"></iframe>
+        <iframe id="code-struct-iframe" style="width:100%;height:100%;border:none;display:none"></iframe>
         <div id="code-unavail-msg" class="code-unavail" style="position:absolute;inset:0">
           <div style="font-size:48px">🔬</div>
           <h3>Code Structure — esperando indexación</h3>
-          <p style="font-size:12px;max-width:340px;line-height:1.7;margin:0">Este módulo muestra el grafo estructural del código (funciones, clases, dependencias). Para activarlo, corre <code>codebase-memory-mcp-ui.exe</code> que expone el puerto 9749.</p>
-          <code>akdd graph-viz → abre KDD Memory</code>
-          <div style="font-size:11px;color:rgba(255,255,255,.2);margin-top:8px">Puerto 9749 no detectado — vuelve a intentar con el botón de abajo</div>
+          <p style="font-size:12px;max-width:340px;line-height:1.7;margin:0">Este módulo muestra el grafo estructural del código (funciones, clases, dependencias) generado por el AST-indexer propio de Agentic KDD.</p>
           <button onclick="reloadCodeFrame()" style="margin-top:4px;background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);color:#00e5ff;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer">↺ Reintentar</button>
         </div>
       </div>
@@ -913,20 +1024,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
   <!-- Combined view -->
   <div id="graph-sub-combined">
-    <div class="combined-left" id="combined-graph-left">
-      <!-- graph-area-main moves here when combined is active -->
-    </div>
-    <div class="combined-right">
-      <div style="padding:6px 10px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(0,229,255,.45);border-bottom:1px solid rgba(139,92,246,.15)">Code Structure</div>
-      <div style="flex:1;position:relative">
-        <iframe id="code-struct-iframe2" src="http://localhost:9749" style="width:100%;height:100%;border:none;display:none" onload="document.getElementById('combined-unavail').style.display='none';this.style.display='block'"></iframe>
-        <div id="combined-unavail" class="code-unavail" style="position:absolute;inset:0">
-          <div style="font-size:32px">🔗</div>
-          <h3 style="font-size:13px">Estructura de código</h3>
-          <p style="font-size:11px;max-width:260px;line-height:1.6;margin:0;color:rgba(255,255,255,.3)">Activa codebase-memory-mcp en el puerto 9749 para ver el grafo estructural del código aquí.</p>
-          <button onclick="reloadCombinedFrame()" style="margin-top:4px;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.2);color:#00e5ff;border-radius:6px;padding:5px 12px;font-size:10px;cursor:pointer">↺ Reintentar</button>
-        </div>
-      </div>
+    <div style="font-size:48px;opacity:.6">⚡</div>
+    <div style="color:#c4b5fd;font-size:15px;font-weight:600;letter-spacing:.03em">Vista Combinada</div>
+    <div style="color:rgba(255,255,255,.4);font-size:12px;text-align:center;max-width:420px;line-height:1.8">
+      Unirá el grafo KDD Memory con el grafo de estructura de código en una sola visualización —
+      mostrando de qué archivos y funciones nació cada patrón, decisión y error.
     </div>
   </div>
 
@@ -976,10 +1078,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         </div>
         <div class="report-section">
           <div class="report-title">📊 Graph Report <span style="font-size:10px;color:var(--text3);font-weight:400">— like Graphify's GRAPH_REPORT.md</span></div>
-          ${godNodes.length > 0 ? `<div class="report-item"><span class="report-key">Divine nodes</span><span>${godNodes.map(n=>n.titulo.slice(0,30)).join(', ')}</span></div>` : ''}
+          ${godNodes.length > 0 ? `<div class="report-item"><span class="report-key">Divine nodes</span><span>${escHtml(godNodes.map(n=>n.titulo.slice(0,30)).join(', '))}</span></div>` : ''}
           ${surprisingEdges.length > 0 ? `<div class="report-item"><span class="report-key">Surprising</span><span>${surprisingEdges.length} cross-area connections found</span></div>` : ''}
-          <div class="report-item"><span class="report-key">HIGH rules</span><span>${patrones.filter(p=>p.confianza==='ALTA').map(p=>p.titulo.slice(0,25)).join(' · ') || 'None yet'}</span></div>
-          <div class="report-item"><span class="report-key">Most errors</span><span>${errores.length > 0 ? errores.sort((a,b)=>b.aplicado-a.aplicado)[0].titulo.slice(0,40) : 'None yet'}</span></div>
+          <div class="report-item"><span class="report-key">HIGH rules</span><span>${escHtml(patrones.filter(p=>p.confianza==='ALTA').map(p=>p.titulo.slice(0,25)).join(' · ')) || 'None yet'}</span></div>
+          <div class="report-item"><span class="report-key">Most errors</span><span>${errores.length > 0 ? escHtml(errores.sort((a,b)=>b.aplicado-a.aplicado)[0].titulo.slice(0,40)) : 'None yet'}</span></div>
         </div>
         <div class="docs-h2">🚀 Getting started</div>
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;color:var(--text2);line-height:2.2">
@@ -995,11 +1097,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="docs-h1" data-i="h_stack">Tech Stack</div>
         <div class="docs-sub" data-i="sub_stack">Technologies and frameworks used in this project.</div>
         <div class="stack-grid">
-          <div class="stack-item"><div class="si-label">Framework</div><div class="si-val">${config.framework || '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Language</div><div class="si-val">${config.language || '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Runtime</div><div class="si-val">${config.runtime || '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Database</div><div class="si-val">${config.base_datos || '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Package Manager</div><div class="si-val">${config.package_manager || '—'}</div></div>
+          <div class="stack-item"><div class="si-label">Framework</div><div class="si-val">${config.framework && config.framework !== '—' ? config.framework : (config.stack || '—')}</div></div>
+          <div class="stack-item"><div class="si-label">Language</div><div class="si-val">${config.language && config.language !== '—' ? config.language : '—'}</div></div>
+          <div class="stack-item"><div class="si-label">Runtime</div><div class="si-val">${config.runtime && config.runtime !== '—' ? config.runtime : '—'}</div></div>
+          <div class="stack-item"><div class="si-label">Database</div><div class="si-val">${config.base_datos && config.base_datos !== '—' ? config.base_datos : '—'}</div></div>
+          <div class="stack-item"><div class="si-label">Package Manager</div><div class="si-val">${config.package_manager && config.package_manager !== '—' ? config.package_manager : '—'}</div></div>
+          ${config.stack ? '<div class="stack-item" style="grid-column:1/-1"><div class="si-label">Full Stack</div><div class="si-val">' + escHtml(config.stack) + '</div></div>' : ''}
         </div>
         <div class="docs-h2">Commands</div>
         <div class="cmd-row"><div class="cmd-label">dev</div><div class="cmd-val">${config.cmd_dev || '—'}</div></div>
@@ -1072,7 +1175,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-rules">
         <div class="docs-h1">Project Rules</div>
         <div class="docs-sub">Rules that apply to all development. The system enforces these automatically.</div>
-        ${reglas.length ? reglas.map(r => `<div class="rule-item"><div class="rule-dot"></div><div>${r}</div></div>`).join('') : '<div class="empty-state">No rules defined yet — run aa: configurar</div>'}
+        ${reglas.length ? reglas.map(r => `<div class="rule-item"><div class="rule-dot"></div><div>${escHtml(r)}</div></div>`).join('') : '<div class="empty-state">No rules defined yet — run aa: configurar</div>'}
       </div>
 
       <!-- PATTERNS -->
@@ -1096,7 +1199,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-decisions">
         <div class="docs-h1">Architectural Decisions</div>
         <div class="docs-sub">Why things are the way they are. The most important layer of project knowledge.</div>
-        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${d.titulo}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${d.area} · ${d.confianza}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
+        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${escHtml(d.titulo)}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${escHtml(d.area)} · ${d.confianza}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
       </div>
 
       <!-- ERRORS -->
@@ -1115,18 +1218,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="docs-sub">Everything a new team member needs to get up to speed.</div>
         <div class="report-section">
           <div class="report-title">💡 Suggested Questions to explore</div>
-          ${suggestedQuestions.map(q => `<div class="question-card">${q}<span class="question-arrow">↗</span></div>`).join('')}
+          ${suggestedQuestions.map(q => `<div class="question-card" onclick="askQuestion(${escHtml(JSON.stringify(q))})">${escHtml(q)}<span class="question-arrow">↗</span></div>`).join('')}
         </div>
         <div class="docs-h2">🔑 Key things to know</div>
         ${patrones.filter(p=>p.confianza==='ALTA').length>0 ? `
         <div style="background:rgba(16,185,129,.05);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:600;color:#34d399;margin-bottom:8px">★ Permanent rules (HIGH confidence)</div>
-          ${patrones.filter(p=>p.confianza==='ALTA').map(p=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${p.titulo}</div>`).join('')}
+          ${patrones.filter(p=>p.confianza==='ALTA').map(p=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${escHtml(p.titulo)}</div>`).join('')}
         </div>` : ''}
         ${errores.length>0 ? `
         <div style="background:rgba(239,68,68,.04);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:14px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:600;color:#f87171;margin-bottom:8px">⚠️ Errors to avoid</div>
-          ${errores.slice(0,3).map(e=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${e.titulo}</div>`).join('')}
+          ${errores.slice(0,3).map(e=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">${escHtml(e.titulo)}</div>`).join('')}
         </div>` : ''}
       </div>
 
@@ -1251,12 +1354,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           ${decisiones.map((d,i) => `<div style="position:relative;margin-bottom:16px">
             <div style="position:absolute;left:-20px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--blue);border:2px solid var(--bg)"></div>
             <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:8px;padding:12px 14px">
-              <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">${d.titulo}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">${escHtml(d.titulo)}</div>
               <div style="display:flex;gap:8px;margin-bottom:6px">
-                <span style="font-size:10px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:1px 6px">${d.area}</span>
+                <span style="font-size:10px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:1px 6px">${escHtml(d.area)}</span>
                 <span style="font-size:10px;color:var(--text3)">${d.confianza}</span>
               </div>
-              ${d.contenido && d.contenido.split('\n').find(l=>l.startsWith('Razón:')) ? `<div style="font-size:11px;color:var(--text2);line-height:1.5">${d.contenido.split('\n').find(l=>l.startsWith('Razón:')).replace('Razón:','').trim()}</div>` : ''}
+              ${d.contenido && d.contenido.split('\n').find(l=>l.startsWith('Razón:')) ? `<div style="font-size:11px;color:var(--text2);line-height:1.5">${escHtml(d.contenido.split('\n').find(l=>l.startsWith('Razón:')).replace('Razón:','').trim())}</div>` : ''}
             </div>
           </div>`).join('')}
         </div>`}
@@ -1275,7 +1378,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-onboarding">
         <div class="docs-h1">🚀 Project Setup</div>
         <div class="docs-sub">How configured is this project with Agentic KDD. Complete all steps for the full system to work.</div>
-        
+
         <!-- Progress bar -->
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -1323,9 +1426,79 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </div>
 
+<!-- ════════ PRESERVATION INTEL ════════ -->
+<div id="mode-intel" style="display:none">
+
+
+
+  <p class="il-title">Contract Guard</p>
+  <div class="il-grid">
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-p">🛡️</div>
+        <div><div class="il-card-name">Contratos verificados</div><div class="il-card-sub">Lo que no se puede romper</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val vp">${contractData.protected}</div><div class="il-stat-lbl">Protected</div></div>
+        <div class="il-stat"><div class="il-stat-val vg">${contractData.verified}</div><div class="il-stat-lbl">Verified</div></div>
+        <div class="il-stat"><div class="il-stat-val va">${contractData.candidate}</div><div class="il-stat-lbl">Candidate</div></div>
+        <div class="il-stat"><div class="il-stat-val ${contractData.violations > 0 ? 'vr' : 'vx'}">${contractData.violations}</div><div class="il-stat-lbl">Violations</div></div>
+      </div>
+      ${contractData.recent && contractData.recent.length > 0 ? `
+      <div class="il-list">
+        ${contractData.recent.map(c => `
+          <div class="il-row">
+            <span class="il-badge b${c.status[0]}">${c.status.toUpperCase()}</span>
+            <span class="il-row-name" title="${escHtml(c.name)}">${escHtml(c.name.substring(0,38))}</span>
+            <span class="il-row-mod">${escHtml(c.module)}</span>
+          </div>`).join('')}
+      </div>` : `<div class="empty-state">Sin contratos — corre ciclos aa: para generarlos</div>`}
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-a">✨</div>
+        <div><div class="il-card-name">Creative Engine</div><div class="il-card-sub">Autonomía creativa dirigida</div></div>
+      </div>
+      <div class="lvl-bar">
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">Nivel ${creativeData.level}</span>
+        <div class="lvl-track"><div class="lvl-fill" style="width:${Math.round(creativeData.level / 3 * 100)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
+        <span style="font-size:11px;color:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap">${creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
+      </div>
+      ${creativeData.level < 2 ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Faltan ${10 - (creativeData.protected_for_level2 || 0)} contratos para Nivel 2</div>` : ''}
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val va">${creativeData.suggestions}</div><div class="il-stat-lbl">Pendientes</div></div>
+        <div class="il-stat"><div class="il-stat-val vg">${creativeData.wins}</div><div class="il-stat-lbl">Aplicadas</div></div>
+      </div>
+      ${creativeData.recent_suggestions && creativeData.recent_suggestions.length > 0 ? `
+        ${creativeData.recent_suggestions.map(s => `
+          <div class="sug-row">
+            <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${s.type}</span>
+            <span class="sug-txt" title="${escHtml(s.title)}">${escHtml(s.title.substring(0,50))}</span>
+          </div>`).join('')}` : `<div class="empty-state">Sin sugerencias todavía</div>`}
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-g">🔬</div>
+        <div><div class="il-card-name">MemCurator</div><div class="il-card-sub">Gobernanza autónoma</div></div>
+      </div>
+      <div class="cur-row"><span class="cur-k">Última curation</span><span class="cur-v">${curatorData.lastRun}</span></div>
+      <div class="cur-row"><span class="cur-k">Auto-run</span><span class="cur-v">cada 10 ciclos</span></div>
+      <div class="cur-row"><span class="cur-k">TTL episódico</span><span class="cur-v">30 días</span></div>
+      <div class="cur-row"><span class="cur-k">Límite nodos</span><span class="cur-v">1,000</span></div>
+      <div class="cur-row"><span class="cur-k">Dedup threshold</span><span class="cur-v">92% Jaccard</span></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        <code style="color:#a5b4fc">akdd cure</code> — manual &nbsp;·&nbsp; <code style="color:#a5b4fc">akdd cure report</code> — preview
+      </div>
+    </div>
+  </div>
+
+</div>
 </div>
 
 <script>
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 const NODES = ${JSON.stringify(nodes)};
 const EDGES = ${JSON.stringify(edges)};
 const M_NODES = ${JSON.stringify(mNodes)};
@@ -1333,7 +1506,7 @@ const M_EDGES = ${JSON.stringify(mEdges)};
 const DEGREE_MAP = ${JSON.stringify(degreeMap)};
 const MAX_DEGREE = ${maxDegree};
 const GOD_THRESHOLD = ${godThreshold};
-const COLORS = {error:'#ff4455',patron:'#00e5ff',decision:'#d88aff',entidad:'#ffaa44',contrato:'#ffe040',ciclo:'#50fa7b',global:'#8b5cf6'};
+const COLORS = {error:'#ef4444',patron:'#10b981',decision:'#3b82f6'};
 let lang='en', isDark=true, currentFilter='all', searchVal='', selectedNodeId=null;
 let simulation, svgEl, linkSel, nodeSel, labelSel, labelsVisible=false;
 let modGraphRendered=false;
@@ -1356,6 +1529,7 @@ function setMode(mode,el){
   document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('mode-graph').style.display=mode==='graph'?'flex':'none';
+  document.getElementById('mode-intel').style.display=mode==='intel'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
 }
@@ -1363,38 +1537,20 @@ function setMode(mode,el){
 function setGraphTab(tab,el){
   document.querySelectorAll('.gst').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('graph-sub-kdd').style.display='none';
-  document.getElementById('graph-sub-code').style.display='none';
-  document.getElementById('graph-sub-combined').style.display='none';
-  const gcMain=document.getElementById('graph-area-main');
-  if(tab==='kdd'){
-    document.getElementById('graph-sub-kdd').style.display='flex';
-    const kdd=document.getElementById('graph-sub-kdd');
-    if(gcMain && gcMain.parentElement!==kdd) kdd.appendChild(gcMain);
-    setTimeout(()=>{if(simulation)simulation.alpha(0.1).restart();},50);
-  } else if(tab==='code'){
-    document.getElementById('graph-sub-code').style.display='flex';
-  } else if(tab==='combined'){
-    document.getElementById('graph-sub-combined').style.display='flex';
-    document.getElementById('graph-sub-combined').style.flexDirection='row';
-    const combLeft=document.getElementById('combined-graph-left');
-    if(gcMain && gcMain.parentElement!==combLeft) combLeft.appendChild(gcMain);
-    setTimeout(()=>{if(simulation)simulation.alpha(0.1).restart();},50);
-  }
+  document.getElementById('graph-sub-kdd').style.display=tab==='kdd'?'flex':'none';
+  document.getElementById('graph-sub-code').style.display=tab==='code'?'flex':'none';
+  document.getElementById('graph-sub-combined').style.display=tab==='combined'?'flex':'none';
+  if(tab==='code')checkCodeStructure();
 }
 
-function reloadCodeFrame(){
+function checkCodeStructure(){
+  const msg=document.getElementById('code-unavail-msg');
   const iframe=document.getElementById('code-struct-iframe');
-  iframe.src='http://localhost:9749';
-  iframe.style.display='none';
-  document.getElementById('code-unavail-msg').style.display='flex';
+  fetch('http://localhost:9749',{signal:AbortSignal.timeout(2000)})
+    .then(r=>{msg.style.display='none';iframe.src='http://localhost:9749';iframe.style.display='block';})
+    .catch(()=>{msg.style.display='flex';iframe.style.display='none';});
 }
-function reloadCombinedFrame(){
-  const iframe=document.getElementById('code-struct-iframe2');
-  iframe.src='http://localhost:9749';
-  iframe.style.display='none';
-  document.getElementById('combined-unavail').style.display='flex';
-}
+function reloadCodeFrame(){ checkCodeStructure(); }
 
 function showDoc(section,el){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -1456,6 +1612,20 @@ function setFilter(f,el){
 
 function filterSearch(val){searchVal=val.toLowerCase();renderNodeList();}
 
+// Las "Suggested Questions" no se responden con texto — se responden mostrando
+// los nodos reales detrás de la pregunta: saltan al grafo, abren la lista de
+// nodos y la filtran por las palabras clave de la pregunta.
+function askQuestion(q){
+  const gTab=document.querySelector('.mode-tab[onclick*="graph"]');
+  if(gTab) setMode('graph',gTab);
+  const nTab=document.querySelector('.sb-tab[onclick*="nodes"]');
+  if(nTab) showSbTab('nodes',nTab);
+  const STOP=new Set(['what','how','why','does','do','is','are','the','a','an','to','for','in','of','on','i','should','this','was','were','decided','permanent','rules','add','feature']);
+  const term=q.toLowerCase().replace(/[?¿]/g,'').split(/\s+/).filter(w=>w.length>2&&!STOP.has(w)).slice(0,4).join(' ');
+  const box=document.getElementById('srch');
+  if(box){ box.value=term; filterSearch(term); box.focus(); }
+}
+
 function getFiltered(){
   let r=NODES;
   if(currentFilter==='ALTA')r=NODES.filter(n=>n.confianza==='ALTA');
@@ -1478,7 +1648,7 @@ function renderNodeList(){
   const tl={error:T[lang].l_err,patron:T[lang].l_pat,decision:T[lang].l_dec};
   if(!filtered.length){list.innerHTML='<div class="empty-state">📭 No nodes found</div>';return;}
   list.innerHTML=filtered.map(n=>{
-    const title=n.titulo.length>48?n.titulo.slice(0,48)+'…':n.titulo;
+    const title=escHtml(n.titulo.length>48?n.titulo.slice(0,48)+'…':n.titulo);
     const isGod=(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
     const deg=DEGREE_MAP[n.id]||0;
     return \`<div class="nitem\${n.id===selectedNodeId?' selected':''}\${isGod?' god-node':''}" onclick="selectNode(\${n.id})" id="nitem-\${n.id}">
@@ -1516,7 +1686,7 @@ function showDetail(node){
   const relHTML=rels.map(r=>{
     const other=r.dir==='out'?nodeMap[r.hacia_id]:nodeMap[r.desde_id];
     if(!other)return'';
-    const t=other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo;
+    const t=escHtml(other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo);
     const relLabel=r.dir==='out'?r.tipo:'← '+r.tipo;
     return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${COLORS[other.tipo]||'#8b5cf6'};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${relLabel}</span></div>\`;
   }).filter(Boolean).join('');
@@ -1527,7 +1697,7 @@ function showDetail(node){
       \${isGod?'<span class="mb" style="background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid rgba(245,158,11,.3)">⚡ divine</span>':''}
       <span class="mb t-\${node.tipo}" style="font-size:11px;padding:3px 8px">\${node.tipo}</span>
       <span class="mb c\${node.confianza}" style="font-size:11px;padding:3px 8px">\${node.confianza}</span>
-      <span class="ab" style="font-size:11px;padding:3px 8px">\${node.area}</span>
+      <span class="ab" style="font-size:11px;padding:3px 8px">\${escHtml(node.area)}</span>
     </div>
     <div class="dp-section">
       <div class="dp-label">Connections · Confidence tag</div>
@@ -1538,7 +1708,7 @@ function showDetail(node){
       <div class="dp-val">\${node.aplicado}x applied · \${node.util}x useful</div>
       \${node.aplicado>0?'<div class="conf-progress"><div class="conf-progress-fill" style="width:'+confPct+'%;background:'+( confPct>=80?'#10b981':confPct>=50?'#f59e0b':'#ef4444')+'"></div></div>':''}
     </div>
-    \${cl?'<div class="dp-section"><div class="dp-label">Details</div><div class="dp-val" style="font-size:10px;background:var(--bg3);border-radius:6px;padding:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto">'+cl+'</div></div>':''}
+    \${cl?'<div class="dp-section"><div class="dp-label">Details</div><div class="dp-val" style="font-size:10px;background:var(--bg3);border-radius:6px;padding:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto">'+escHtml(cl)+'</div></div>':''}
     \${rels.length>0?'<div class="dp-section"><div class="dp-label">Connected nodes ('+rels.length+')</div>'+relHTML+'</div>':''}
   \`;
   document.getElementById('detail-panel').classList.add('visible');
@@ -1548,35 +1718,35 @@ function closeDetail(){
   document.getElementById('detail-panel').classList.remove('visible');
   selectedNodeId=null;
   renderNodeList();
-  if(nodeSel)nodeSel.attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d)).attr('fill-opacity',d=>d.confianza==='ALTA'?0.95:0.65).attr('filter','url(#neon-glow)');
-  if(linkSel)linkSel.attr('stroke-opacity',0.6).attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1);
+  if(nodeSel)nodeSel.attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d)).attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75);
+  if(linkSel)linkSel.attr('stroke-opacity',0.35).attr('stroke','#2a3050').attr('stroke-width',1);
 }
 
 function focusNode(id){
   if(!nodeSel)return;
   nodeSel.attr('stroke',d=>d.id===id?'#fff':getNodeStroke(d))
          .attr('stroke-width',d=>d.id===id?3:getNodeStrokeW(d))
-         .attr('fill-opacity',d=>d.id===id?1:selectedNodeId?0.15:d.confianza==='ALTA'?0.95:0.65);
+         .attr('fill-opacity',d=>d.id===id?1:selectedNodeId?0.2:d.confianza==='ALTA'?1:0.75);
   if(linkSel){
-    linkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?1:0.04)
-           .attr('stroke',e=>e.source.id===id||e.target.id===id?'rgba(196,181,253,0.8)':'rgba(139,92,246,0.2)')
+    linkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?0.9:0.06)
+           .attr('stroke',e=>e.source.id===id||e.target.id===id?'#a78bfa':'#2a3050')
            .attr('stroke-width',e=>e.source.id===id||e.target.id===id?2:1);
   }
 }
 
 function highlightEdge(srcId,tgtId){
   if(!linkSel)return;
-  linkSel.attr('stroke-opacity',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?1:0.04)
-         .attr('stroke',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?'#00e5ff':'rgba(139,92,246,0.2)')
+  linkSel.attr('stroke-opacity',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?1:0.06)
+         .attr('stroke',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?'#ec4899':'#2a3050')
          .attr('stroke-width',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?3:1);
-  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.id===srcId||d.id===tgtId?1:0.1);
+  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.id===srcId||d.id===tgtId?1:0.15);
 }
 
 function highlightByFilter(){
   if(!nodeSel)return;
   const ids=getFiltered().map(n=>n.id);
-  nodeSel.attr('fill-opacity',d=>ids.includes(d.id)?(d.confianza==='ALTA'?0.95:0.8):0.08);
-  if(linkSel)linkSel.attr('stroke-opacity',e=>ids.includes(e.source.id)&&ids.includes(e.target.id)?0.6:0.02);
+  nodeSel.attr('fill-opacity',d=>ids.includes(d.id)?(d.confianza==='ALTA'?1:0.85):0.1);
+  if(linkSel)linkSel.attr('stroke-opacity',e=>ids.includes(e.source.id)&&ids.includes(e.target.id)?0.5:0.03);
 }
 
 function getNodeStroke(d){
@@ -1669,16 +1839,9 @@ function renderGraph(){
     .selectAll('stop').data([{o:'0%',c:'rgba(245,158,11,0.4)'},{o:'100%',c:'rgba(245,158,11,0)'}])
     .enter().append('stop').attr('offset',d=>d.o).attr('stop-color',d=>d.c);
 
-  // Neon glow filter for all nodes
-  const glowFilter=defs.append('filter').attr('id','neon-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
-  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
-  const feMerge=glowFilter.append('feMerge');
-  feMerge.append('feMergeNode').attr('in','blur');
-  feMerge.append('feMergeNode').attr('in','SourceGraphic');
-
   defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
     .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
-    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','rgba(139,92,246,0.4)');
+    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#3a4060');
 
   const links=EDGES.map(e=>({...e,source:e.desde_id,target:e.hacia_id})).filter(e=>nodeMap[e.source]&&nodeMap[e.target]);
 
@@ -1689,10 +1852,12 @@ function renderGraph(){
     }))
     .force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-600:-320))
     .force('center',d3.forceCenter(W/2,H/2))
-    .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4));
+    .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4))
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
 
   linkSel=g.append('g').selectAll('line').data(links).enter().append('line')
-    .attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1).attr('stroke-opacity',0.6)
+    .attr('stroke','#2a3050').attr('stroke-width',1).attr('stroke-opacity',0.35)
     .attr('marker-end','url(#arrow)');
 
   // God node glow circles
@@ -1703,10 +1868,9 @@ function renderGraph(){
     .attr('class','node')
     .attr('r',d=>getNodeRadius(d))
     .attr('fill',d=>COLORS[d.tipo]||'#8b5cf6')
-    .attr('fill-opacity',d=>d.confianza==='ALTA'?0.95:0.65)
+    .attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75)
     .attr('stroke',d=>getNodeStroke(d))
     .attr('stroke-width',d=>getNodeStrokeW(d))
-    .attr('filter','url(#neon-glow)')
     .style('cursor','pointer')
     .call(d3.drag()
       .on('start',(ev,d)=>{if(!ev.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
@@ -1718,7 +1882,7 @@ function renderGraph(){
       const tt=document.getElementById('gtt');
       const deg=DEGREE_MAP[d.id]||0;
       const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
-      tt.innerHTML=\`<strong style="color:var(--text)">\${isGod?'⚡ ':''}\${d.titulo.slice(0,40)}\${d.titulo.length>40?'…':''}</strong><br><span style="color:var(--text3);font-size:10px">\${d.tipo} · \${d.area} · \${d.confianza} · \${deg} connections</span>\`;
+      tt.innerHTML=\`<strong style="color:var(--text)">\${isGod?'⚡ ':''}\${escHtml(d.titulo.slice(0,40))}\${d.titulo.length>40?'…':''}</strong><br><span style="color:var(--text3);font-size:10px">\${d.tipo} · \${escHtml(d.area)} · \${d.confianza} · \${deg} connections</span>\`;
       tt.style.opacity=1;
       const r=container.getBoundingClientRect();
       tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
@@ -1737,8 +1901,8 @@ function renderGraph(){
 
   simulation.on('tick',()=>{
     linkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-    nodeSel.attr('cx',d=>Math.max(15,Math.min(W-15,d.x))).attr('cy',d=>Math.max(15,Math.min(H-15,d.y)));
-    glowSel.attr('cx',d=>Math.max(15,Math.min(W-15,d.x))).attr('cy',d=>Math.max(15,Math.min(H-15,d.y)));
+    nodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
+    glowSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
     if(labelSel)labelSel.attr('x',d=>d.x).attr('y',d=>d.y);
   });
 
@@ -1894,17 +2058,17 @@ function selectModule(label,area,d){
   html+='<div style="font-size:10px;color:var(--text3);margin-bottom:8px">'+(d?d.tipo==='impl'?'Done':'Pending':'')+'</div>';
   if(errs.length>0){
     html+='<div style="margin-bottom:8px"><div style="font-size:10px;color:#f87171;font-weight:600;margin-bottom:4px">Errors ('+errs.length+')</div>';
-    errs.slice(0,3).forEach(function(e){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+e.titulo.slice(0,42)+'</div>';});
+    errs.slice(0,3).forEach(function(e){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(e.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(pats.length>0){
     html+='<div style="margin-bottom:8px"><div style="font-size:10px;color:#34d399;font-weight:600;margin-bottom:4px">HIGH patterns ('+pats.length+')</div>';
-    pats.slice(0,3).forEach(function(p){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+p.titulo.slice(0,42)+'</div>';});
+    pats.slice(0,3).forEach(function(p){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(p.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(decs.length>0){
     html+='<div><div style="font-size:10px;color:#60a5fa;font-weight:600;margin-bottom:4px">Decisions ('+decs.length+')</div>';
-    decs.slice(0,2).forEach(function(dec){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+dec.titulo.slice(0,42)+'</div>';});
+    decs.slice(0,2).forEach(function(dec){html+='<div style="font-size:11px;color:#94a3b8;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">'+escHtml(dec.titulo.slice(0,42))+'</div>';});
     html+='</div>';
   }
   if(!errs.length&&!pats.length&&!decs.length) html+='<div style="font-size:11px;color:#64748b">No knowledge recorded yet.</div>';
@@ -1930,173 +2094,25 @@ renderNodeList();
 renderGraph();
 </script>
 
-    <!-- ───────────────────────────────────────────────────────────────────
-         v3.3 PANELS: CONTRACT GUARD + CREATIVE ENGINE + CURATOR
-    ─────────────────────────────────────────────────────────────────────── -->
-
-    <style>
-    .v33-section { margin: 0 auto 32px; max-width: 1100px; padding: 0 24px; }
-    .v33-title { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #8d99ae; margin: 0 0 14px; }
-    .v33-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    .v33-card { background: #1e2535; border: 1px solid #2e3550; border-radius: 12px; padding: 18px 20px; }
-    .v33-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-    .v33-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
-    .icon-purple { background: rgba(127,119,221,0.15); }
-    .icon-green  { background: rgba(29,158,117,0.15); }
-    .icon-amber  { background: rgba(239,159,39,0.15); }
-    .v33-card-title { font-size: 14px; font-weight: 700; color: #e2e8f0; }
-    .v33-card-sub   { font-size: 11px; color: #64748b; margin-top: 1px; }
-    .v33-stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
-    .v33-stat { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px; text-align: center; }
-    .v33-stat-val { font-size: 22px; font-weight: 800; line-height: 1.1; }
-    .v33-stat-label { font-size: 10px; color: #64748b; margin-top: 2px; }
-    .val-purple { color: #9f99e8; }
-    .val-green  { color: #34d399; }
-    .val-amber  { color: #fbbf24; }
-    .val-red    { color: #f87171; }
-    .val-gray   { color: #94a3b8; }
-    .contract-list { display: flex; flex-direction: column; gap: 6px; }
-    .contract-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border-radius: 7px; font-size: 12px; }
-    .contract-badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; white-space: nowrap; flex-shrink: 0; }
-    .badge-protected { background: rgba(127,119,221,0.2); color: #9f99e8; }
-    .badge-verified  { background: rgba(29,158,117,0.2);  color: #34d399; }
-    .badge-candidate { background: rgba(239,159,39,0.2);  color: #fbbf24; }
-    .badge-invalid   { background: rgba(248,113,113,0.2); color: #f87171; }
-    .contract-name { flex: 1; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .contract-module { font-size: 10px; color: #475569; }
-    .suggestion-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border-radius: 7px; font-size: 12px; margin-bottom: 5px; }
-    .sug-type { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; white-space: nowrap; flex-shrink: 0; background: rgba(239,159,39,0.15); color: #fbbf24; }
-    .sug-auto { background: rgba(29,158,117,0.15); color: #34d399; }
-    .sug-text { color: #94a3b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .level-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .level-indicator { height: 6px; flex: 1; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
-    .level-fill { height: 100%; border-radius: 3px; transition: width .6s; }
-    .curator-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 12px; }
-    .curator-row:last-child { border-bottom: none; }
-    .curator-key { color: #64748b; }
-    .curator-val { color: #94a3b8; font-weight: 600; }
-    .obsidian-panel { background: #1e2535; border: 1px solid #3730a3; border-radius: 12px; padding: 16px 20px; }
-    .obsidian-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .obsidian-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(99,91,255,0.15); color: #818cf8; font-weight: 600; }
-    .obsidian-text { font-size: 13px; color: #94a3b8; line-height: 1.5; }
-    .obsidian-cmd { font-family: monospace; font-size: 11px; background: rgba(255,255,255,0.05); color: #a5b4fc; padding: 6px 10px; border-radius: 6px; margin-top: 8px; display: block; }
-    @media(max-width:600px){ .v33-stat-row { grid-template-columns: repeat(2,1fr); } }
-    </style>
-
-    <div class="v33-section">
-      <div class="v33-title">Preservation Intelligence Layer — v3.3</div>
-      <div class="v33-grid">
-
-        <!-- CONTRACT GUARD -->
-        <div class="v33-card">
-          <div class="v33-card-header">
-            <div class="v33-card-icon icon-purple">🛡️</div>
-            <div><div class="v33-card-title">Contract Guard</div><div class="v33-card-sub">Lo que no se puede romper</div></div>
-          </div>
-          <div class="v33-stat-row">
-            <div class="v33-stat"><div class="v33-stat-val val-purple">${contractData.protected}</div><div class="v33-stat-label">Protected</div></div>
-            <div class="v33-stat"><div class="v33-stat-val val-green">${contractData.verified}</div><div class="v33-stat-label">Verified</div></div>
-            <div class="v33-stat"><div class="v33-stat-val val-amber">${contractData.candidate}</div><div class="v33-stat-label">Candidate</div></div>
-            <div class="v33-stat"><div class="v33-stat-val ${contractData.violations > 0 ? 'val-red' : 'val-gray'}">${contractData.violations}</div><div class="v33-stat-label">Violations</div></div>
-          </div>
-          ${contractData.recent && contractData.recent.length > 0 ? `
-          <div class="contract-list">
-            ${contractData.recent.map(c => `
-              <div class="contract-row">
-                <span class="contract-badge badge-${c.status}">${c.status.toUpperCase()}</span>
-                <span class="contract-name" title="${escHtml(c.name)}">${escHtml(c.name.substring(0,35))}</span>
-                <span class="contract-module">${escHtml(c.module)}</span>
-              </div>
-            `).join('')}
-          </div>` : `<div style="font-size:12px;color:#475569;text-align:center;padding:12px 0">Sin contratos todavía — corre más ciclos aa: para generarlos automáticamente</div>`}
-        </div>
-
-        <!-- CREATIVE ENGINE -->
-        <div class="v33-card">
-          <div class="v33-card-header">
-            <div class="v33-card-icon icon-amber">✨</div>
-            <div><div class="v33-card-title">Creative Engine</div><div class="v33-card-sub">Autonomía creativa dirigida</div></div>
-          </div>
-          <div class="level-bar">
-            <span style="font-size:11px;color:#64748b;white-space:nowrap">Nivel ${creativeData.level}</span>
-            <div class="level-indicator"><div class="level-fill" style="width:${(creativeData.level / 3 * 100).toFixed(0)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
-            <span style="font-size:11px;color:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap">${creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
-          </div>
-          ${creativeData.level < 2 ? `<div style="font-size:11px;color:#475569;margin-bottom:10px">Faltan ${10 - (creativeData.protected_for_level2 || 0)} contratos verificados para Nivel 2</div>` : ''}
-          <div class="v33-stat-row">
-            <div class="v33-stat"><div class="v33-stat-val val-amber">${creativeData.suggestions}</div><div class="v33-stat-label">Pendientes</div></div>
-            <div class="v33-stat"><div class="v33-stat-val val-green">${creativeData.wins}</div><div class="v33-stat-label">Aplicadas</div></div>
-          </div>
-          ${creativeData.recent_suggestions && creativeData.recent_suggestions.length > 0 ? `
-          <div>
-            ${creativeData.recent_suggestions.map(s => `
-              <div class="suggestion-row">
-                <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${s.type}</span>
-                <span class="sug-text" title="${escHtml(s.title)}">${escHtml(s.title.substring(0,50))}</span>
-              </div>
-            `).join('')}
-          </div>` : `<div style="font-size:12px;color:#475569;text-align:center;padding:8px 0">Sin sugerencias — se generan automáticamente cada ciclo</div>`}
-        </div>
-
-        <!-- MEM CURATOR -->
-        <div class="v33-card">
-          <div class="v33-card-icon icon-green" style="margin-bottom:14px;width:auto;height:auto;padding:0;display:flex;gap:10px;align-items:center;background:none">
-            <div style="width:32px;height:32px;border-radius:8px;background:rgba(29,158,117,0.15);display:flex;align-items:center;justify-content:center;font-size:16px">🔬</div>
-            <div><div class="v33-card-title">MemCurator</div><div class="v33-card-sub">Gobernanza autónoma de memoria</div></div>
-          </div>
-          <div class="curator-row"><span class="curator-key">Última curation</span><span class="curator-val">${curatorData.lastRun}</span></div>
-          <div class="curator-row"><span class="curator-key">Ciclos para auto-run</span><span class="curator-val">cada 10</span></div>
-          <div class="curator-row"><span class="curator-key">TTL episódico</span><span class="curator-val">30 días</span></div>
-          <div class="curator-row"><span class="curator-key">Límite nodos activos</span><span class="curator-val">1,000</span></div>
-          <div class="curator-row"><span class="curator-key">Dedup threshold</span><span class="curator-val">92% Jaccard</span></div>
-          <div style="margin-top:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:11px;color:#64748b">
-            <code style="color:#a5b4fc">akdd cure</code> — curation manual<br>
-            <code style="color:#a5b4fc">akdd cure report</code> — preview sin cambios
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <!-- OBSIDIAN MCP OPTIONAL CONNECTOR -->
-    <div class="v33-section">
-      <div class="v33-title">Conector opcional — Obsidian MCP</div>
-      <div class="obsidian-panel">
-        <div class="obsidian-header">
-          <span style="font-size:20px">🗂️</span>
-          <div style="flex:1">
-            <span style="font-size:14px;font-weight:700;color:#e2e8f0">Obsidian como fuente humana</span>
-            <span class="obsidian-badge" style="margin-left:8px">OPCIONAL</span>
-          </div>
-        </div>
-        <div class="obsidian-text">
-          Si usas Obsidian, el plugin MCP conecta tu vault directamente con Agentic KDD.<br>
-          Tus notas personales, decisiones y gotchas fluyen al grafo automáticamente — sin hacer <code style="color:#a5b4fc">akdd knowledge</code> manual.
-        </div>
-        <code class="obsidian-cmd">1. Instalar plugin "Obsidian MCP Server" en Obsidian<br>2. En Claude Code/Cursor: agrega el servidor MCP del plugin<br>3. La herramienta obsidian_read_notes queda disponible en el chat</code>
-        <div style="font-size:11px;color:#475569;margin-top:8px">Sin Obsidian instalado: usa <code style="color:#a5b4fc">akdd knowledge</code> normalmente — mismo resultado.</div>
-      </div>
-    </div>
-
   </body>
 </html>`;
 
-const server = http.createServer((req, res) => {
+const server = require('http').createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(HTML);
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
-  console.log('\n  \x1b[34mAgentic KDD Dashboard v4\x1b[0m');
-  console.log(`  Project: ${config.nombre}`);
-  console.log(`  Nodes: ${stats.total} | Divine: ${stats.godNodes} | Surprising: ${stats.surprising} | HIGH: ${stats.high}`);
-  console.log(`\n  \x1b[36m→ ${url}\x1b[0m\n`);
-  console.log('  Ctrl+C to stop\n');
-  try {
-    const cmd = process.platform === 'win32' ? `start ${url}` : process.platform === 'darwin' ? `open ${url}` : `xdg-open ${url}`;
-    require('child_process').execSync(cmd, { stdio: 'ignore' });
-  } catch {}
+  console.log(`\n  Agentic KDD Dashboard v4`);
+  console.log(`  → ${url}\n`);
+  // Open browser
+  const { exec } = require('child_process');
+  const cmd = process.platform === 'win32' ? `start "" "${url}"`
+            : process.platform === 'darwin' ? `open "${url}"`
+            : `xdg-open "${url}"`;
+  exec(cmd, (err) => {
+    if (err) console.log(`  Open manually: ${url}`);
+  });
+  console.log('  Press Ctrl+C to stop\n');
 });
-
-process.on('SIGINT', () => { server.close(); console.log('\n  Stopped.\n'); process.exit(0); });
