@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agentix-graph",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\lumo\\.agentic\\grafo\\graph-server.cjs", "C:\\lumo"],
+      "port": 9750
+    }
+  ]
+}

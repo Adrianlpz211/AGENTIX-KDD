@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agentix — Knowledge Graph</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#07090d;color:#c8d0d8;font-family:'Inter',system-ui,sans-serif;font-size:13px}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.hdr{display:flex;align-items:center;gap:20px;padding:0 20px;height:46px;border-bottom:1px solid #151c26;background:#07090d;flex-shrink:0}
+.logo{font-size:12px;font-weight:700;letter-spacing:2px;color:#3FE2E8;text-transform:uppercase}
+.logo span{color:#546e7a;font-weight:400}
+.tabs{display:flex;gap:2px}
+.tab{padding:5px 15px;border-radius:5px;cursor:pointer;font-size:12px;color:#546e7a;border:1px solid transparent;transition:all .18s;letter-spacing:.3px}
+.tab:hover{color:#c8d0d8;background:#111820}
+.tab.on{color:#3FE2E8;border-color:#1e3a3e;background:rgba(63,226,232,.07)}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.badge{font-size:11px;color:#546e7a;background:#0f151e;border:1px solid #151c26;padding:3px 9px;border-radius:4px}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+.content{height:calc(100vh - 46px);display:flex}
+.panel{display:none;width:100%;height:100%}
+.panel.on{display:flex}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+.sidebar{width:220px;flex-shrink:0;background:#07090d;border-right:1px solid #151c26;display:flex;flex-direction:column;overflow:hidden}
+.sb-section{padding:14px 14px 8px;border-bottom:1px solid #151c26}
+.sb-label{font-size:10px;color:#3a4a5a;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:10px}
+.search{width:100%;background:#0d1520;border:1px solid #151c26;border-radius:5px;padding:5px 9px;color:#c8d0d8;font-size:12px;outline:none}
+.search::placeholder{color:#3a4a5a}
+.search:focus{border-color:#1e3a3e;box-shadow:0 0 0 2px rgba(63,226,232,.08)}
+
+/* Legend */
+.leg-item{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:background .15s}
+.leg-item:hover{background:#0d1520}
+.leg-item.off{opacity:.35}
+.leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.leg-name{color:#8a9aaa;font-size:12px}
+.leg-n{margin-left:auto;font-size:11px;color:#3a4a5a;font-variant-numeric:tabular-nums}
+
+/* Stats */
+.stat{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #0d1520}
+.stat-k{color:#3a4a5a;font-size:11px}
+.stat-v{color:#3FE2E8;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* Node detail */
+.detail{padding:12px 14px;font-size:12px;color:#546e7a;flex:1;overflow-y:auto}
+.detail-title{color:#c8d0d8;font-weight:600;margin-bottom:6px;font-size:13px;word-break:break-word}
+.detail-row{display:flex;gap:6px;margin-bottom:4px}
+.detail-key{color:#3a4a5a;min-width:70px}
+.detail-val{color:#8a9aaa;word-break:break-word}
+.detail-chip{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;margin-top:4px}
+
+/* ── Graph canvas ──────────────────────────────────────────────────────────── */
+.graph-area{flex:1;position:relative;overflow:hidden}
+.graph-area canvas{display:block}
+
+/* ── Iframe tab ──────────────────────────────────────────────────────────── */
+#tab-code iframe{width:100%;height:100%;border:none;display:block}
+
+/* ── Combined tab ──────────────────────────────────────────────────────────── */
+.split{display:flex;width:100%;height:100%}
+.split-half{flex:1;position:relative;overflow:hidden}
+.split-divider{width:1px;background:#151c26;flex-shrink:0}
+.split-label{position:absolute;top:10px;left:10px;z-index:9;font-size:10px;color:#3a4a5a;text-transform:uppercase;letter-spacing:1px;background:rgba(7,9,13,.8);padding:3px 8px;border-radius:4px;border:1px solid #151c26}
+.split-half iframe{width:100%;height:100%;border:none;display:block}
+
+/* ── Tooltip ──────────────────────────────────────────────────────────────── */
+#tip{position:fixed;background:#0d1520;border:1px solid #1e2a38;border-radius:7px;padding:9px 12px;font-size:12px;pointer-events:none;z-index:999;max-width:260px;display:none;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+#tip-name{font-weight:600;color:#e0e8f0;margin-bottom:3px}
+#tip-meta{color:#546e7a;font-size:11px;line-height:1.5}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="logo">Agentix <span>/ Graph</span></div>
+  <div class="tabs">
+    <div class="tab on"  onclick="showTab('kdd')">KDD Memory</div>
+    <div class="tab"     onclick="showTab('code')">Code Structure</div>
+    <div class="tab"     onclick="showTab('combined')">Combined</div>
+  </div>
+  <div class="hdr-right">
+    <div class="badge" id="hdr-badge">cargando...</div>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- ── TAB 1: KDD Memory ───────────────────────────────────────────────── -->
+  <div class="panel on" id="tab-kdd">
+    <div class="sidebar">
+      <div class="sb-section">
+        <div class="sb-label">Buscar</div>
+        <input class="search" id="kdd-search" placeholder="Buscar nodo..." oninput="applySearch(this.value)">
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Tipos</div>
+        <div id="legend"></div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Stats</div>
+        <div id="stats"></div>
+      </div>
+      <div class="detail" id="detail">
+        <div style="color:#3a4a5a;font-size:11px;margin-top:4px">Haz click en un nodo para inspeccionar</div>
+      </div>
+    </div>
+    <div class="graph-area" id="kdd-mount"></div>
+  </div>
+
+  <!-- ── TAB 2: Code Structure ───────────────────────────────────────────── -->
+  <div class="panel" id="tab-code">
+    <iframe src="http://localhost:9749" title="Code Structure — codebase-memory-mcp"></iframe>
+  </div>
+
+  <!-- ── TAB 3: Combined ─────────────────────────────────────────────────── -->
+  <div class="panel" id="tab-combined">
+    <div class="split">
+      <div class="split-half">
+        <div class="split-label">KDD Memory</div>
+        <div id="combined-mount" style="width:100%;height:100%"></div>
+      </div>
+      <div class="split-divider"></div>
+      <div class="split-half">
+        <div class="split-label">Code Structure</div>
+        <iframe src="http://localhost:9749"></iframe>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="tip"><div id="tip-name"></div><div id="tip-meta"></div></div>
+
+<!-- force-graph CDN -->
+<script src="https://unpkg.com/force-graph@1.43.5/dist/force-graph.min.js"></script>
+<script>
+// ── Node visual config ────────────────────────────────────────────────────────
+const CFG = {
+  error:    { color: '#ff4455', glow: 'rgba(255,40,60,0.45)',   label: 'Error' },
+  patron:   { color: '#00e5ff', glow: 'rgba(0,220,255,0.40)',   label: 'Patrón' },
+  decision: { color: '#d88aff', glow: 'rgba(200,100,255,0.38)', label: 'Decisión' },
+  entidad:  { color: '#ffaa44', glow: 'rgba(255,160,40,0.38)',  label: 'Entidad' },
+  contrato: { color: '#ffe040', glow: 'rgba(255,220,0,0.40)',   label: 'Contrato' },
+  ciclo:    { color: '#50fa7b', glow: 'rgba(60,240,100,0.35)',  label: 'Ciclo' },
+  global:   { color: '#78909c', glow: 'rgba(100,130,150,0.30)', label: 'Global' },
+};
+const DFLT = { color: '#445566', glow: 'rgba(60,80,100,0.25)', label: 'Otro' };
+function cfg(tipo) { return CFG[tipo] || DFLT; }
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allData = { nodes: [], links: [] };
+let visible = new Set(Object.keys(CFG));
+let kddG = null, comboG = null;
+let combinedInited = false;
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+function nodeCanvasObj(node, ctx, scale) {
+  const c  = cfg(node.tipo);
+  const r  = Math.sqrt(node.val || 3) * 2.8;
+  const x  = node.x, y = node.y;
+
+  // outer glow
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 2.5);
+  grad.addColorStop(0,   c.glow);
+  grad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.5, 0, 2*Math.PI);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // core
+  ctx.shadowBlur  = 10;
+  ctx.shadowColor = c.color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 2*Math.PI);
+  ctx.fillStyle = c.color;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // label at high zoom
+  if (scale > 2 && node.label) {
+    const fs = Math.min(8 / scale, 3.5);
+    ctx.font      = `${fs}px Inter,system-ui,sans-serif`;
+    ctx.fillStyle = 'rgba(200,215,230,0.85)';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.label.substring(0,22), x, y + r + fs + 1);
+  }
+}
+
+function buildGraph(mountId, data) {
+  const el = document.getElementById(mountId);
+  if (!el) return null;
+  const g = ForceGraph()(el)
+    .backgroundColor('#07090d')
+    .nodeId('id')
+    .nodeVal(n => n.val || 3)
+    .nodeColor(n => cfg(n.tipo).color)
+    .nodeCanvasObject(nodeCanvasObj)
+    .nodeCanvasObjectMode(() => 'replace')
+    .linkColor(() => 'rgba(80,120,160,0.12)')
+    .linkWidth(0.4)
+    .linkDirectionalParticles(0)
+    .d3AlphaDecay(0.018)
+    .d3VelocityDecay(0.35)
+    .onNodeHover(node => {
+      const tip = document.getElementById('tip');
+      if (node) {
+        tip.style.display = 'block';
+        document.getElementById('tip-name').textContent = node.label || node.id;
+        document.getElementById('tip-meta').innerHTML =
+          `Tipo: <b>${node.tipo}</b> &nbsp;·&nbsp; Área: ${node.area||'—'}<br>` +
+          `Confianza: ${node.confianza||'—'} &nbsp;·&nbsp; Accesos: ${node.accesos||0}`;
+      } else {
+        tip.style.display = 'none';
+      }
+    })
+    .onNodeClick(node => showDetail(node));
+  return g;
+}
+
+document.addEventListener('mousemove', e => {
+  const t = document.getElementById('tip');
+  t.style.left = (e.clientX + 14) + 'px';
+  t.style.top  = (e.clientY - 8)  + 'px';
+});
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+function renderLegend(data) {
+  const counts = {};
+  data.nodes.forEach(n => { counts[n.tipo] = (counts[n.tipo]||0)+1; });
+
+  const leg = document.getElementById('legend');
+  leg.innerHTML = '';
+  Object.entries(CFG).forEach(([tipo, c]) => {
+    if (!counts[tipo]) return;
+    const d = document.createElement('div');
+    d.className = 'leg-item' + (visible.has(tipo) ? '' : ' off');
+    d.dataset.tipo = tipo;
+    d.innerHTML = `<div class="leg-dot" style="background:${c.color};box-shadow:0 0 5px ${c.color}"></div><span class="leg-name">${c.label}</span><span class="leg-n">${counts[tipo]}</span>`;
+    d.onclick = () => toggleType(tipo);
+    leg.appendChild(d);
+  });
+
+  const st = document.getElementById('stats');
+  st.innerHTML = `
+    <div class="stat"><span class="stat-k">Nodos</span><span class="stat-v">${data.nodes.length}</span></div>
+    <div class="stat"><span class="stat-k">Relaciones</span><span class="stat-v">${data.links.length}</span></div>
+    ${Object.entries(counts).map(([t,n])=>`<div class="stat"><span class="stat-k">${CFG[t]?.label||t}</span><span class="stat-v">${n}</span></div>`).join('')}
+  `;
+
+  document.getElementById('hdr-badge').textContent = `${data.nodes.length} nodos · ${data.links.length} edges`;
+}
+
+// ── Filter helpers ────────────────────────────────────────────────────────────
+function filtered(searchQ) {
+  let nodes = allData.nodes.filter(n => visible.has(n.tipo));
+  if (searchQ) {
+    const q = searchQ.toLowerCase();
+    nodes = nodes.filter(n => (n.label||'').toLowerCase().includes(q) || (n.area||'').toLowerCase().includes(q));
+  }
+  const ids = new Set(nodes.map(n=>n.id));
+  return { nodes, links: allData.links.filter(l => ids.has(l.source?.id||l.source) && ids.has(l.target?.id||l.target)) };
+}
+
+function toggleType(tipo) {
+  if (visible.has(tipo)) visible.delete(tipo); else visible.add(tipo);
+  document.querySelectorAll('.leg-item').forEach(el => {
+    el.classList.toggle('off', !visible.has(el.dataset.tipo));
+  });
+  const d = filtered(document.getElementById('kdd-search').value);
+  kddG && kddG.graphData(d);
+}
+
+function applySearch(q) {
+  const d = filtered(q);
+  kddG && kddG.graphData(d);
+}
+
+// ── Node detail ───────────────────────────────────────────────────────────────
+function showDetail(node) {
+  const c = cfg(node.tipo);
+  const chip = `<span class="detail-chip" style="background:${c.color}22;color:${c.color};border:1px solid ${c.color}44">${CFG[node.tipo]?.label||node.tipo}</span>`;
+  document.getElementById('detail').innerHTML = `
+    <div class="detail-title">${node.label||node.id}</div>
+    ${chip}
+    <div style="height:10px"></div>
+    <div class="detail-row"><span class="detail-key">Área</span><span class="detail-val">${node.area||'—'}</span></div>
+    <div class="detail-row"><span class="detail-key">Confianza</span><span class="detail-val">${node.confianza||'—'}</span></div>
+    <div class="detail-row"><span class="detail-key">Estado</span><span class="detail-val">${node.estado||'—'}</span></div>
+    <div class="detail-row"><span class="detail-key">Aplicado</span><span class="detail-val">${node.aplicado||0}</span></div>
+    <div class="detail-row"><span class="detail-key">Accesos</span><span class="detail-val">${node.accesos||0}</span></div>
+  `;
+}
+
+// ── Tab switch ────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('on', ['kdd','code','combined'][i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  document.getElementById('tab-' + name).classList.add('on');
+
+  if (name === 'combined' && !combinedInited && allData.nodes.length > 0) {
+    combinedInited = true;
+    setTimeout(() => {
+      comboG = buildGraph('combined-mount', allData);
+      comboG && comboG.graphData(filtered(''));
+    }, 80);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+fetch('/api/graph.json')
+  .then(r => r.json())
+  .then(data => {
+    allData = data;
+    renderLegend(data);
+    kddG = buildGraph('kdd-mount', data);
+    kddG && kddG.graphData(filtered(''));
+  })
+  .catch(() => {
+    document.getElementById('kdd-mount').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3a4a5a;font-size:13px">No se pudo cargar memoria.db</div>';
+  });
+</script>
+</body>
+</html>

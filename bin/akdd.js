@@ -127,6 +127,9 @@ const HELP = `
     akdd ci-install        Install GitHub Actions CI/CD workflow
     akdd ci-status         Show last CI/CD reports
 
+  Graph Visualization:
+    akdd graph-viz         Open KDD Memory graph — glowing force-directed graph in browser
+
   Dashboard:
     akdd dashboard         Open visual dashboard in browser
 
@@ -409,6 +412,12 @@ switch (command) {
     } else {
       runModule('collab-manager.cjs', 'status');
     }
+    break;
+  }
+
+  // ── Graph Visualization ───────────────────────────────────────────────
+  case 'graph-viz': {
+    runModule('graph-server.cjs', '', process.cwd());
     break;
   }
 

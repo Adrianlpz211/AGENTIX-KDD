@@ -124,6 +124,7 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd reason recall <query>` | correr `node .agentic/grafo/reasoning-bank.cjs recall "<query>"` |
 | `akdd resolve-errors [area]` | correr `node .agentic/grafo/creative-engine.cjs resolve-errors [area]` |
 | `akdd auto-confirm [days]` | correr `node .agentic/grafo/creative-engine.cjs auto-confirm [days]` |
+| `akdd graph-viz` | correr `node .agentic/grafo/graph-server.cjs [cwd]` |
 
 Los comandos que SÍ requieren terminal (solo estos dos):
 - `npm install -g agentic-kdd` → instalar el CLI por primera vez
