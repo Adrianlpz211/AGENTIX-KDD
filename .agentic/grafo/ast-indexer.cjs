@@ -530,7 +530,7 @@ function computePageRank(db, iterations = 20, dampingFactor = 0.85) {
     for (const file of files) {
       let links;
       try {
-        links = db.prepare('SELECT to_file, weight FROM ast_edges WHERE from_file = ? AND to_file IS NOT NULL').all(file);
+        links = db.prepare("SELECT to_file, weight FROM ast_edges WHERE from_file = ? AND to_file IS NOT NULL AND kind != 'CALLS'").all(file);
       } catch { continue; }
 
       if (links.length === 0) continue;
@@ -570,7 +570,7 @@ function analyzeImpact(db, target) {
     directDeps = db.prepare(`
       SELECT DISTINCT from_file, kind, weight
       FROM ast_edges
-      WHERE to_file LIKE ? OR to_symbol LIKE ?
+      WHERE (to_file LIKE ? OR to_symbol LIKE ?) AND kind != 'CALLS' AND (to_file IS NULL OR to_file != from_file)
       ORDER BY weight DESC
     `).all(`%${target}%`, `%${target}%`);
 
@@ -578,7 +578,7 @@ function analyzeImpact(db, target) {
       SELECT DISTINCT ae2.from_file
       FROM ast_edges ae1
       JOIN ast_edges ae2 ON ae1.from_file = ae2.to_file
-      WHERE ae1.to_file LIKE ?
+      WHERE ae1.to_file LIKE ? AND ae1.kind != 'CALLS' AND ae2.kind != 'CALLS'
       LIMIT 50
     `).all(`%${target}%`);
   } catch {
