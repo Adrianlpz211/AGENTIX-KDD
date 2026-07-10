@@ -271,35 +271,44 @@ node .agentic/grafo/causal-edges.cjs history [archivo]
 Si hay `caused_failure` en la memoria: incluir precaución en el plan.
 Si hay `was_fixed_by`: anotar el fix conocido como referencia.
 
-### PASO 4.5 — Estructura del código con codebase-memory-mcp (OPCIONAL)
+### PASO 4.5 — Estructura del código (OBLIGATORIO, 100% nativo)
 
-Solo si codebase-memory-mcp está activo (puerto 9749):
+Ya no depende de ninguna herramienta externa. Corre siempre, es una simple
+consulta SQL contra `.agentic/memoria.db` (tablas `ast_symbols`/`ast_edges`,
+llenadas por `ast-indexer.cjs` — con caché por `content_hash`, así que no
+reindexa archivos sin cambios; es rápido).
 
-**trace_path** — Traza la ruta de llamadas real entre el punto de entrada y el módulo a tocar.
-Úsalo cuando la tarea toca un módulo que otros módulos llaman — para entender el chain completo.
+**Antes de planificar, correr siempre:**
 
 ```bash
+# Impacto de tocar el archivo/módulo objetivo (severidad BAJO/MEDIO/ALTO)
+node .agentic/grafo/ast-indexer.cjs impacto "[archivo o módulo]"
+
+# Ruta de dependencias entre el punto de entrada y el módulo a tocar
 node .agentic/grafo/causal-edges.cjs trace [archivo_entrada] [módulo_destino]
-```
 
-**detect_changes** — Detecta qué archivos cambiaron estructuralmente y qué downstream impactan.
-Úsalo antes de planificar para no perderte dependencias no declaradas.
-
-```bash
+# Qué cambió estructuralmente desde el último index (útil si el índice
+# lleva tiempo sin correr)
 node .agentic/grafo/causal-edges.cjs detect-changes
 ```
 
-**enrich** — Enriquece los edges causales de KDD con datos reales del call-graph.
-Corre después de indexar el proyecto con codebase-memory-mcp.
-
+Si el índice AST no existe todavía (proyecto nunca indexado), correr primero:
 ```bash
-node .agentic/grafo/causal-edges.cjs enrich [módulo]
+node .agentic/grafo/ast-indexer.cjs index
 ```
+Esto es automático la primera vez — el Analista lo detecta si `impacto`/`trace`
+devuelven "sin datos AST" y corre `index` sin preguntar.
 
-Si el puerto 9749 no responde → ignorar silenciosamente, continuar sin este contexto.
-El análisis estructural enriquece pero nunca es bloqueante.
+**Aplicación de resultados:**
+- Severidad ALTO en `impacto` → incluir en el plan como restricción explícita,
+  igual que un gotcha de severidad ALTO.
+- Si `trace` encuentra una ruta → esos archivos entran a `allowed_files` del
+  plan, aunque no se hayan mencionado en la tarea original.
+- Si `patrones.md` ya tiene una entrada `[ESTRUCTURAL]` que menciona alguno
+  de los archivos en la ruta → aplicarla como regla ALTA confianza, igual que
+  cualquier patrón HIGH — el sistema ya aprendió que esa cadena falla.
 
-### Orden final de lectura (v3.2 + codebase-memory)
+### Orden final de lectura (v3.3 — estructura nativa, sin dependencia externa)
 
 ```
 1. grafo.cjs buscar "[tarea]" [área]                  → memoria KDD general
@@ -309,8 +318,8 @@ El análisis estructural enriquece pero nunca es bloqueante.
 5. knowledge-ingestor.cjs query [módulo]               → gotchas y restricciones
 6. spec-manager.cjs waves [módulo]                     → tareas ordenadas por wave
 7. causal-edges.cjs query [módulo]                     → historial de fallos
-8. causal-edges.cjs detect-changes          (OPCIONAL) → cambios estructurales recientes
-9. causal-edges.cjs trace [entrada] [módulo](OPCIONAL) → ruta de llamadas real
+8. causal-edges.cjs detect-changes          (SIEMPRE) → cambios estructurales recientes
+9. causal-edges.cjs trace [entrada] [módulo](SIEMPRE) → ruta de llamadas real, nativo
 ```
 
 
@@ -381,9 +390,11 @@ que devuelva un **resumen compacto** (no volcar archivos crudos):
   ADRs vigentes, gotchas ALTO/MEDIO.
 - 📋 **Sub-agente SPEC** → `spec-manager.cjs status/waves` + `causal-edges.cjs query` →
   criterios del spec, waves, historial de fallos.
-- 🔬 **Sub-agente ESTRUCTURA** (OPCIONAL, si puerto 9749 activo) →
+- 🔬 **Sub-agente ESTRUCTURA** (SIEMPRE, nativo) →
   `causal-edges.cjs detect-changes` + `causal-edges.cjs trace [entrada] [módulo]` →
   call-chain real, cambios estructurales recientes, downstream no declarado.
+  Ya no depende de codebase-memory-mcp — es una query SQL contra el índice AST
+  propio de Agentix.
 
 Luego TÚ (orquestador) **fusionas los 4 resúmenes** en el PLAN.md de forma
 determinista: dedup, prioriza por `_score`/severidad, y arma las fases.
