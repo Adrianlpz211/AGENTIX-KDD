@@ -115,9 +115,14 @@ function readConfig() {
     return {
       nombre: get('Nombre'),
       descripcion: (() => {
-        // Descripción puede ser multilinea con |
-        const m = c.match(/Descripción: \|\n([\s\S]*?)(?=\nTipo:|$)/);
-        if (m) return m[1].split('\n').map(l => l.trim()).filter(Boolean).join(' ');
+        // Descripción puede ser multilínea con | (bloque YAML)...
+        const pipeMatch = c.match(/Descripción: \|\n([\s\S]*?)(?=\nTipo:|$)/);
+        if (pipeMatch) return pipeMatch[1].split('\n').map(l => l.trim()).filter(Boolean).join(' ');
+        // ...o texto plano que sigue sin marcador en las líneas de abajo (el
+        // formato real que usa este proyecto) — antes esto se cortaba en la
+        // primera línea porque get() solo captura hasta el primer salto.
+        const plainMatch = c.match(/Descripción:\s*([\s\S]*?)(?=\n(?:Tipo|Nombre):|\n##|\n\s*\n)/);
+        if (plainMatch) return plainMatch[1].split('\n').map(l => l.trim()).filter(Boolean).join(' ');
         return get('Descripción');
       })(),
       tipo: get('Tipo'),
