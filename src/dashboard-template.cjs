@@ -357,24 +357,27 @@ function getGraphData() {
 function getCodeStructureGraph() {
   const empty = { nodes: [], edges: [] };
   if (!fs.existsSync(dbPath)) return empty;
-  let _db;
-  try {
-    const BS3 = require('better-sqlite3');
-    _db = new BS3(dbPath, { readonly: true });
 
-    // Agregación a nivel de ARCHIVO (no función individual) para que el
-    // grafo sea legible — cientos de archivos es manejable, miles de funciones no.
-    const files = _db.prepare(`
-      SELECT file,
-             MAX(pagerank) as pagerank,
-             COUNT(*) as symbol_count,
-             SUM(CASE WHEN kind='function' THEN 1 ELSE 0 END) as functions,
-             SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes
-      FROM ast_symbols
-      GROUP BY file
-      ORDER BY pagerank DESC
-    `).all();
+  // Agregación a nivel de ARCHIVO (no función individual) para que el
+  // grafo sea legible — cientos de archivos es manejable, miles de funciones no.
+  const FILES_SQL = `
+    SELECT file,
+           MAX(pagerank) as pagerank,
+           COUNT(*) as symbol_count,
+           SUM(CASE WHEN kind='function' THEN 1 ELSE 0 END) as functions,
+           SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes
+    FROM ast_symbols
+    GROUP BY file
+    ORDER BY pagerank DESC
+  `;
+  const EDGES_SQL = `
+    SELECT DISTINCT from_file, to_file, kind, COUNT(*) as weight
+    FROM ast_edges
+    WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
+    GROUP BY from_file, to_file, kind
+  `;
 
+  function buildGraph(files, rawEdges) {
     const nodes = files.map((f, i) => ({
       id: `code-${i}`,
       file: f.file,
@@ -387,22 +390,45 @@ function getCodeStructureGraph() {
     const fileToId = {};
     nodes.forEach(n => { fileToId[n.file] = n.id; });
 
-    const rawEdges = _db.prepare(`
-      SELECT DISTINCT from_file, to_file, kind, COUNT(*) as weight
-      FROM ast_edges
-      WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
-      GROUP BY from_file, to_file, kind
-    `).all();
-
     const edges = rawEdges
       .filter(e => fileToId[e.from_file] && fileToId[e.to_file] && e.from_file !== e.to_file)
       .map(e => ({ source: fileToId[e.from_file], target: fileToId[e.to_file], tipo: e.kind, weight: e.weight }));
 
     return { nodes, edges };
-  } catch {
-    return empty;
-  } finally {
-    try { _db && _db.close(); } catch {}
+  }
+
+  // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
+  try {
+    const BS3 = require('better-sqlite3');
+    const _db = new BS3(dbPath, { readonly: true });
+    try {
+      const files = _db.prepare(FILES_SQL).all();
+      const rawEdges = _db.prepare(EDGES_SQL).all();
+      return buildGraph(files, rawEdges);
+    } finally {
+      try { _db.close(); } catch {}
+    }
+  } catch (e) {
+    // Fallback sql.js
+    try {
+      const SQL = require('sql.js/dist/sql-wasm.js');
+      const buffer = fs.readFileSync(dbPath);
+      const _db = new SQL.Database(buffer);
+      const allSQL = (sql) => {
+        try {
+          const stmt = _db.prepare(sql);
+          const rows = [];
+          while(stmt.step()) rows.push(stmt.getAsObject());
+          stmt.free();
+          return rows;
+        } catch(e) { return []; }
+      };
+      const files = allSQL(FILES_SQL);
+      const rawEdges = allSQL(EDGES_SQL);
+      return buildGraph(files, rawEdges);
+    } catch(e2) {
+      return empty;
+    }
   }
 }
 
@@ -417,16 +443,32 @@ function getStructuralLearningData() {
 
     let ultimoIndex = null, archivosCambiados = 0;
     if (fs.existsSync(dbPath)) {
+      const LAST_INDEX_SQL = 'SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1';
+      let last = null;
+      // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
       try {
         const BS3 = require('better-sqlite3');
         const _db = new BS3(dbPath, { readonly: true });
-        const last = _db.prepare('SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1').get();
-        if (last) {
-          ultimoIndex = last.ran_at;
-          archivosCambiados = JSON.parse(last.changed_files || '[]').length;
+        try {
+          last = _db.prepare(LAST_INDEX_SQL).get();
+        } finally {
+          try { _db.close(); } catch {}
         }
-        _db.close();
-      } catch {}
+      } catch (e) {
+        // Fallback sql.js
+        try {
+          const SQL = require('sql.js/dist/sql-wasm.js');
+          const buffer = fs.readFileSync(dbPath);
+          const _db = new SQL.Database(buffer);
+          const stmt = _db.prepare(LAST_INDEX_SQL);
+          if (stmt.step()) last = stmt.getAsObject();
+          stmt.free();
+        } catch (e2) {}
+      }
+      if (last) {
+        ultimoIndex = last.ran_at;
+        archivosCambiados = JSON.parse(last.changed_files || '[]').length;
+      }
     }
 
     return { patronesEstructurales: matches.length, ultimoIndex, archivosCambiados, cadenasActivas };

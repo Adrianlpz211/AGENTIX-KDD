@@ -49,14 +49,22 @@ console.log('✅ causal-edges.native.test.cjs (parte 1: detect-changes) — PASS
 db.close();
 fs.rmSync(tmpRoot, { recursive: true, force: true });
 
-// Parte 2: tracePathNative contra datos REALES de Lumo (no sandbox)
-const dbLumo = openDb('C:\\lumo\\.agentic\\memoria.db', { readonly: true });
-const anyImport = dbLumo.prepare(`SELECT from_file, to_file FROM ast_edges WHERE kind='IMPORTS' AND to_file IS NOT NULL LIMIT 1`).get();
-if (anyImport) {
-  const trace = tracePathNative(dbLumo, anyImport.from_file, anyImport.to_file);
-  assert.ok(Array.isArray(trace) && trace.length >= 2, 'esperaba una ruta de al menos 2 archivos');
-  console.log('✅ causal-edges.native.test.cjs (parte 2: trace real en Lumo) — PASS', trace);
+// Parte 2: tracePathNative contra datos REALES de Lumo (no sandbox).
+// C:\lumo es un proyecto de desarrollo local de esta sesión — no existe en
+// ninguna máquina que instale este paquete por npm. Sin este guard, la Parte 2
+// revienta con una excepción sin capturar en cualquier instalación real.
+const lumoDbPath = 'C:\\lumo\\.agentic\\memoria.db';
+if (fs.existsSync(lumoDbPath)) {
+  const dbLumo = openDb(lumoDbPath, { readonly: true });
+  const anyImport = dbLumo.prepare(`SELECT from_file, to_file FROM ast_edges WHERE kind='IMPORTS' AND to_file IS NOT NULL LIMIT 1`).get();
+  if (anyImport) {
+    const trace = tracePathNative(dbLumo, anyImport.from_file, anyImport.to_file);
+    assert.ok(Array.isArray(trace) && trace.length >= 2, 'esperaba una ruta de al menos 2 archivos');
+    console.log('✅ causal-edges.native.test.cjs (parte 2: trace real en Lumo) — PASS', trace);
+  } else {
+    console.log('⚠️  Sin edges IMPORTS en Lumo para probar trace — revisar Task 1');
+  }
+  dbLumo.close();
 } else {
-  console.log('⚠️  Sin edges IMPORTS en Lumo para probar trace — revisar Task 1');
+  console.log('⚠️ Parte 2 omitida — C:\\lumo no existe en esta máquina (verificación específica de esta sesión de desarrollo)');
 }
-dbLumo.close();
