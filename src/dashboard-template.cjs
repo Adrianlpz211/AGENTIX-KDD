@@ -739,6 +739,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .graph-area{flex:1;position:relative;overflow:hidden;background:var(--bg)}
 #gc{width:100%;height:100%}
 #code-gc{width:100%;height:100%}
+#combined-gc{width:100%;height:100%}
 .gtt{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:15;max-width:240px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .graph-legend{position:absolute;top:10px;left:10px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;backdrop-filter:blur(4px)}
 .lg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2)}
@@ -1083,13 +1084,20 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     ${codeStructure.nodes.length === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🔬</div><div>Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div></div>' : ''}
   </div>
 
-  <!-- Combined view -->
-  <div id="graph-sub-combined">
-    <div style="font-size:48px;opacity:.6">⚡</div>
-    <div style="color:#c4b5fd;font-size:15px;font-weight:600;letter-spacing:.03em">Vista Combinada</div>
-    <div style="color:rgba(255,255,255,.4);font-size:12px;text-align:center;max-width:420px;line-height:1.8">
-      Unirá el grafo KDD Memory con el grafo de estructura de código en una sola visualización —
-      mostrando de qué archivos y funciones nació cada patrón, decisión y error.
+  <!-- Combined view — KDD Memory + Code Structure, unión heurística por área -->
+  <div id="graph-sub-combined" style="position:relative">
+    <svg id="combined-gc"></svg>
+    <div class="gtt" id="combined-gtt"></div>
+    <div class="graph-legend">
+      <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span>error/patrón/decisión (KDD)</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo (código)</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:rgba(80,250,123,.6)"></div><span>relación por área (aproximada)</span></div>
+    </div>
+    <div class="graph-controls">
+      <button class="gc-btn" onclick="if(combinedSimulation)combinedSimulation.alpha(0.5).restart()">⟳ Reset</button>
+    </div>
+    <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
+      Las líneas verdes conectan por coincidencia de área/ruta — es una aproximación, no un vínculo exacto guardado en la base de datos.
     </div>
   </div>
 
@@ -1605,6 +1613,7 @@ function setGraphTab(tab,el){
   document.getElementById('graph-sub-code').style.display=tab==='code'?'flex':'none';
   document.getElementById('graph-sub-combined').style.display=tab==='combined'?'flex':'none';
   if(tab==='code'&&!codeSimulation)renderCodeGraph();
+  if(tab==='combined'&&!combinedSimulation)renderCombinedGraph();
 }
 
 function showDoc(section,el){
@@ -2053,6 +2062,98 @@ function centerCodeGraph(){
   if(!codeSvgEl||!codeSimulation)return;
   const c=document.getElementById('graph-sub-code');
   codeSimulation.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();
+}
+
+// ─── Combined — merge heurístico por área (KDD Memory + Code Structure) ──────
+let combinedSimulation;
+
+function buildHeuristicLinks(){
+  // Heurística: un nodo KDD con area="X" se conecta a archivos de código
+  // cuya ruta contenga "X". Aproximación deliberada — no hay vínculo exacto
+  // guardado en la base de datos entre un patrón/error y el archivo que lo
+  // originó, así que esto es lo mejor que se puede inferir sin esa data.
+  const links=[];
+  NODES.forEach(kddNode=>{
+    if(!kddNode.area||kddNode.area==='global')return;
+    const areaLower=kddNode.area.toLowerCase();
+    CODE_NODES.forEach(codeNode=>{
+      if(codeNode.file.toLowerCase().includes(areaLower)){
+        links.push({source:'kdd-'+kddNode.id,target:codeNode.id,tipo:'area_match',weight:0.5});
+      }
+    });
+  });
+  return links;
+}
+
+function renderCombinedGraph(){
+  if(!NODES.length&&!CODE_NODES.length)return;
+  const container=document.getElementById('graph-sub-combined');
+  const W=container.clientWidth||1280,H=container.clientHeight||600;
+
+  const svg=d3.select('#combined-gc').attr('width',W).attr('height',H)
+    .call(d3.zoom().scaleExtent([0.1,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
+  const g=svg.append('g');
+
+  const defs=svg.append('defs');
+  const glowFilter=defs.append('filter').attr('id','combined-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
+  const fm=glowFilter.append('feMerge');
+  fm.append('feMergeNode').attr('in','blur');
+  fm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Namespacing de IDs para evitar colisión entre los dos sets de nodos
+  const mergedNodes=[
+    ...NODES.map(n=>({...n,mergedId:'kdd-'+n.id,group:'kdd'})),
+    ...CODE_NODES.map(n=>({...n,mergedId:n.id,group:'code'})),
+  ];
+  const idIndex={};
+  mergedNodes.forEach(n=>idIndex[n.mergedId]=n);
+
+  const kddEdges=EDGES
+    .filter(e=>idIndex['kdd-'+e.desde_id]&&idIndex['kdd-'+e.hacia_id])
+    .map(e=>({source:'kdd-'+e.desde_id,target:'kdd-'+e.hacia_id}));
+  const codeEdges=CODE_EDGES
+    .filter(e=>idIndex[e.source]&&idIndex[e.target])
+    .map(e=>({source:e.source,target:e.target}));
+  const heuristicEdges=buildHeuristicLinks().filter(e=>idIndex[e.source]&&idIndex[e.target]);
+
+  const allLinks=[...kddEdges,...codeEdges,...heuristicEdges];
+
+  combinedSimulation=d3.forceSimulation(mergedNodes)
+    .force('link',d3.forceLink(allLinks).id(d=>d.mergedId).distance(90))
+    .force('charge',d3.forceManyBody().strength(-280))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(8))
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
+
+  const linkSelCombined=g.append('g').selectAll('line').data(allLinks).enter().append('line')
+    .attr('stroke',d=>heuristicEdges.includes(d)?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
+    .attr('stroke-width',1).attr('stroke-opacity',0.6);
+
+  const nodeSelCombined=g.append('g').selectAll('circle').data(mergedNodes).enter().append('circle')
+    .attr('r',d=>d.group==='kdd'?8:6)
+    .attr('fill',d=>d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff'))
+    .attr('filter','url(#combined-glow)')
+    .style('cursor','pointer')
+    .call(d3.drag()
+      .on('start',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
+      .on('end',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0);}))
+    .on('mouseover',(ev,d)=>{
+      const tt=document.getElementById('combined-gtt');
+      const label=d.group==='kdd'?d.titulo:d.file;
+      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(String(label).slice(0,60))}</strong><br><span style="color:var(--text3);font-size:10px">\${d.group==='kdd'?'KDD · '+escHtml(d.area||''):'código'}</span>\`;
+      tt.style.opacity=1;
+      const r=container.getBoundingClientRect();
+      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
+    })
+    .on('mouseout',()=>{document.getElementById('combined-gtt').style.opacity=0;});
+
+  combinedSimulation.on('tick',()=>{
+    linkSelCombined.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    nodeSelCombined.attr('cx',d=>d.x).attr('cy',d=>d.y);
+  });
 }
 
 // ─── D3 Module Neural Graph (fullscreen) ─────────────────────
