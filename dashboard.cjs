@@ -815,6 +815,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .graph-controls{position:absolute;bottom:12px;left:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:480px}
 .help-fab{position:absolute;bottom:12px;right:12px;width:34px;height:34px;border-radius:50%;background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.35);color:var(--pl);font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:15;backdrop-filter:blur(4px)}
 .help-fab:hover{background:rgba(139,92,246,.32)}
+.help-fab-fixed{position:fixed}
 .gc-slider-wrap{display:flex;align-items:center;gap:4px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:6px;padding:3px 8px}
 .gc-slider-label{font-size:13px;color:var(--text2)}
 .gc-slider{-webkit-appearance:none;width:80px;height:3px;border-radius:2px;background:var(--border);outline:none;cursor:pointer}
@@ -1603,6 +1604,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <!-- ════════ PRESERVATION INTEL ════════ -->
 <div id="mode-intel" style="display:none">
+  <button class="help-fab help-fab-fixed" onclick="showTermsGlossary('intel')" title="¿Qué significa cada tarjeta?">?</button>
 
 
 
@@ -1736,6 +1738,16 @@ const TERMS_GLOSSARY={
     {term:'área≈ (relación por área)',explain:'Una corazonada, no una certeza: si un error/patrón/decisión dice que pasó en el área "auth", y hay archivos cuya ruta también dice "auth", los conectamos con una línea verde como sugerencia — no es un vínculo 100% exacto guardado en la base de datos.'},
     {term:'nodo rojo/verde/azul (KDD)',explain:'Son los mismos error/patrón/decisión de la pestaña KDD Memory.'},
     {term:'nodo celeste (código)',explain:'Es un archivo real de tu código, igual que en Code Structure.'},
+  ]},
+  intel:{title:'❓ Preservation Intel — términos generales',items:[
+    {term:'🛡️ Contract Guard',explain:'Vigila que el código que ya funciona no se rompa por accidente. Cada prueba que pasa varias veces seguidas se vuelve un "contrato" — mientras más veces pasa, más protegido queda.'},
+    {term:'Protected / Verified / Candidate',explain:'Los 3 niveles de confianza de un contrato. Candidate = recién detectado, pocas pruebas todavía. Verified = ya pasó varias veces. Protected = pasó tantas veces que quedó blindado — si un cambio nuevo lo rompe, el sistema avisa antes de dejarte continuar.'},
+    {term:'Violations (violaciones)',explain:'Cuántas veces un cambio intentó romper algo que ya estaba protegido, y el sistema lo detuvo a tiempo.'},
+    {term:'✨ Creative Engine',explain:'Un motor que, además de hacer lo que le pides, se fija en oportunidades de mejora y te las sugiere — nunca cambia nada por su cuenta, siempre pide tu confirmación primero.'},
+    {term:'Nivel (de autonomía)',explain:'Qué tanta confianza tiene el sistema para actuar solo. Empieza en Nivel 1 (solo sugiere, nunca aplica nada) y solo puede subir con el tiempo, entre más contratos protegidos acumule el proyecto.'},
+    {term:'Pendientes / Aplicadas',explain:'Cuántas sugerencias del Creative Engine están esperando tu confirmación, y cuántas ya confirmaste.'},
+    {term:'🔬 MemCurator',explain:'El "bibliotecario" de la memoria del proyecto — su trabajo sería limpiar recuerdos viejos o duplicados para que la memoria no se llene de basura. Hoy todavía no se ha usado nunca en este proyecto.'},
+    {term:'🧬 Aprendizaje Estructural',explain:'Analiza cómo se conecta tu código de verdad (qué archivo llama a cuál) para detectar cuando el MISMO tipo de fallo se repite varias veces por la misma cadena de archivos — si pasa 3 veces o más, lo sube automáticamente a "patrón confirmado" sin que nadie tenga que hacerlo a mano.'},
   ]},
 };
 
