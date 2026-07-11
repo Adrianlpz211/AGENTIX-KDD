@@ -808,6 +808,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .lg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2)}
 .lg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .graph-controls{position:absolute;bottom:12px;left:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:480px}
+.help-fab{position:absolute;bottom:12px;right:12px;width:34px;height:34px;border-radius:50%;background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.35);color:var(--pl);font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:15;backdrop-filter:blur(4px)}
+.help-fab:hover{background:rgba(139,92,246,.32)}
 .gc-slider-wrap{display:flex;align-items:center;gap:4px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:6px;padding:3px 8px}
 .gc-slider-label{font-size:13px;color:var(--text2)}
 .gc-slider{-webkit-appearance:none;width:80px;height:3px;border-radius:2px;background:var(--border);outline:none;cursor:pointer}
@@ -1107,6 +1109,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
   <!-- GRAPH -->
   <div class="graph-area" id="graph-area-main">
+    <button class="help-fab" onclick="showTermsGlossary('kdd')" title="¿Qué significan los términos de este grafo?">?</button>
     <svg id="gc"></svg>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend">
@@ -1141,6 +1144,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
   <!-- Code Structure view — nativo, sin herramienta externa -->
   <div id="graph-sub-code" style="position:relative">
+    <button class="help-fab" onclick="showTermsGlossary('code')" title="¿Qué significan los términos de este grafo?">?</button>
     <svg id="code-gc"></svg>
     <div class="gtt" id="code-gtt"></div>
     <div class="graph-legend">
@@ -1164,6 +1168,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
   <!-- Combined view — KDD Memory + Code Structure, unión heurística por área -->
   <div id="graph-sub-combined" style="position:relative">
+    <button class="help-fab" onclick="showTermsGlossary('combined')" title="¿Qué significan los términos de este grafo?">?</button>
     <svg id="combined-gc"></svg>
     <div class="gtt" id="combined-gtt"></div>
     <div class="graph-legend">
@@ -1697,6 +1702,45 @@ const FIELD_LABELS={
   ubicacion:'📂 Dónde está en el código', 'razón':'💡 La razón', razon:'💡 La razón',
 };
 const SKIP_FIELD_LABELS=new Set(['área','area','confianza','aplicado','útil','util','estado','última validación','ultima validacion','creado','tipo','raw']);
+
+// ─── Glosario general de términos — ícono flotante "?", uno por grafo ───────
+// Distinto del botón "¡NO ENTIENDO!": esto NO depende de qué nodo esté
+// seleccionado, es la misma explicación de conceptos generales siempre.
+const TERMS_GLOSSARY={
+  kdd:{title:'❓ KDD Memory — términos generales',items:[
+    {term:'error',explain:'Un problema real que pasó en el proyecto y quedó anotado en la memoria para no repetirlo.'},
+    {term:'pattern (patrón)',explain:'Una forma de resolver algo que ya se probó y funcionó bien — se guarda para reusarla la próxima vez en vez de reinventar la rueda.'},
+    {term:'decision',explain:'Una decisión importante que se tomó sobre cómo construir algo, con la razón por la que se eligió así.'},
+    {term:'BAJA / MEDIA / ALTA',explain:'Qué tanta confianza hay en que esto sea correcto. Empieza en BAJA y sube solo, entre más veces se use y funcione bien.'},
+    {term:'AMBIGUOUS / INFERRED / EXTRACTED',explain:'Qué tan seguro está el sistema de esta información. EXTRACTED = se sacó directo de algo confirmado. INFERRED = se dedujo por contexto. AMBIGUOUS = todavía no está del todo claro.'},
+    {term:'Applied / Useful (aplicado/útil)',explain:'Cuántas veces se usó esto, y de esas veces, cuántas de verdad ayudaron.'},
+    {term:'Connections (conexiones)',explain:'Con cuántas otras cosas de la memoria del proyecto está relacionado esto — mientras más conexiones, más "central" es.'},
+    {term:'⚡ Divine (nodo divino)',explain:'Un apodo cariñoso para los nodos con MUCHAS conexiones — son los que más importan en el mapa.'},
+  ]},
+  code:{title:'❓ Code Structure — términos generales',items:[
+    {term:'archivo',explain:'Es un archivo real de tu código — como una hoja de un cuaderno donde está escrita una parte del programa.'},
+    {term:'clase',explain:'Un archivo que define una "plantilla" de código reutilizable (en programación se le llama "clase").'},
+    {term:'Funciones / Símbolos',explain:'Cuántas "acciones" (funciones) y piezas de código distintas hay guardadas adentro de este archivo.'},
+    {term:'PageRank',explain:'Un número que dice qué tan "importante" es este archivo dentro del proyecto — mientras más alto, más cosas dependen de él. Es el mismo tipo de cálculo que usa Google para ordenar páginas web, aplicado a tu código.'},
+    {term:'Importa / llama a',explain:'Los archivos que ESTE necesita para funcionar — como los ingredientes que usa en su receta.'},
+    {term:'Usado por',explain:'Los archivos que dependen de este — si algo se rompe aquí, estos otros se ven afectados también.'},
+    {term:'IMPORTS',explain:'Una etiqueta que dice: "este archivo trae/usa código de aquel otro".'},
+  ]},
+  combined:{title:'❓ Combined — términos generales',items:[
+    {term:'¿Qué es esta pestaña?',explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
+    {term:'área≈ (relación por área)',explain:'Una corazonada, no una certeza: si un error/patrón/decisión dice que pasó en el área "auth", y hay archivos cuya ruta también dice "auth", los conectamos con una línea verde como sugerencia — no es un vínculo 100% exacto guardado en la base de datos.'},
+    {term:'nodo rojo/verde/azul (KDD)',explain:'Son los mismos error/patrón/decisión de la pestaña KDD Memory.'},
+    {term:'nodo celeste (código)',explain:'Es un archivo real de tu código, igual que en Code Structure.'},
+  ]},
+};
+
+function showTermsGlossary(kind){
+  const g=TERMS_GLOSSARY[kind];
+  if(!g)return;
+  document.getElementById('glossary-title').textContent=g.title;
+  document.getElementById('glossary-body').innerHTML=glossaryItemsHTML(g.items.map(it=>({label:it.term,text:it.explain})));
+  document.getElementById('glossary-modal').classList.add('visible');
+}
 
 function parseContenido(contenido){
   if(!contenido)return[];
