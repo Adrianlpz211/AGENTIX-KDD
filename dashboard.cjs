@@ -1684,54 +1684,103 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <script>
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-// ─── Glosario "en fácil" — para no-devs, botón 🍼 en cada panel de detalle ──
-const GLOSSARY = {
-  kdd: {
-    title: '🍼 KDD Memory, en fácil',
-    items: [
-      {term:'error', explain:'Un problema real que pasó en el proyecto y quedó anotado en la memoria para no repetirlo.'},
-      {term:'pattern (patrón)', explain:'Una forma de resolver algo que ya se probó y funcionó bien — se guarda para reusarla la próxima vez en vez de reinventar la rueda.'},
-      {term:'decision', explain:'Una decisión importante que se tomó sobre cómo construir algo, con la razón por la que se eligió así.'},
-      {term:'BAJA / MEDIA / ALTA', explain:'Qué tanta confianza hay en que esto sea correcto. Empieza en BAJA y sube solo, entre más veces se use y funcione bien.'},
-      {term:'AMBIGUOUS / INFERRED / EXTRACTED', explain:'Qué tan seguro está el sistema de esta información. EXTRACTED = se sacó directo de algo confirmado. INFERRED = se dedujo por contexto. AMBIGUOUS = todavía no está del todo claro.'},
-      {term:'Applied / Useful (aplicado/útil)', explain:'Cuántas veces se usó esto, y de esas veces, cuántas de verdad ayudaron.'},
-      {term:'Connections (conexiones)', explain:'Con cuántas otras cosas de la memoria del proyecto está relacionado esto — mientras más conexiones, más "central" es.'},
-      {term:'⚡ Divine (nodo divino)', explain:'Un apodo cariñoso para los nodos con MUCHAS conexiones — son los que más importan en el mapa.'},
-    ],
-  },
-  code: {
-    title: '🍼 Code Structure, en fácil',
-    items: [
-      {term:'archivo', explain:'Es un archivo real de tu código — como una hoja de un cuaderno donde está escrita una parte del programa.'},
-      {term:'clase', explain:'Un archivo que define una "plantilla" de código reutilizable (en programación se le llama "clase").'},
-      {term:'Funciones / Símbolos', explain:'Cuántas "acciones" (funciones) y piezas de código distintas hay guardadas adentro de este archivo.'},
-      {term:'PageRank', explain:'Un número que dice qué tan "importante" es este archivo dentro del proyecto — mientras más alto, más cosas dependen de él. Es el mismo tipo de cálculo que usa Google para ordenar páginas web, aplicado a tu código.'},
-      {term:'Importa / llama a', explain:'Los archivos que ESTE necesita para funcionar — como los ingredientes que usa en su receta.'},
-      {term:'Usado por', explain:'Los archivos que dependen de este — si algo se rompe aquí, estos otros se ven afectados también.'},
-      {term:'IMPORTS', explain:'Una etiqueta que dice: "este archivo trae/usa código de aquel otro".'},
-    ],
-  },
-  combined: {
-    title: '🍼 Combined, en fácil',
-    items: [
-      {term:'¿Qué es esta pestaña?', explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
-      {term:'área≈ (relación por área)', explain:'Una corazonada, no una certeza: si un error/patrón/decisión dice que pasó en el área "auth", y hay archivos cuya ruta también dice "auth", los conectamos con una línea verde como sugerencia — no es un vínculo 100% exacto guardado en la base de datos.'},
-      {term:'nodo morado/rojo/azul (KDD)', explain:'Son los mismos error/patrón/decisión de la pestaña KDD Memory.'},
-      {term:'nodo celeste (código)', explain:'Es un archivo real de tu código, igual que en Code Structure.'},
-    ],
-  },
-};
+// ─── "¡NO ENTIENDO!" — explicación de ESE nodo específico, no un glosario ───
+// Reorganiza los datos reales que YA existen para ese nodo puntual (su propio
+// contenido/conexiones/números) con etiquetas simples — no inventa nada nuevo,
+// no llama ninguna IA, es la misma info de siempre presentada distinto.
 
-function showGlossary(kind){
-  const g=GLOSSARY[kind];
-  if(!g)return;
-  document.getElementById('glossary-title').textContent=g.title;
-  document.getElementById('glossary-body').innerHTML=g.items.map(it=>\`
+const FIELD_LABELS={
+  contexto:'📍 Dónde pasó / contexto', 'síntoma':'😵 Lo que se notó', sintoma:'😵 Lo que se notó',
+  causa:'🔍 Por qué pasó', 'solución':'✅ Cómo se resolvió (o falta resolver)', solucion:'✅ Cómo se resolvió (o falta resolver)',
+  evitar:'🚫 Qué no volver a hacer', 'aplicar cuando':'📌 Cuándo aplica esto', regla:'📏 La regla que quedó',
+  error:'💥 El error tal cual salió', origen:'🔎 Cómo se detectó', 'ubicación':'📂 Dónde está en el código',
+  ubicacion:'📂 Dónde está en el código', 'razón':'💡 La razón', razon:'💡 La razón',
+};
+const SKIP_FIELD_LABELS=new Set(['área','area','confianza','aplicado','útil','util','estado','última validación','ultima validacion','creado','tipo','raw']);
+
+function parseContenido(contenido){
+  if(!contenido)return[];
+  const lines=String(contenido).split('\\n');
+  const out=[];
+  let currentLabel=null, buffer=[];
+  const flush=()=>{ if(currentLabel && buffer.join(' ').trim())out.push({label:currentLabel, text:buffer.join(' ').trim()}); buffer=[]; };
+  for(const raw of lines){
+    const line=raw.trim();
+    if(!line||line.startsWith('##'))continue;
+    const m=line.match(/^([A-ZÁÉÍÓÚÑ][a-záéíóúñ ]{2,25}):\s*(.*)$/);
+    if(m){
+      const key=m[1].toLowerCase().trim();
+      if(SKIP_FIELD_LABELS.has(key)){currentLabel=null;continue;}
+      flush();
+      currentLabel=FIELD_LABELS[key]||('📋 '+m[1]);
+      buffer=m[2]?[m[2]]:[];
+    } else if(currentLabel){
+      buffer.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+
+function glossaryItemsHTML(items){
+  return items.map(it=>\`
     <div class="glossary-item">
-      <div class="glossary-term">\${escHtml(it.term)}</div>
-      <div class="glossary-explain">\${escHtml(it.explain)}</div>
+      <div class="glossary-term">\${escHtml(it.label)}</div>
+      <div class="glossary-explain">\${escHtml(it.text)}</div>
     </div>
   \`).join('');
+}
+
+function explainKddNode(node){
+  const fields=parseContenido(node.contenido);
+  const deg=DEGREE_MAP[node.id]||0;
+  const tipoLabel={error:'un error',patron:'un patrón (algo que se probó y funcionó, para reusarlo)',decision:'una decisión de diseño'}[node.tipo]||node.tipo;
+  let summary=\`Esto es \${tipoLabel}, del área "\${node.area||'global'}". \`;
+  if(node.aplicado>0)summary+=\`Se ha usado \${node.aplicado}×, de las cuales \${node.util}× resultó útil. \`;
+  summary+=\`Está conectado con \${deg} otra(s) cosa(s) de la memoria del proyecto.\`;
+  const items=[{label:'📝 En resumen',text:summary},...fields];
+  if(!fields.length)items.push({label:'ℹ️ Nota',text:'Este nodo todavía no tiene más detalle guardado aparte del título — probablemente se detectó automáticamente y nadie lo ha revisado a mano todavía (con "aa: aprende").'});
+  return {title:'¡NO ENTIENDO! — '+String(node.titulo||'').slice(0,60), bodyHTML:glossaryItemsHTML(items)};
+}
+
+function explainCodeNode(node){
+  const outEdges=CODE_EDGES.filter(e=>edgeEndId(e.source)===node.id);
+  const inEdges=CODE_EDGES.filter(e=>edgeEndId(e.target)===node.id);
+  const rankNote=node.pagerank>0.01?'uno de los archivos más importantes/centrales del proyecto':node.pagerank>0.002?'un archivo con conectividad media':'un archivo bastante periférico — pocas cosas dependen de él';
+  const usedByNames=inEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
+  const needsNames=outEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
+  let summary=\`Este archivo tiene \${node.functions} función(es) adentro. Es \${rankNote}. \`;
+  summary+=usedByNames.length?\`\${usedByNames.length} otro(s) archivo(s) DEPENDEN de este, así que si lo cambias hay que revisar: \${usedByNames.slice(0,6).join(', ')}\${usedByNames.length>6?'…':''}. \`:'Ningún otro archivo indexado depende de este todavía. ';
+  summary+=needsNames.length?\`A su vez, este archivo necesita: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:'No depende de ningún otro archivo indexado.';
+  return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\/]/).pop(), bodyHTML:glossaryItemsHTML([{label:'📝 En resumen',text:summary}])};
+}
+
+function explainCombinedNode(node){
+  const links=linkSelCombined?linkSelCombined.data().filter(e=>e.source.mergedId===node.mergedId||e.target.mergedId===node.mergedId):[];
+  const areaLinks=links.filter(l=>l.tipo==='area_match');
+  let summary;
+  if(node.group==='kdd'){
+    summary=areaLinks.length
+      ?\`Este \${node.tipo} ocurrió en el área "\${node.area}". Encontramos \${areaLinks.length} archivo(s) de código cuya ruta también menciona "\${node.area}" — puede que ahí se haya originado, aunque esto es una coincidencia de nombre de carpeta, no un vínculo 100% confirmado en la base de datos.\`
+      :\`Este \${node.tipo} es del área "\${node.area||'global'}" y no encontramos ningún archivo de código cuya ruta coincida con esa área todavía.\`;
+  } else {
+    summary=areaLinks.length
+      ?\`Este archivo coincide por nombre de carpeta con \${areaLinks.length} error(es)/patrón(es)/decisión(es) guardados en la memoria — puede que sea donde ocurrieron, aunque es una aproximación, no un vínculo exacto.\`
+      :'No encontramos ningún error/patrón/decisión de la memoria cuya área coincida con la ruta de este archivo.';
+  }
+  return {title:'¡NO ENTIENDO! — '+(node.group==='kdd'?String(node.titulo||'').slice(0,50):node.file.split(/[\\/]/).pop()), bodyHTML:glossaryItemsHTML([{label:'📝 En resumen',text:summary}])};
+}
+
+let lastKddNode=null, lastCodeNode=null, lastCombinedNode=null;
+
+function showGlossary(kind){
+  let data=null;
+  if(kind==='kdd'&&lastKddNode)data=explainKddNode(lastKddNode);
+  else if(kind==='code'&&lastCodeNode)data=explainCodeNode(lastCodeNode);
+  else if(kind==='combined'&&lastCombinedNode)data=explainCombinedNode(lastCombinedNode);
+  if(!data)return;
+  document.getElementById('glossary-title').textContent=data.title;
+  document.getElementById('glossary-body').innerHTML=data.bodyHTML;
   document.getElementById('glossary-modal').classList.add('visible');
 }
 function closeGlossary(){
@@ -1915,6 +1964,7 @@ function selectNode(id){
 
 function showDetail(node){
   if(!node)return;
+  lastKddNode=node;
   document.getElementById('dp-title').textContent=node.titulo;
   const deg=DEGREE_MAP[node.id]||0;
   const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
@@ -2220,6 +2270,7 @@ function renderCodeGraph(){
 
 function edgeEndId(v){return (v&&typeof v==='object')?v.id:v;}
 function showCodeDetail(node){
+  lastCodeNode=node;
   document.getElementById('code-dp-title').textContent=node.file;
   const outEdges=CODE_EDGES.filter(e=>edgeEndId(e.source)===node.id);
   const inEdges=CODE_EDGES.filter(e=>edgeEndId(e.target)===node.id);
@@ -2370,6 +2421,7 @@ function renderCombinedGraph(){
 }
 
 function showCombinedDetail(node){
+  lastCombinedNode=node;
   const isKdd=node.group==='kdd';
   document.getElementById('combined-dp-title').textContent=isKdd?node.titulo:node.file;
   const links=linkSelCombined?linkSelCombined.data().filter(e=>e.source.mergedId===node.mergedId||e.target.mergedId===node.mergedId):[];
