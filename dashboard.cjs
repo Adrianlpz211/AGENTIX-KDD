@@ -701,6 +701,11 @@ const HTML = `<!DOCTYPE html>
 :root{--bg:#0a0d14;--bg2:#111520;--bg3:#1a1f2e;--bg4:#232840;--border:#2a3050;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--purple:#8b5cf6;--pl:#a78bfa;--green:#10b981;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b;--cyan:#06b6d4;--pink:#ec4899;--r:12px}
 .light{--bg:#f0f4f8;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#eef2f7;--border:#dde3ee;--text:#0f172a;--text2:#475569;--text3:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0}
+*{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+*::-webkit-scrollbar-thumb:hover{background:var(--pl)}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;height:100vh;overflow:hidden;display:flex;flex-direction:column}
 
 /* Header */
