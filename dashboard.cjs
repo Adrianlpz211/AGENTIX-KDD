@@ -819,6 +819,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .dp-close{cursor:pointer;color:var(--text3);font-size:16px;flex-shrink:0;line-height:1}
 .dp-close:hover{color:var(--text)}
 .dp-body{padding:12px 14px}
+.dp-help-btn{background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.3);color:var(--pl);border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.dp-help-btn:hover{background:rgba(139,92,246,.28)}
+.glossary-modal{display:none;position:fixed;inset:0;background:rgba(5,7,12,.75);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.glossary-modal.visible{display:flex}
+.glossary-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;max-width:460px;width:90%;max-height:78vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.glossary-header{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg2)}
+.glossary-header-title{font-size:15px;font-weight:700;color:var(--text)}
+.glossary-body{padding:6px 18px 16px}
+.glossary-item{padding:11px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.glossary-item:last-child{border-bottom:none}
+.glossary-term{font-size:11px;font-weight:700;color:var(--pl);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.glossary-explain{font-size:13px;color:var(--text2);line-height:1.55}
 .dp-section{margin-bottom:12px}
 .dp-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;font-weight:600}
 .dp-val{font-size:11px;color:var(--text2);line-height:1.6}
@@ -1112,6 +1124,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="dp-title"></div>
+        <button class="dp-help-btn" onclick="showGlossary('kdd')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeDetail()">×</div>
       </div>
       <div class="dp-body" id="dp-body"></div>
@@ -1135,6 +1148,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="code-detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="code-dp-title"></div>
+        <button class="dp-help-btn" onclick="showGlossary('code')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeCodeDetail()">×</div>
       </div>
       <div class="dp-body" id="code-dp-body"></div>
@@ -1157,12 +1171,23 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="combined-detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="combined-dp-title"></div>
+        <button class="dp-help-btn" onclick="showGlossary('combined')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeCombinedDetail()">×</div>
       </div>
       <div class="dp-body" id="combined-dp-body"></div>
     </div>
     <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
       Las líneas verdes conectan por coincidencia de área/ruta — es una aproximación, no un vínculo exacto guardado en la base de datos.
+    </div>
+  </div>
+
+  <div class="glossary-modal" id="glossary-modal" onclick="if(event.target===this)closeGlossary()">
+    <div class="glossary-card">
+      <div class="glossary-header">
+        <div class="glossary-header-title" id="glossary-title"></div>
+        <div class="dp-close" onclick="closeGlossary()">×</div>
+      </div>
+      <div class="glossary-body" id="glossary-body"></div>
     </div>
   </div>
 
@@ -1652,6 +1677,61 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <script>
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ─── Glosario "en fácil" — para no-devs, botón 🍼 en cada panel de detalle ──
+const GLOSSARY = {
+  kdd: {
+    title: '🍼 KDD Memory, en fácil',
+    items: [
+      {term:'error', explain:'Un problema real que pasó en el proyecto y quedó anotado en la memoria para no repetirlo.'},
+      {term:'pattern (patrón)', explain:'Una forma de resolver algo que ya se probó y funcionó bien — se guarda para reusarla la próxima vez en vez de reinventar la rueda.'},
+      {term:'decision', explain:'Una decisión importante que se tomó sobre cómo construir algo, con la razón por la que se eligió así.'},
+      {term:'BAJA / MEDIA / ALTA', explain:'Qué tanta confianza hay en que esto sea correcto. Empieza en BAJA y sube solo, entre más veces se use y funcione bien.'},
+      {term:'AMBIGUOUS / INFERRED / EXTRACTED', explain:'Qué tan seguro está el sistema de esta información. EXTRACTED = se sacó directo de algo confirmado. INFERRED = se dedujo por contexto. AMBIGUOUS = todavía no está del todo claro.'},
+      {term:'Applied / Useful (aplicado/útil)', explain:'Cuántas veces se usó esto, y de esas veces, cuántas de verdad ayudaron.'},
+      {term:'Connections (conexiones)', explain:'Con cuántas otras cosas de la memoria del proyecto está relacionado esto — mientras más conexiones, más "central" es.'},
+      {term:'⚡ Divine (nodo divino)', explain:'Un apodo cariñoso para los nodos con MUCHAS conexiones — son los que más importan en el mapa.'},
+    ],
+  },
+  code: {
+    title: '🍼 Code Structure, en fácil',
+    items: [
+      {term:'archivo', explain:'Es un archivo real de tu código — como una hoja de un cuaderno donde está escrita una parte del programa.'},
+      {term:'clase', explain:'Un archivo que define una "plantilla" de código reutilizable (en programación se le llama "clase").'},
+      {term:'Funciones / Símbolos', explain:'Cuántas "acciones" (funciones) y piezas de código distintas hay guardadas adentro de este archivo.'},
+      {term:'PageRank', explain:'Un número que dice qué tan "importante" es este archivo dentro del proyecto — mientras más alto, más cosas dependen de él. Es el mismo tipo de cálculo que usa Google para ordenar páginas web, aplicado a tu código.'},
+      {term:'Importa / llama a', explain:'Los archivos que ESTE necesita para funcionar — como los ingredientes que usa en su receta.'},
+      {term:'Usado por', explain:'Los archivos que dependen de este — si algo se rompe aquí, estos otros se ven afectados también.'},
+      {term:'IMPORTS', explain:'Una etiqueta que dice: "este archivo trae/usa código de aquel otro".'},
+    ],
+  },
+  combined: {
+    title: '🍼 Combined, en fácil',
+    items: [
+      {term:'¿Qué es esta pestaña?', explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
+      {term:'área≈ (relación por área)', explain:'Una corazonada, no una certeza: si un error/patrón/decisión dice que pasó en el área "auth", y hay archivos cuya ruta también dice "auth", los conectamos con una línea verde como sugerencia — no es un vínculo 100% exacto guardado en la base de datos.'},
+      {term:'nodo morado/rojo/azul (KDD)', explain:'Son los mismos error/patrón/decisión de la pestaña KDD Memory.'},
+      {term:'nodo celeste (código)', explain:'Es un archivo real de tu código, igual que en Code Structure.'},
+    ],
+  },
+};
+
+function showGlossary(kind){
+  const g=GLOSSARY[kind];
+  if(!g)return;
+  document.getElementById('glossary-title').textContent=g.title;
+  document.getElementById('glossary-body').innerHTML=g.items.map(it=>\`
+    <div class="glossary-item">
+      <div class="glossary-term">\${escHtml(it.term)}</div>
+      <div class="glossary-explain">\${escHtml(it.explain)}</div>
+    </div>
+  \`).join('');
+  document.getElementById('glossary-modal').classList.add('visible');
+}
+function closeGlossary(){
+  document.getElementById('glossary-modal').classList.remove('visible');
+}
+
 const NODES = ${JSON.stringify(nodes)};
 const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
 const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
