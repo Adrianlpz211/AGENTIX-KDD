@@ -328,30 +328,139 @@ function getGraphData() {
       _db.close();
       return { nodes, edges, ciclos, fases };
     } catch(e) {
-      // Fallback sql.js
+      // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
       try {
-        const SQL = require('sql.js/dist/sql-wasm.js');
-        const buffer = fs.readFileSync(dbPath);
-        const _db = new SQL.Database(buffer);
+        const { DatabaseSync } = require('node:sqlite');
+        const _db = new DatabaseSync(dbPath);
         const allSQL = (sql) => {
-          try {
-            const stmt = _db.prepare(sql);
-            const rows = [];
-            while(stmt.step()) rows.push(stmt.getAsObject());
-            stmt.free();
-            return rows;
-          } catch(e) { return []; }
+          try { return _db.prepare(sql).all(); } catch(e) { return []; }
         };
         const nodes  = allSQL('SELECT * FROM nodos ORDER BY fecha_creacion DESC');
         const edges  = allSQL('SELECT * FROM relaciones');
         const ciclos = allSQL('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30');
         const fases  = allSQL('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100');
+        try { _db.close(); } catch {}
         return { nodes, edges, ciclos, fases };
       } catch(e2) {
         return { nodes: [], edges: [], ciclos: [], fases: [] };
       }
     }
   } catch { return { nodes: [], edges: [], ciclos: [], fases: [] }; }
+}
+
+function getCodeStructureGraph() {
+  const empty = { nodes: [], edges: [] };
+  if (!fs.existsSync(dbPath)) return empty;
+
+  // Agregación a nivel de ARCHIVO (no función individual) para que el
+  // grafo sea legible — cientos de archivos es manejable, miles de funciones no.
+  const FILES_SQL = `
+    SELECT file,
+           MAX(pagerank) as pagerank,
+           COUNT(*) as symbol_count,
+           SUM(CASE WHEN kind='function' THEN 1 ELSE 0 END) as functions,
+           SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes
+    FROM ast_symbols
+    GROUP BY file
+    ORDER BY pagerank DESC
+  `;
+  const EDGES_SQL = `
+    SELECT DISTINCT from_file, to_file, kind, COUNT(*) as weight
+    FROM ast_edges
+    WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
+    GROUP BY from_file, to_file, kind
+  `;
+
+  function buildGraph(files, rawEdges) {
+    const nodes = files.map((f, i) => ({
+      id: `code-${i}`,
+      file: f.file,
+      titulo: f.file.split(/[\\/]/).pop(),
+      tipo: f.classes > 0 ? 'clase' : 'archivo',
+      symbol_count: f.symbol_count,
+      functions: f.functions,
+      pagerank: f.pagerank || 0,
+    }));
+    const fileToId = {};
+    nodes.forEach(n => { fileToId[n.file] = n.id; });
+
+    const edges = rawEdges
+      .filter(e => fileToId[e.from_file] && fileToId[e.to_file] && e.from_file !== e.to_file)
+      .map(e => ({ source: fileToId[e.from_file], target: fileToId[e.to_file], tipo: e.kind, weight: e.weight }));
+
+    return { nodes, edges };
+  }
+
+  // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
+  try {
+    const BS3 = require('better-sqlite3');
+    const _db = new BS3(dbPath, { readonly: true });
+    try {
+      const files = _db.prepare(FILES_SQL).all();
+      const rawEdges = _db.prepare(EDGES_SQL).all();
+      return buildGraph(files, rawEdges);
+    } finally {
+      try { _db.close(); } catch {}
+    }
+  } catch (e) {
+    // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      const _db = new DatabaseSync(dbPath);
+      const allSQL = (sql) => {
+        try { return _db.prepare(sql).all(); } catch(e) { return []; }
+      };
+      const files = allSQL(FILES_SQL);
+      const rawEdges = allSQL(EDGES_SQL);
+      try { _db.close(); } catch {}
+      return buildGraph(files, rawEdges);
+    } catch(e2) {
+      return empty;
+    }
+  }
+}
+
+
+// ─── Task 9: STRUCTURAL LEARNING VERIFICATION DATA ───────────────────────────
+function getStructuralLearningData() {
+  const empty = { patronesEstructurales: 0, ultimoIndex: null, archivosCambiados: 0, cadenasActivas: [] };
+  try {
+    const patronesRaw = readMemoria('patrones.md');
+    const matches = [...patronesRaw.matchAll(/\[ESTRUCTURAL\] (.+)/g)];
+    const cadenasActivas = matches.map(m => m[1].trim()).slice(0, 5);
+
+    let ultimoIndex = null, archivosCambiados = 0;
+    if (fs.existsSync(dbPath)) {
+      const LAST_INDEX_SQL = 'SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1';
+      let last = null;
+      // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
+      try {
+        const BS3 = require('better-sqlite3');
+        const _db = new BS3(dbPath, { readonly: true });
+        try {
+          last = _db.prepare(LAST_INDEX_SQL).get();
+        } finally {
+          try { _db.close(); } catch {}
+        }
+      } catch (e) {
+        // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
+        try {
+          const { DatabaseSync } = require('node:sqlite');
+          const _db = new DatabaseSync(dbPath);
+          try { last = _db.prepare(LAST_INDEX_SQL).get(); } catch {}
+          try { _db.close(); } catch {}
+        } catch (e2) {}
+      }
+      if (last) {
+        ultimoIndex = last.ran_at;
+        archivosCambiados = JSON.parse(last.changed_files || '[]').length;
+      }
+    }
+
+    return { patronesEstructurales: matches.length, ultimoIndex, archivosCambiados, cadenasActivas };
+  } catch {
+    return empty;
+  }
 }
 
 
@@ -424,6 +533,7 @@ function getEffectivenessData() {
 
 
 const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
+const codeStructure = getCodeStructureGraph();
 
 // Calcular grado de conexiones por nodo (como Graphify — nodos divinos)
 const degreeMap = {};
@@ -474,6 +584,7 @@ function parseModulos(text) {
 }
 
 const contractData   = getContractData();
+const structuralData = getStructuralLearningData();
 const effectData     = getEffectivenessData();
 const creativeData   = getCreativeData();
 const curatorData    = getCuratorData();
@@ -615,7 +726,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .content{flex:1;overflow:hidden;display:flex}
 
 /* ════════ KNOWLEDGE GRAPH MODE ════════ */
-#mode-graph{flex:1;display:flex;overflow:hidden}
+#mode-graph{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.graph-sub-tabs{display:flex;gap:2px;padding:6px 10px;background:rgba(7,9,13,.95);border-bottom:1px solid rgba(139,92,246,.2);flex-shrink:0}
+.gst{font-size:11px;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;color:rgba(255,255,255,.45);border:1px solid transparent;transition:all .2s}
+.gst:hover{color:rgba(255,255,255,.75);background:rgba(139,92,246,.08)}
+.gst.active{color:#c4b5fd;background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.35)}
+#graph-sub-kdd{flex:1;display:flex;overflow:hidden;min-height:0}
+#graph-sub-code{flex:1;display:none;overflow:hidden;position:relative;background:#07090d}
+#graph-sub-combined{flex:1;display:none;overflow:hidden;position:relative;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#07090d}
+.code-unavail{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,.35);text-align:center;gap:12px}
+.code-unavail h3{color:rgba(0,229,255,.6);font-size:15px;margin:0}
+.code-unavail code{font-size:11px;background:rgba(255,255,255,.06);padding:4px 10px;border-radius:5px;color:#a5b4fc}
 .sidebar{width:272px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .sb-tabs{display:flex;border-bottom:1px solid var(--border)}
 .sb-tab{flex:1;padding:9px 6px;text-align:center;font-size:11px;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s}
@@ -675,6 +796,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* Graph area */
 .graph-area{flex:1;position:relative;overflow:hidden;background:var(--bg)}
 #gc{width:100%;height:100%}
+#code-gc{width:100%;height:100%}
+#combined-gc{width:100%;height:100%}
 .gtt{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:15;max-width:240px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .graph-legend{position:absolute;top:10px;left:10px;background:rgba(17,21,32,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;backdrop-filter:blur(4px)}
 .lg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2)}
@@ -873,6 +996,15 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <!-- ════════ KNOWLEDGE GRAPH ════════ -->
 <div id="mode-graph">
+
+  <!-- Graph sub-tabs -->
+  <div class="graph-sub-tabs">
+    <div class="gst active" onclick="setGraphTab('kdd',this)">🧠 KDD Memory</div>
+    <div class="gst" onclick="setGraphTab('code',this)">🔬 Code Structure</div>
+    <div class="gst" onclick="setGraphTab('combined',this)">⚡ Combined</div>
+  </div>
+
+  <div id="graph-sub-kdd">
   <div class="sidebar">
     <div class="sb-tabs">
       <div class="sb-tab active" onclick="showSbTab('nodes',this)" data-i="sb_nodes">Nodes</div>
@@ -956,7 +1088,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 
   <!-- GRAPH -->
-  <div class="graph-area">
+  <div class="graph-area" id="graph-area-main">
     <svg id="gc"></svg>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend">
@@ -986,6 +1118,47 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     </div>
     ${stats.total === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🧠</div><div>No nodes yet — use aa: to start</div></div>' : ''}
   </div>
+  </div><!-- /graph-sub-kdd -->
+
+  <!-- Code Structure view — nativo, sin herramienta externa -->
+  <div id="graph-sub-code" style="position:relative">
+    <svg id="code-gc"></svg>
+    <div class="gtt" id="code-gtt"></div>
+    <div class="graph-legend">
+      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>
+    </div>
+    <div class="graph-controls">
+      <button class="gc-btn" onclick="resetCodeGraph()">⟳ Reset</button>
+      <button class="gc-btn" onclick="centerCodeGraph()">⊙ Center</button>
+    </div>
+    <div class="detail-panel" id="code-detail-panel">
+      <div class="dp-header">
+        <div class="dp-title" id="code-dp-title"></div>
+        <div class="dp-close" onclick="closeCodeDetail()">×</div>
+      </div>
+      <div class="dp-body" id="code-dp-body"></div>
+    </div>
+    ${codeStructure.nodes.length === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🔬</div><div>Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div></div>' : ''}
+  </div>
+
+  <!-- Combined view — KDD Memory + Code Structure, unión heurística por área -->
+  <div id="graph-sub-combined" style="position:relative">
+    <svg id="combined-gc"></svg>
+    <div class="gtt" id="combined-gtt"></div>
+    <div class="graph-legend">
+      <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span>error/patrón/decisión (KDD)</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo (código)</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:rgba(80,250,123,.6)"></div><span>relación por área (aproximada)</span></div>
+    </div>
+    <div class="graph-controls">
+      <button class="gc-btn" onclick="if(combinedSimulation)combinedSimulation.alpha(0.5).restart()">⟳ Reset</button>
+    </div>
+    <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
+      Las líneas verdes conectan por coincidencia de área/ruta — es una aproximación, no un vínculo exacto guardado en la base de datos.
+    </div>
+  </div>
+
 </div>
 
 <!-- ════════ PROJECT DOCS ════════ -->
@@ -1129,7 +1302,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-rules">
         <div class="docs-h1">Project Rules</div>
         <div class="docs-sub">Rules that apply to all development. The system enforces these automatically.</div>
-        ${reglas.length ? reglas.map(r => `<div class="rule-item"><div class="rule-dot"></div><div>${r}</div></div>`).join('') : '<div class="empty-state">No rules defined yet — run aa: configurar</div>'}
+        ${reglas.length ? reglas.map(r => `<div class="rule-item"><div class="rule-dot"></div><div>${escHtml(r)}</div></div>`).join('') : '<div class="empty-state">No rules defined yet — run aa: configurar</div>'}
       </div>
 
       <!-- PATTERNS -->
@@ -1332,7 +1505,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-onboarding">
         <div class="docs-h1">🚀 Project Setup</div>
         <div class="docs-sub">How configured is this project with Agentic KDD. Complete all steps for the full system to work.</div>
-        
+
         <!-- Progress bar -->
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -1446,23 +1619,26 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <code style="color:#a5b4fc">akdd cure</code> — manual &nbsp;·&nbsp; <code style="color:#a5b4fc">akdd cure report</code> — preview
       </div>
     </div>
-  </div>
 
-  <!-- Obsidian MCP — oculto: integración con un plugin de terceros nunca probada
-       de verdad contra este proyecto, sin valor demostrado todavía. No se borró
-       a propósito — si algún día se prueba y sirve, se reactiva quitando este
-       comentario.
-  <div class="obs-panel">
-    <div class="obs-head">
-      <span style="font-size:18px">🗂️</span>
-      <span style="font-size:13px;font-weight:700;color:var(--text)">Obsidian MCP</span>
-      <span class="obs-badge">OPCIONAL</span>
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-p">🧬</div>
+        <div><div class="il-card-name">Aprendizaje Estructural</div><div class="il-card-sub">Nativo — ast_symbols/ast_edges, sin herramienta externa</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val ${structuralData.patronesEstructurales > 0 ? 'vg' : 'vx'}">${structuralData.patronesEstructurales}</div><div class="il-stat-lbl">Patrones aprendidos</div></div>
+        <div class="il-stat"><div class="il-stat-val vp">${structuralData.archivosCambiados}</div><div class="il-stat-lbl">Archivos en último index</div></div>
+      </div>
+      ${structuralData.ultimoIndex ? `<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Último index AST: ${escHtml(structuralData.ultimoIndex)}</div>` : `<div class="empty-state">Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div>`}
+      ${structuralData.cadenasActivas.length > 0 ? `
+      <div class="il-list">
+        ${structuralData.cadenasActivas.map(c => `<div class="il-row"><span class="il-badge bp">CADENA</span><span class="il-row-name" title="${escHtml(c)}">${escHtml(c.substring(0, 45))}</span></div>`).join('')}
+      </div>` : `<div class="empty-state">Sin cadenas estructurales promovidas todavía — se necesitan 3 fallos con la misma causa</div>`}
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        Verificar tú mismo: <code style="color:#a5b4fc">node .agentic/grafo/causal-edges.cjs detect-changes</code>
+      </div>
     </div>
-    <div class="obs-txt">Conecta tu vault de Obsidian como fuente humana de conocimiento. Tus notas fluyen al grafo sin hacer <code style="color:#a5b4fc">akdd knowledge</code> manual.</div>
-    <code class="obs-cmd">1. Instalar plugin "Obsidian MCP Server" en Obsidian → 2. Agregar el servidor MCP en Cursor/Claude Code → 3. La herramienta obsidian_read_notes queda disponible en el chat</code>
-    <div style="font-size:11px;color:var(--text3);margin-top:7px">Sin Obsidian: usa <code style="color:#a5b4fc">akdd knowledge</code> — mismo resultado.</div>
   </div>
-  -->
 
 </div>
 </div>
@@ -1470,6 +1646,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <script>
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 const NODES = ${JSON.stringify(nodes)};
+const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
+const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
+const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
 const EDGES = ${JSON.stringify(edges)};
 const M_NODES = ${JSON.stringify(mNodes)};
 const M_EDGES = ${JSON.stringify(mEdges)};
@@ -1502,6 +1681,16 @@ function setMode(mode,el){
   document.getElementById('mode-intel').style.display=mode==='intel'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
+}
+
+function setGraphTab(tab,el){
+  document.querySelectorAll('.gst').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('graph-sub-kdd').style.display=tab==='kdd'?'flex':'none';
+  document.getElementById('graph-sub-code').style.display=tab==='code'?'flex':'none';
+  document.getElementById('graph-sub-combined').style.display=tab==='combined'?'flex':'none';
+  if(tab==='code'&&!codeSimulation)renderCodeGraph();
+  if(tab==='combined'&&!combinedSimulation)renderCombinedGraph();
 }
 
 function showDoc(section,el){
@@ -1805,8 +1994,8 @@ function renderGraph(){
     .force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-600:-320))
     .force('center',d3.forceCenter(W/2,H/2))
     .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4))
-    .force('x',d3.forceX(W/2).strength(0.04))
-    .force('y',d3.forceY(H/2).strength(0.04));
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
 
   linkSel=g.append('g').selectAll('line').data(links).enter().append('line')
     .attr('stroke','#2a3050').attr('stroke-width',1).attr('stroke-opacity',0.35)
@@ -1859,6 +2048,189 @@ function renderGraph(){
   });
 
   svgEl.on('click',()=>closeDetail());
+}
+
+// ─── D3 Code Structure Graph (nativo) ─────────────────────────────────────────
+let codeSimulation, codeSvgEl, codeLinkSel, codeNodeSel;
+
+function getCodeNodeRadius(d){
+  const base=d.tipo==='clase'?11:7;
+  const bonus=Math.round((d.pagerank||0)*400);
+  return Math.min(base+bonus,22);
+}
+
+function renderCodeGraph(){
+  if(!CODE_NODES.length)return;
+  const container=document.getElementById('graph-sub-code');
+  const W=container.clientWidth||1280,H=container.clientHeight||600;
+
+  codeSvgEl=d3.select('#code-gc').attr('width',W).attr('height',H)
+    .call(d3.zoom().scaleExtent([0.15,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
+
+  const g=codeSvgEl.append('g');
+  const defs=codeSvgEl.append('defs');
+  const glowFilter=defs.append('filter').attr('id','code-neon-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
+  const feMerge=glowFilter.append('feMerge');
+  feMerge.append('feMergeNode').attr('in','blur');
+  feMerge.append('feMergeNode').attr('in','SourceGraphic');
+
+  defs.append('marker').attr('id','code-arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
+    .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
+    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','rgba(139,92,246,0.4)');
+
+  const nodeMapCode={};
+  CODE_NODES.forEach(n=>nodeMapCode[n.id]=n);
+  const links=CODE_EDGES.filter(e=>nodeMapCode[e.source]&&nodeMapCode[e.target]);
+
+  codeSimulation=d3.forceSimulation(CODE_NODES)
+    .force('link',d3.forceLink(links).id(d=>d.id).distance(90))
+    .force('charge',d3.forceManyBody().strength(-260))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(d=>getCodeNodeRadius(d)+4))
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
+
+  codeLinkSel=g.append('g').selectAll('line').data(links).enter().append('line')
+    .attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1).attr('stroke-opacity',0.6)
+    .attr('marker-end','url(#code-arrow)');
+
+  codeNodeSel=g.append('g').selectAll('circle.code-node').data(CODE_NODES).enter().append('circle')
+    .attr('class','code-node')
+    .attr('r',d=>getCodeNodeRadius(d))
+    .attr('fill',d=>CODE_COLORS[d.tipo]||'#00e5ff')
+    .attr('filter','url(#code-neon-glow)')
+    .style('cursor','pointer')
+    .call(d3.drag()
+      .on('start',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
+      .on('end',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0);}))
+    .on('click',(ev,d)=>{ev.stopPropagation();showCodeDetail(d);})
+    .on('mouseover',(ev,d)=>{
+      const tt=document.getElementById('code-gtt');
+      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(d.titulo)}</strong><br><span style="color:var(--text3);font-size:10px">\${d.functions} funciones · \${d.symbol_count} símbolos</span>\`;
+      tt.style.opacity=1;
+      const r=container.getBoundingClientRect();
+      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
+    })
+    .on('mouseout',()=>{document.getElementById('code-gtt').style.opacity=0;});
+
+  codeSimulation.on('tick',()=>{
+    codeLinkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    codeNodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
+  });
+
+  codeSvgEl.on('click',()=>closeCodeDetail());
+}
+
+function showCodeDetail(node){
+  document.getElementById('code-dp-title').textContent=node.file;
+  document.getElementById('code-dp-body').innerHTML=\`
+    <div class="dp-section"><div class="dp-label">Tipo</div><div class="dp-val">\${escHtml(node.tipo)}</div></div>
+    <div class="dp-section"><div class="dp-label">Funciones</div><div class="dp-val">\${node.functions}</div></div>
+    <div class="dp-section"><div class="dp-label">Símbolos totales</div><div class="dp-val">\${node.symbol_count}</div></div>
+    <div class="dp-section"><div class="dp-label">PageRank</div><div class="dp-val">\${(node.pagerank||0).toFixed(4)}</div></div>
+  \`;
+  document.getElementById('code-detail-panel').classList.add('visible');
+}
+function closeCodeDetail(){document.getElementById('code-detail-panel').classList.remove('visible');}
+function resetCodeGraph(){if(codeSimulation)codeSimulation.alpha(0.5).restart();}
+function centerCodeGraph(){
+  if(!codeSvgEl||!codeSimulation)return;
+  const c=document.getElementById('graph-sub-code');
+  codeSimulation.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();
+}
+
+// ─── Combined — merge heurístico por área (KDD Memory + Code Structure) ──────
+let combinedSimulation;
+
+function buildHeuristicLinks(){
+  // Heurística: un nodo KDD con area="X" se conecta a archivos de código
+  // cuya ruta contenga "X". Aproximación deliberada — no hay vínculo exacto
+  // guardado en la base de datos entre un patrón/error y el archivo que lo
+  // originó, así que esto es lo mejor que se puede inferir sin esa data.
+  const links=[];
+  NODES.forEach(kddNode=>{
+    if(!kddNode.area||kddNode.area==='global')return;
+    const areaLower=kddNode.area.toLowerCase();
+    CODE_NODES.forEach(codeNode=>{
+      if(codeNode.file.toLowerCase().includes(areaLower)){
+        links.push({source:'kdd-'+kddNode.id,target:codeNode.id,tipo:'area_match',weight:0.5});
+      }
+    });
+  });
+  return links;
+}
+
+function renderCombinedGraph(){
+  if(!NODES.length&&!CODE_NODES.length)return;
+  const container=document.getElementById('graph-sub-combined');
+  const W=container.clientWidth||1280,H=container.clientHeight||600;
+
+  const svg=d3.select('#combined-gc').attr('width',W).attr('height',H)
+    .call(d3.zoom().scaleExtent([0.1,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
+  const g=svg.append('g');
+
+  const defs=svg.append('defs');
+  const glowFilter=defs.append('filter').attr('id','combined-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
+  const fm=glowFilter.append('feMerge');
+  fm.append('feMergeNode').attr('in','blur');
+  fm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Namespacing de IDs para evitar colisión entre los dos sets de nodos
+  const mergedNodes=[
+    ...NODES.map(n=>({...n,mergedId:'kdd-'+n.id,group:'kdd'})),
+    ...CODE_NODES.map(n=>({...n,mergedId:n.id,group:'code'})),
+  ];
+  const idIndex={};
+  mergedNodes.forEach(n=>idIndex[n.mergedId]=n);
+
+  const kddEdges=EDGES
+    .filter(e=>idIndex['kdd-'+e.desde_id]&&idIndex['kdd-'+e.hacia_id])
+    .map(e=>({source:'kdd-'+e.desde_id,target:'kdd-'+e.hacia_id}));
+  const codeEdges=CODE_EDGES
+    .filter(e=>idIndex[e.source]&&idIndex[e.target])
+    .map(e=>({source:e.source,target:e.target}));
+  const heuristicEdges=buildHeuristicLinks().filter(e=>idIndex[e.source]&&idIndex[e.target]);
+
+  const allLinks=[...kddEdges,...codeEdges,...heuristicEdges];
+
+  combinedSimulation=d3.forceSimulation(mergedNodes)
+    .force('link',d3.forceLink(allLinks).id(d=>d.mergedId).distance(90))
+    .force('charge',d3.forceManyBody().strength(-280))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(8))
+    .force('x',d3.forceX(W/2).strength(0.3))
+    .force('y',d3.forceY(H/2).strength(0.3));
+
+  const linkSelCombined=g.append('g').selectAll('line').data(allLinks).enter().append('line')
+    .attr('stroke',d=>heuristicEdges.includes(d)?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
+    .attr('stroke-width',1).attr('stroke-opacity',0.6);
+
+  const nodeSelCombined=g.append('g').selectAll('circle').data(mergedNodes).enter().append('circle')
+    .attr('r',d=>d.group==='kdd'?8:6)
+    .attr('fill',d=>d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff'))
+    .attr('filter','url(#combined-glow)')
+    .style('cursor','pointer')
+    .call(d3.drag()
+      .on('start',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
+      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
+      .on('end',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0);}))
+    .on('mouseover',(ev,d)=>{
+      const tt=document.getElementById('combined-gtt');
+      const label=d.group==='kdd'?d.titulo:d.file;
+      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(String(label).slice(0,60))}</strong><br><span style="color:var(--text3);font-size:10px">\${d.group==='kdd'?'KDD · '+escHtml(d.area||''):'código'}</span>\`;
+      tt.style.opacity=1;
+      const r=container.getBoundingClientRect();
+      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
+    })
+    .on('mouseout',()=>{document.getElementById('combined-gtt').style.opacity=0;});
+
+  combinedSimulation.on('tick',()=>{
+    linkSelCombined.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    nodeSelCombined.attr('cx',d=>d.x).attr('cy',d=>d.y);
+  });
 }
 
 // ─── D3 Module Neural Graph (fullscreen) ─────────────────────

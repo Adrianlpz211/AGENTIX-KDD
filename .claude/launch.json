@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["C:\\lumo\\.agentic\\grafo\\graph-server.cjs", "C:\\lumo"],
       "port": 9750
+    },
+    {
+      "name": "agentix-dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dashboard.cjs"],
+      "port": 3847
     }
   ]
 }

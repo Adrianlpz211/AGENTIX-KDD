@@ -30,7 +30,7 @@ async function dashboard() {
   // Check for local dashboard first
   const localCjs = path.join(projectPath, 'dashboard.cjs');
   const localJs  = path.join(projectPath, 'dashboard.js');
-  const template = path.join(__dirname, 'dashboard-template.cjs');
+  const template = path.join(__dirname, '..', 'dashboard.cjs');
 
   const dashPath = fs.existsSync(localCjs) ? localCjs
                  : fs.existsSync(localJs)  ? localJs
