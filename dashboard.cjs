@@ -1154,6 +1154,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="graph-controls">
       <button class="gc-btn" onclick="if(combinedSimulation)combinedSimulation.alpha(0.5).restart()">⟳ Reset</button>
     </div>
+    <div class="detail-panel" id="combined-detail-panel">
+      <div class="dp-header">
+        <div class="dp-title" id="combined-dp-title"></div>
+        <div class="dp-close" onclick="closeCombinedDetail()">×</div>
+      </div>
+      <div class="dp-body" id="combined-dp-body"></div>
+    </div>
     <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
       Las líneas verdes conectan por coincidencia de área/ruta — es una aproximación, no un vínculo exacto guardado en la base de datos.
     </div>
@@ -1649,6 +1656,8 @@ const NODES = ${JSON.stringify(nodes)};
 const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
 const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
+const codeNodeMap={};
+CODE_NODES.forEach(n=>codeNodeMap[n.id]=n);
 const EDGES = ${JSON.stringify(edges)};
 const M_NODES = ${JSON.stringify(mNodes)};
 const M_EDGES = ${JSON.stringify(mEdges)};
@@ -2123,17 +2132,54 @@ function renderCodeGraph(){
   codeSvgEl.on('click',()=>closeCodeDetail());
 }
 
+function edgeEndId(v){return (v&&typeof v==='object')?v.id:v;}
 function showCodeDetail(node){
   document.getElementById('code-dp-title').textContent=node.file;
+  const outEdges=CODE_EDGES.filter(e=>edgeEndId(e.source)===node.id);
+  const inEdges=CODE_EDGES.filter(e=>edgeEndId(e.target)===node.id);
+  const relList=(edges,dir)=>edges.slice(0,10).map(e=>{
+    const otherId=dir==='out'?edgeEndId(e.target):edgeEndId(e.source);
+    const other=codeNodeMap[otherId];
+    if(!other)return'';
+    const name=other.file.split(/[\\/]/).pop();
+    return \`<div class="rel-item" onclick="focusCodeNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${CODE_COLORS[other.tipo]||'#00e5ff'};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${e.tipo}</span></div>\`;
+  }).filter(Boolean).join('');
+  const rankNote=node.pagerank>0.01?'archivo central — muchas cosas dependen de él':node.pagerank>0.002?'conectividad media':'archivo periférico';
   document.getElementById('code-dp-body').innerHTML=\`
-    <div class="dp-section"><div class="dp-label">Tipo</div><div class="dp-val">\${escHtml(node.tipo)}</div></div>
-    <div class="dp-section"><div class="dp-label">Funciones</div><div class="dp-val">\${node.functions}</div></div>
-    <div class="dp-section"><div class="dp-label">Símbolos totales</div><div class="dp-val">\${node.symbol_count}</div></div>
-    <div class="dp-section"><div class="dp-label">PageRank</div><div class="dp-val">\${(node.pagerank||0).toFixed(4)}</div></div>
+    <div class="dp-badges">
+      <span class="mb" style="font-size:11px;padding:3px 8px;background:rgba(0,229,255,.15);color:#00e5ff;border:1px solid rgba(0,229,255,.3)">\${escHtml(node.tipo)}</span>
+    </div>
+    <div class="dp-section">
+      <div class="dp-label">Funciones / Símbolos</div>
+      <div class="dp-val">\${node.functions} funciones · \${node.symbol_count} símbolos totales</div>
+    </div>
+    <div class="dp-section">
+      <div class="dp-label">PageRank</div>
+      <div class="dp-val">\${(node.pagerank||0).toFixed(4)} — \${rankNote}</div>
+    </div>
+    \${outEdges.length?'<div class="dp-section"><div class="dp-label">Importa / llama a ('+outEdges.length+')</div>'+relList(outEdges,'out')+'</div>':''}
+    \${inEdges.length?'<div class="dp-section"><div class="dp-label">Usado por ('+inEdges.length+')</div>'+relList(inEdges,'in')+'</div>':''}
+    \${(!outEdges.length&&!inEdges.length)?'<div class="dp-section"><div class="dp-val" style="opacity:.5">Sin conexiones detectadas con otros archivos</div></div>':''}
   \`;
   document.getElementById('code-detail-panel').classList.add('visible');
+  focusCodeNode(node.id);
 }
-function closeCodeDetail(){document.getElementById('code-detail-panel').classList.remove('visible');}
+function closeCodeDetail(){
+  document.getElementById('code-detail-panel').classList.remove('visible');
+  if(codeNodeSel)codeNodeSel.attr('stroke','none').attr('stroke-width',0).attr('fill-opacity',1);
+  if(codeLinkSel)codeLinkSel.attr('stroke-opacity',0.6).attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1);
+}
+function focusCodeNode(id){
+  if(!codeNodeSel)return;
+  codeNodeSel.attr('stroke',d=>d.id===id?'#fff':'none')
+             .attr('stroke-width',d=>d.id===id?3:0)
+             .attr('fill-opacity',d=>d.id===id?1:0.15);
+  if(codeLinkSel){
+    codeLinkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?0.9:0.06)
+               .attr('stroke',e=>e.source.id===id||e.target.id===id?'#00e5ff':'rgba(139,92,246,0.2)')
+               .attr('stroke-width',e=>e.source.id===id||e.target.id===id?2:1);
+  }
+}
 function resetCodeGraph(){if(codeSimulation)codeSimulation.alpha(0.5).restart();}
 function centerCodeGraph(){
   if(!codeSvgEl||!codeSimulation)return;
@@ -2142,7 +2188,8 @@ function centerCodeGraph(){
 }
 
 // ─── Combined — merge heurístico por área (KDD Memory + Code Structure) ──────
-let combinedSimulation;
+let combinedSimulation, linkSelCombined, nodeSelCombined;
+let combinedNodeMap={};
 
 function buildHeuristicLinks(){
   // Heurística: un nodo KDD con area="X" se conecta a archivos de código
@@ -2183,16 +2230,16 @@ function renderCombinedGraph(){
     ...NODES.map(n=>({...n,mergedId:'kdd-'+n.id,group:'kdd'})),
     ...CODE_NODES.map(n=>({...n,mergedId:n.id,group:'code'})),
   ];
-  const idIndex={};
-  mergedNodes.forEach(n=>idIndex[n.mergedId]=n);
+  combinedNodeMap={};
+  mergedNodes.forEach(n=>combinedNodeMap[n.mergedId]=n);
 
   const kddEdges=EDGES
-    .filter(e=>idIndex['kdd-'+e.desde_id]&&idIndex['kdd-'+e.hacia_id])
+    .filter(e=>combinedNodeMap['kdd-'+e.desde_id]&&combinedNodeMap['kdd-'+e.hacia_id])
     .map(e=>({source:'kdd-'+e.desde_id,target:'kdd-'+e.hacia_id}));
   const codeEdges=CODE_EDGES
-    .filter(e=>idIndex[e.source]&&idIndex[e.target])
-    .map(e=>({source:e.source,target:e.target}));
-  const heuristicEdges=buildHeuristicLinks().filter(e=>idIndex[e.source]&&idIndex[e.target]);
+    .filter(e=>combinedNodeMap[e.source]&&combinedNodeMap[e.target])
+    .map(e=>({source:e.source,target:e.target,tipo:e.tipo}));
+  const heuristicEdges=buildHeuristicLinks().filter(e=>combinedNodeMap[e.source]&&combinedNodeMap[e.target]);
 
   const allLinks=[...kddEdges,...codeEdges,...heuristicEdges];
 
@@ -2204,11 +2251,11 @@ function renderCombinedGraph(){
     .force('x',d3.forceX(W/2).strength(0.3))
     .force('y',d3.forceY(H/2).strength(0.3));
 
-  const linkSelCombined=g.append('g').selectAll('line').data(allLinks).enter().append('line')
+  linkSelCombined=g.append('g').selectAll('line').data(allLinks).enter().append('line')
     .attr('stroke',d=>heuristicEdges.includes(d)?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
     .attr('stroke-width',1).attr('stroke-opacity',0.6);
 
-  const nodeSelCombined=g.append('g').selectAll('circle').data(mergedNodes).enter().append('circle')
+  nodeSelCombined=g.append('g').selectAll('circle').data(mergedNodes).enter().append('circle')
     .attr('r',d=>d.group==='kdd'?8:6)
     .attr('fill',d=>d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff'))
     .attr('filter','url(#combined-glow)')
@@ -2217,6 +2264,7 @@ function renderCombinedGraph(){
       .on('start',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
       .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
       .on('end',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0);}))
+    .on('click',(ev,d)=>{ev.stopPropagation();showCombinedDetail(d);})
     .on('mouseover',(ev,d)=>{
       const tt=document.getElementById('combined-gtt');
       const label=d.group==='kdd'?d.titulo:d.file;
@@ -2231,6 +2279,69 @@ function renderCombinedGraph(){
     linkSelCombined.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
     nodeSelCombined.attr('cx',d=>d.x).attr('cy',d=>d.y);
   });
+
+  svg.on('click',()=>closeCombinedDetail());
+}
+
+function showCombinedDetail(node){
+  const isKdd=node.group==='kdd';
+  document.getElementById('combined-dp-title').textContent=isKdd?node.titulo:node.file;
+  const links=linkSelCombined?linkSelCombined.data().filter(e=>e.source.mergedId===node.mergedId||e.target.mergedId===node.mergedId):[];
+  const areaLinks=links.filter(l=>l.tipo==='area_match');
+  const relHTML=areaLinks.slice(0,12).map(e=>{
+    const otherId=e.source.mergedId===node.mergedId?e.target.mergedId:e.source.mergedId;
+    const other=combinedNodeMap[otherId];
+    if(!other)return'';
+    const label=other.group==='kdd'?other.titulo:other.file.split(/[\\/]/).pop();
+    const dotColor=other.group==='kdd'?(COLORS[other.tipo]||'#8b5cf6'):'#00e5ff';
+    return \`<div class="rel-item" onclick="focusCombinedNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${dotColor};flex-shrink:0"></div><div class="rel-name">\${escHtml(String(label).slice(0,36))}</div><span class="rel-type-label">área≈</span></div>\`;
+  }).filter(Boolean).join('');
+
+  const bodyHTML=isKdd?\`
+    <div class="dp-badges">
+      <span class="mb t-\${node.tipo}" style="font-size:11px;padding:3px 8px">\${node.tipo}</span>
+      <span class="mb c\${node.confianza}" style="font-size:11px;padding:3px 8px">\${node.confianza}</span>
+      <span class="ab" style="font-size:11px;padding:3px 8px">\${escHtml(node.area||'global')}</span>
+    </div>
+    <div class="dp-section">
+      <div class="dp-label">Archivos de código relacionados por área (\${areaLinks.length})</div>
+      \${areaLinks.length?relHTML:'<div class="dp-val" style="opacity:.5">Sin coincidencia de área con ningún archivo indexado</div>'}
+    </div>
+  \`:\`
+    <div class="dp-badges">
+      <span class="mb" style="font-size:11px;padding:3px 8px;background:rgba(0,229,255,.15);color:#00e5ff">\${escHtml(node.tipo)}</span>
+    </div>
+    <div class="dp-section">
+      <div class="dp-label">Funciones / Símbolos</div>
+      <div class="dp-val">\${node.functions} funciones · \${node.symbol_count} símbolos</div>
+    </div>
+    <div class="dp-section">
+      <div class="dp-label">Nodos KDD relacionados por área (\${areaLinks.length})</div>
+      \${areaLinks.length?relHTML:'<div class="dp-val" style="opacity:.5">Ningún error/patrón/decisión coincide con la ruta de este archivo</div>'}
+    </div>
+  \`;
+  document.getElementById('combined-dp-body').innerHTML=bodyHTML;
+  document.getElementById('combined-detail-panel').classList.add('visible');
+  focusCombinedNode(node.mergedId);
+}
+
+function closeCombinedDetail(){
+  document.getElementById('combined-detail-panel').classList.remove('visible');
+  if(nodeSelCombined)nodeSelCombined.attr('stroke','none').attr('stroke-width',0).attr('fill-opacity',1);
+  if(linkSelCombined)linkSelCombined.attr('stroke-opacity',0.6)
+    .attr('stroke',d=>d.tipo==='area_match'?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
+    .attr('stroke-width',1);
+}
+
+function focusCombinedNode(mergedId){
+  if(!nodeSelCombined)return;
+  nodeSelCombined.attr('stroke',d=>d.mergedId===mergedId?'#fff':'none')
+                 .attr('stroke-width',d=>d.mergedId===mergedId?3:0)
+                 .attr('fill-opacity',d=>d.mergedId===mergedId?1:0.15);
+  if(linkSelCombined){
+    linkSelCombined.attr('stroke-opacity',e=>e.source.mergedId===mergedId||e.target.mergedId===mergedId?0.9:0.05)
+                   .attr('stroke-width',e=>e.source.mergedId===mergedId||e.target.mergedId===mergedId?2:1);
+  }
 }
 
 // ─── D3 Module Neural Graph (fullscreen) ─────────────────────
