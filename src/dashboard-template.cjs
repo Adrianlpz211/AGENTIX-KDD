@@ -328,24 +328,18 @@ function getGraphData() {
       _db.close();
       return { nodes, edges, ciclos, fases };
     } catch(e) {
-      // Fallback sql.js
+      // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
       try {
-        const SQL = require('sql.js/dist/sql-wasm.js');
-        const buffer = fs.readFileSync(dbPath);
-        const _db = new SQL.Database(buffer);
+        const { DatabaseSync } = require('node:sqlite');
+        const _db = new DatabaseSync(dbPath);
         const allSQL = (sql) => {
-          try {
-            const stmt = _db.prepare(sql);
-            const rows = [];
-            while(stmt.step()) rows.push(stmt.getAsObject());
-            stmt.free();
-            return rows;
-          } catch(e) { return []; }
+          try { return _db.prepare(sql).all(); } catch(e) { return []; }
         };
         const nodes  = allSQL('SELECT * FROM nodos ORDER BY fecha_creacion DESC');
         const edges  = allSQL('SELECT * FROM relaciones');
         const ciclos = allSQL('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30');
         const fases  = allSQL('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100');
+        try { _db.close(); } catch {}
         return { nodes, edges, ciclos, fases };
       } catch(e2) {
         return { nodes: [], edges: [], ciclos: [], fases: [] };
@@ -409,22 +403,16 @@ function getCodeStructureGraph() {
       try { _db.close(); } catch {}
     }
   } catch (e) {
-    // Fallback sql.js
+    // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
     try {
-      const SQL = require('sql.js/dist/sql-wasm.js');
-      const buffer = fs.readFileSync(dbPath);
-      const _db = new SQL.Database(buffer);
+      const { DatabaseSync } = require('node:sqlite');
+      const _db = new DatabaseSync(dbPath);
       const allSQL = (sql) => {
-        try {
-          const stmt = _db.prepare(sql);
-          const rows = [];
-          while(stmt.step()) rows.push(stmt.getAsObject());
-          stmt.free();
-          return rows;
-        } catch(e) { return []; }
+        try { return _db.prepare(sql).all(); } catch(e) { return []; }
       };
       const files = allSQL(FILES_SQL);
       const rawEdges = allSQL(EDGES_SQL);
+      try { _db.close(); } catch {}
       return buildGraph(files, rawEdges);
     } catch(e2) {
       return empty;
@@ -455,14 +443,12 @@ function getStructuralLearningData() {
           try { _db.close(); } catch {}
         }
       } catch (e) {
-        // Fallback sql.js
+        // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
         try {
-          const SQL = require('sql.js/dist/sql-wasm.js');
-          const buffer = fs.readFileSync(dbPath);
-          const _db = new SQL.Database(buffer);
-          const stmt = _db.prepare(LAST_INDEX_SQL);
-          if (stmt.step()) last = stmt.getAsObject();
-          stmt.free();
+          const { DatabaseSync } = require('node:sqlite');
+          const _db = new DatabaseSync(dbPath);
+          try { last = _db.prepare(LAST_INDEX_SQL).get(); } catch {}
+          try { _db.close(); } catch {}
         } catch (e2) {}
       }
       if (last) {
