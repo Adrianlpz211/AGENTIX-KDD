@@ -407,6 +407,35 @@ function getCodeStructureGraph() {
 }
 
 
+// ─── Task 9: STRUCTURAL LEARNING VERIFICATION DATA ───────────────────────────
+function getStructuralLearningData() {
+  const empty = { patronesEstructurales: 0, ultimoIndex: null, archivosCambiados: 0, cadenasActivas: [] };
+  try {
+    const patronesRaw = readMemoria('patrones.md');
+    const matches = [...patronesRaw.matchAll(/\[ESTRUCTURAL\] (.+)/g)];
+    const cadenasActivas = matches.map(m => m[1].trim()).slice(0, 5);
+
+    let ultimoIndex = null, archivosCambiados = 0;
+    if (fs.existsSync(dbPath)) {
+      try {
+        const BS3 = require('better-sqlite3');
+        const _db = new BS3(dbPath, { readonly: true });
+        const last = _db.prepare('SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1').get();
+        if (last) {
+          ultimoIndex = last.ran_at;
+          archivosCambiados = JSON.parse(last.changed_files || '[]').length;
+        }
+        _db.close();
+      } catch {}
+    }
+
+    return { patronesEstructurales: matches.length, ultimoIndex, archivosCambiados, cadenasActivas };
+  } catch {
+    return empty;
+  }
+}
+
+
 // ─── v3.3: CONTRACT GUARD DATA ────────────────────────────────────────────────
 function getContractData() {
   const empty = { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] };
@@ -527,6 +556,7 @@ function parseModulos(text) {
 }
 
 const contractData   = getContractData();
+const structuralData = getStructuralLearningData();
 const effectData     = getEffectivenessData();
 const creativeData   = getCreativeData();
 const curatorData    = getCuratorData();
@@ -1559,6 +1589,25 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="cur-row"><span class="cur-k">Dedup threshold</span><span class="cur-v">92% Jaccard</span></div>
       <div style="margin-top:10px;font-size:11px;color:var(--text3)">
         <code style="color:#a5b4fc">akdd cure</code> — manual &nbsp;·&nbsp; <code style="color:#a5b4fc">akdd cure report</code> — preview
+      </div>
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-p">🧬</div>
+        <div><div class="il-card-name">Aprendizaje Estructural</div><div class="il-card-sub">Nativo — ast_symbols/ast_edges, sin herramienta externa</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val ${structuralData.patronesEstructurales > 0 ? 'vg' : 'vx'}">${structuralData.patronesEstructurales}</div><div class="il-stat-lbl">Patrones aprendidos</div></div>
+        <div class="il-stat"><div class="il-stat-val vp">${structuralData.archivosCambiados}</div><div class="il-stat-lbl">Archivos en último index</div></div>
+      </div>
+      ${structuralData.ultimoIndex ? `<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Último index AST: ${escHtml(structuralData.ultimoIndex)}</div>` : `<div class="empty-state">Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div>`}
+      ${structuralData.cadenasActivas.length > 0 ? `
+      <div class="il-list">
+        ${structuralData.cadenasActivas.map(c => `<div class="il-row"><span class="il-badge bp">CADENA</span><span class="il-row-name" title="${escHtml(c)}">${escHtml(c.substring(0, 45))}</span></div>`).join('')}
+      </div>` : `<div class="empty-state">Sin cadenas estructurales promovidas todavía — se necesitan 3 fallos con la misma causa</div>`}
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        Verificar tú mismo: <code style="color:#a5b4fc">node .agentic/grafo/causal-edges.cjs detect-changes</code>
       </div>
     </div>
   </div>
