@@ -819,7 +819,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .dp-close{cursor:pointer;color:var(--text3);font-size:16px;flex-shrink:0;line-height:1}
 .dp-close:hover{color:var(--text)}
 .dp-body{padding:12px 14px}
-.dp-help-btn{background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.3);color:var(--pl);border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.dp-help-row{padding:0 14px 12px;border-bottom:1px solid var(--border)}
+.dp-help-btn{background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.3);color:var(--pl);border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;width:100%}
 .dp-help-btn:hover{background:rgba(139,92,246,.28)}
 .glossary-modal{display:none;position:fixed;inset:0;background:rgba(5,7,12,.75);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
 .glossary-modal.visible{display:flex}
@@ -1124,9 +1125,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="dp-title"></div>
-        <button class="dp-help-btn" onclick="showGlossary('kdd')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeDetail()">×</div>
       </div>
+      <div class="dp-help-row"><button class="dp-help-btn" onclick="showGlossary('kdd')" title="Explicación en lenguaje simple">¡NO ENTIENDO!</button></div>
       <div class="dp-body" id="dp-body"></div>
     </div>
     ${stats.total === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🧠</div><div>No nodes yet — use aa: to start</div></div>' : ''}
@@ -1148,9 +1149,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="code-detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="code-dp-title"></div>
-        <button class="dp-help-btn" onclick="showGlossary('code')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeCodeDetail()">×</div>
       </div>
+      <div class="dp-help-row"><button class="dp-help-btn" onclick="showGlossary('code')" title="Explicación en lenguaje simple">¡NO ENTIENDO!</button></div>
       <div class="dp-body" id="code-dp-body"></div>
     </div>
     ${codeStructure.nodes.length === 0 ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--text3)"><div style="font-size:40px;margin-bottom:10px">🔬</div><div>Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div></div>' : ''}
@@ -1171,9 +1172,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="detail-panel" id="combined-detail-panel">
       <div class="dp-header">
         <div class="dp-title" id="combined-dp-title"></div>
-        <button class="dp-help-btn" onclick="showGlossary('combined')" title="Explicación en lenguaje simple">🍼 Explícamelo fácil</button>
         <div class="dp-close" onclick="closeCombinedDetail()">×</div>
       </div>
+      <div class="dp-help-row"><button class="dp-help-btn" onclick="showGlossary('combined')" title="Explicación en lenguaje simple">¡NO ENTIENDO!</button></div>
       <div class="dp-body" id="combined-dp-body"></div>
     </div>
     <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
