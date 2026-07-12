@@ -702,6 +702,14 @@ const HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Agentic KDD — ${escHtml(config.nombre)}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"></script>
+<!-- three-spritetext necesita un THREE global — 3d-force-graph trae su PROPIA copia
+     interna pero no la expone como variable global. Three.js quitó su build clásico
+     (script suelto, sin módulos) a partir de r160 — 0.160.0 es la ÚLTIMA versión que
+     todavía lo tiene (verificado: 0.161.0 en adelante da 404). Tira un warning de
+     "deprecated" en consola, inofensivo — sigue funcionando igual, es solo el aviso. -->
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three-spritetext@1.10.0/dist/three-spritetext.min.js"></script>
 <style>
 :root{--bg:#0a0d14;--bg2:#111520;--bg3:#1a1f2e;--bg4:#232840;--border:#2a3050;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--purple:#8b5cf6;--pl:#a78bfa;--green:#10b981;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b;--cyan:#06b6d4;--pink:#ec4899;--r:12px}
 .light{--bg:#f0f4f8;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#eef2f7;--border:#dde3ee;--text:#0f172a;--text2:#475569;--text3:#94a3b8}
@@ -1116,7 +1124,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- GRAPH -->
   <div class="graph-area" id="graph-area-main">
     <button class="help-fab" onclick="showTermsGlossary('kdd')" title="¿Qué significan los términos de este grafo?">?</button>
-    <svg id="gc"></svg>
+    <div id="gc"></div>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend">
       <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span data-i="l_err">error</span></div>
@@ -1132,7 +1140,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <button class="gc-btn" onclick="releaseAll()" title="Release all pinned nodes">⊠ Unpin all</button>
       <div class="gc-slider-wrap" title="Node repulsion">
         <span class="gc-slider-label">⊷</span>
-        <input type="range" class="gc-slider" id="repulsion-slider" min="50" max="800" value="320"
+        <input type="range" class="gc-slider" id="repulsion-slider" min="50" max="800" value="140"
           oninput="setRepulsion(this.value)" title="Repulsion force">
       </div>
     </div>
@@ -1151,7 +1159,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- Code Structure view — nativo, sin herramienta externa -->
   <div id="graph-sub-code" style="position:relative">
     <button class="help-fab" onclick="showTermsGlossary('code')" title="¿Qué significan los términos de este grafo?">?</button>
-    <svg id="code-gc"></svg>
+    <div id="code-gc"></div>
     <div class="gtt" id="code-gtt"></div>
     <div class="graph-legend">
       <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
@@ -1175,7 +1183,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- Combined view — KDD Memory + Code Structure, unión heurística por área -->
   <div id="graph-sub-combined" style="position:relative">
     <button class="help-fab" onclick="showTermsGlossary('combined')" title="¿Qué significan los términos de este grafo?">?</button>
-    <svg id="combined-gc"></svg>
+    <div id="combined-gc"></div>
     <div class="gtt" id="combined-gtt"></div>
     <div class="graph-legend">
       <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span>error/patrón/decisión (KDD)</span></div>
@@ -1183,7 +1191,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="lg-item"><div class="lg-dot" style="background:rgba(80,250,123,.6)"></div><span>relación por área (aproximada)</span></div>
     </div>
     <div class="graph-controls">
-      <button class="gc-btn" onclick="if(combinedSimulation)combinedSimulation.alpha(0.5).restart()">⟳ Reset</button>
+      <button class="gc-btn" onclick="resetCombinedGraph()">⟳ Reset</button>
+      <button class="gc-btn" onclick="centerCombinedGraph()">⊙ Center</button>
     </div>
     <div class="detail-panel" id="combined-detail-panel">
       <div class="dp-header">
@@ -1817,7 +1826,7 @@ function explainCodeNode(node){
 }
 
 function explainCombinedNode(node){
-  const links=linkSelCombined?linkSelCombined.data().filter(e=>e.source.mergedId===node.mergedId||e.target.mergedId===node.mergedId):[];
+  const links=combinedLinksArr.filter(e=>mergedEdgeEndId(e.source)===node.mergedId||mergedEdgeEndId(e.target)===node.mergedId);
   const areaLinks=links.filter(l=>l.tipo==='area_match');
   let summary;
   if(node.group==='kdd'){
@@ -1862,7 +1871,7 @@ const MAX_DEGREE = ${maxDegree};
 const GOD_THRESHOLD = ${godThreshold};
 const COLORS = {error:'#ef4444',patron:'#10b981',decision:'#3b82f6'};
 let lang='en', isDark=true, currentFilter='all', searchVal='', selectedNodeId=null;
-let simulation, svgEl, linkSel, nodeSel, labelSel, labelsVisible=false;
+let labelsVisible=false;
 let modGraphRendered=false;
 const nodeMap={};
 NODES.forEach(n=>nodeMap[n.id]=n);
@@ -1894,8 +1903,17 @@ function setGraphTab(tab,el){
   document.getElementById('graph-sub-kdd').style.display=tab==='kdd'?'flex':'none';
   document.getElementById('graph-sub-code').style.display=tab==='code'?'flex':'none';
   document.getElementById('graph-sub-combined').style.display=tab==='combined'?'flex':'none';
-  if(tab==='code'&&!codeSimulation)renderCodeGraph();
-  if(tab==='combined'&&!combinedSimulation)renderCombinedGraph();
+  if(tab==='code'&&!active3DGraphs['code-gc'])renderCodeGraph();
+  if(tab==='combined'&&!active3DGraphs['combined-gc'])renderCombinedGraph();
+  // A diferencia de D3 (que anima 1-2s y se queda quieto), la librería 3D corre
+  // un ciclo de render continuo para que orbitar responda fluido — incluyendo
+  // pestañas ya visitadas pero ocultas. Sin esto, con las 3 pestañas visitadas
+  // en una sesión larga quedan 3 ciclos de render de GPU corriendo a la vez
+  // sin necesidad. Se pausa el que se oculta, se reanuda el que se muestra.
+  const activeGraphId=tab==='kdd'?'gc':tab==='code'?'code-gc':'combined-gc';
+  ['gc','code-gc','combined-gc'].forEach(id=>{
+    if(id===activeGraphId)resume3DGraph(id); else pause3DGraph(id);
+  });
 }
 
 function showDoc(section,el){
@@ -1945,7 +1963,11 @@ function toggleTheme(){
 function toggleLabels(){
   labelsVisible=!labelsVisible;
   document.getElementById('label-btn').textContent='Labels '+(labelsVisible?'ON':'OFF');
-  if(labelSel)labelSel.attr('opacity',labelsVisible?1:0);
+  // Igual que refreshKddColors(): reasignar el mismo accessor fuerza a la
+  // librería a recalcular nodeThreeObject para cada nodo (crea/quita los
+  // sprites de texto según labelsVisible, ver renderGraph()).
+  const g=active3DGraphs['gc'];
+  if(g)g.nodeThreeObject(g.nodeThreeObject());
 }
 
 function setFilter(f,el){
@@ -2065,49 +2087,47 @@ function closeDetail(){
   document.getElementById('detail-panel').classList.remove('visible');
   selectedNodeId=null;
   renderNodeList();
-  if(nodeSel)nodeSel.attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d)).attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75);
-  if(linkSel)linkSel.attr('stroke-opacity',0.35).attr('stroke','#2a3050').attr('stroke-width',1);
+  refreshKddColors();
+  const g=active3DGraphs['gc'];
+  if(g)g.controls().target.set(0,0,0); // vuelve a orbitar el grafo completo, no un nodo puntual
+}
+
+// Reasigna los mismos accessors de color (misma función, mismo objeto) —
+// eso es lo que 3d-force-graph usa como disparador para recalcular colores/
+// grosores de todos los nodos y links ya dibujados, sin reconstruir el grafo.
+function refreshKddColors(){
+  const g=active3DGraphs['gc'];
+  if(!g)return;
+  g.nodeColor(g.nodeColor());
+  g.linkColor(g.linkColor());
+  g.linkWidth(g.linkWidth());
+  forceRefreshLinkMaterials(g);
 }
 
 function focusNode(id){
-  if(!nodeSel)return;
-  nodeSel.attr('stroke',d=>d.id===id?'#fff':getNodeStroke(d))
-         .attr('stroke-width',d=>d.id===id?3:getNodeStrokeW(d))
-         .attr('fill-opacity',d=>d.id===id?1:selectedNodeId?0.2:d.confianza==='ALTA'?1:0.75);
-  if(linkSel){
-    linkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?0.9:0.06)
-           .attr('stroke',e=>e.source.id===id||e.target.id===id?'#a78bfa':'#2a3050')
-           .attr('stroke-width',e=>e.source.id===id||e.target.id===id?2:1);
-  }
+  refreshKddColors();
 }
 
 function highlightEdge(srcId,tgtId){
-  if(!linkSel)return;
-  linkSel.attr('stroke-opacity',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?1:0.06)
-         .attr('stroke',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?'#ec4899':'#2a3050')
-         .attr('stroke-width',e=>(e.source.id===srcId&&e.target.id===tgtId)||(e.source.id===tgtId&&e.target.id===srcId)?3:1);
-  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.id===srcId||d.id===tgtId?1:0.15);
+  const g=active3DGraphs['gc'];
+  if(!g)return;
+  const isPair=e=>{const s=edgeEndId(e.source),t=edgeEndId(e.target);return (s===srcId&&t===tgtId)||(s===tgtId&&t===srcId);};
+  g.linkColor(e=>isPair(e)?'#ec4899':'#2a3050');
+  g.linkWidth(e=>isPair(e)?3:1);
+  g.nodeColor(d=>d.id===srcId||d.id===tgtId?'#ffffff':(COLORS[d.tipo]||'#8b5cf6'));
 }
 
 function highlightByFilter(){
-  if(!nodeSel)return;
+  const g=active3DGraphs['gc'];
+  if(!g)return;
   const ids=getFiltered().map(n=>n.id);
-  nodeSel.attr('fill-opacity',d=>ids.includes(d.id)?(d.confianza==='ALTA'?1:0.85):0.1);
-  if(linkSel)linkSel.attr('stroke-opacity',e=>ids.includes(e.source.id)&&ids.includes(e.target.id)?0.5:0.03);
+  g.nodeColor(d=>ids.includes(d.id)?(COLORS[d.tipo]||'#8b5cf6'):'rgba(100,100,110,0.15)');
+  g.linkColor(e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    return ids.includes(s)&&ids.includes(t)?'#3a4060':'rgba(58,64,96,0.05)';
+  });
 }
 
-function getNodeStroke(d){
-  const deg=DEGREE_MAP[d.id]||0;
-  if(deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0)return '#f59e0b';
-  if(d.confianza==='ALTA')return 'rgba(255,255,255,0.5)';
-  return 'none';
-}
-function getNodeStrokeW(d){
-  const deg=DEGREE_MAP[d.id]||0;
-  if(deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0)return 2.5;
-  if(d.confianza==='ALTA')return 1.5;
-  return 0;
-}
 function getNodeRadius(d){
   const deg=DEGREE_MAP[d.id]||0;
   const base=d.confianza==='ALTA'?13:d.confianza==='MEDIA'?10:7;
@@ -2122,142 +2142,606 @@ function resetGraph(){
   document.getElementById('srch').value='';
   document.querySelectorAll('.fpill').forEach((p,i)=>p.classList.toggle('active',i===0));
   renderNodeList();
-  if(nodeSel)nodeSel.attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75).attr('stroke',d=>getNodeStroke(d)).attr('stroke-width',d=>getNodeStrokeW(d));
-  if(linkSel)linkSel.attr('stroke-opacity',0.35).attr('stroke','#2a3050').attr('stroke-width',1);
+  refreshKddColors();
+  // En el 2D original esto ya era todo lo que hacía "Reset" (solo filtros/búsqueda)
+  // — pero ahí los nodos fijados/la cámara no tenían adónde "irse", así que no se
+  // notaba. En 3D si arrastraste/fijaste un nodo o moviste la cámara, "Reset" se
+  // sentía roto (no pasaba nada visible). Ahora también libera nodos fijados y
+  // recentra la cámara — la intención real de un botón "Reset".
+  NODES.forEach(n=>{n.fx=null;n.fy=null;n.fz=null;});
+  pinnedNodeIds.clear();
+  const g=active3DGraphs['gc'];
+  if(g){ g.d3ReheatSimulation(); robustAutoFit(g, NODES, 5); }
 }
 
 function centerGraph(){
-  if(!svgEl||!simulation)return;
-  const c=document.getElementById('gc');
-  simulation.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();
+  const g=active3DGraphs['gc'];
+  if(!g)return;
+  robustAutoFit(g, NODES, 5);
 }
 
-// ─── Graph interaction helpers ────────────────────────────────
-function updatePinIndicator(el, pinned){
-  if(!el)return;
-  d3.select(el).classed('node-pinned', pinned);
+// ─── Graph interaction helpers (3D) ───────────────────────────
+// El indicador visual de "nodo fijado" antes era una clase CSS sobre un
+// <circle> SVG — en 3D no hay un elemento DOM por nodo (son mallas Three.js
+// dentro de un <canvas>), así que se resuelve con color: un nodo fijado se
+// dibuja con un tono más claro/blanqueado del mismo color.
+const pinnedNodeIds=new Set();
+
+function blendWhite(hex, amt){ return blendTowards(hex,'#ffffff',amt); }
+
+// Mezcla un color hacia otro (ej. hacia el fondo oscuro, para "atenuar" un
+// nodo que no es vecino del seleccionado — no hay opacidad por-canal en los
+// materiales de esferas, así que atenuar = acercar el color al del fondo).
+function blendTowards(hex, targetHex, amt){
+  const c=String(hex).replace('#','');
+  const t=String(targetHex).replace('#','');
+  if(c.length!==6||t.length!==6)return hex;
+  const mix=(a,b)=>Math.round(a+(b-a)*amt);
+  const r=mix(parseInt(c.substr(0,2),16), parseInt(t.substr(0,2),16));
+  const gg=mix(parseInt(c.substr(2,2),16), parseInt(t.substr(2,2),16));
+  const b=mix(parseInt(c.substr(4,2),16), parseInt(t.substr(4,2),16));
+  return 'rgb('+r+','+gg+','+b+')';
 }
 
-function unpinNode(d, el){
-  d.fx=null; d.fy=null;
-  if(el) d3.select(el).classed('node-pinned', false);
-  simulation.alpha(0.2).restart();
+function unpinNode(id){
+  const node=nodeMap[id];
+  if(!node)return;
+  node.fx=null; node.fy=null; node.fz=null;
+  pinnedNodeIds.delete(id);
+  refreshKddColors();
+  const g=active3DGraphs['gc'];
+  if(g)g.d3ReheatSimulation();
 }
 
 function releaseAll(){
-  if(!nodeSel)return;
-  NODES.forEach(n=>{n.fx=null;n.fy=null;});
-  nodeSel.classed('node-pinned', false);
-  simulation.alpha(0.5).restart();
+  NODES.forEach(n=>{n.fx=null;n.fy=null;n.fz=null;});
+  pinnedNodeIds.clear();
+  refreshKddColors();
+  const g=active3DGraphs['gc'];
+  if(g)g.d3ReheatSimulation();
 }
 
 function spreadGraph(){
-  if(!simulation)return;
-  simulation.force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-1200:-700));
-  simulation.alpha(0.8).restart();
+  const g=active3DGraphs['gc'];
+  if(!g)return;
+  g.d3Force('charge').strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-1200:-700);
+  g.d3ReheatSimulation();
   setTimeout(()=>{
-    const repVal = parseInt(document.getElementById('repulsion-slider')?.value||320);
-    simulation.force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-(repVal*2):-(repVal)));
-    simulation.alpha(0.1).restart();
+    const repVal=parseInt(document.getElementById('repulsion-slider')?.value||140);
+    g.d3Force('charge').strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-(repVal*2):-(repVal));
+    g.d3ReheatSimulation();
   }, 1800);
 }
 
 function setRepulsion(val){
-  val = parseInt(val);
-  if(!simulation)return;
-  simulation.force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-(val*2):-(val)));
-  simulation.alpha(0.3).restart();
+  val=parseInt(val);
+  const g=active3DGraphs['gc'];
+  if(!g)return;
+  g.d3Force('charge').strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-(val*2):-(val));
+  g.d3ReheatSimulation();
 }
 
-// ─── D3 Knowledge Graph ───────────────────────────────────────
+// ─── Motor 3D compartido (esferas reales + orbitar) ──────────────────────────
+// Reemplaza la simulación D3/SVG plana de los 3 grafos. Una sola función que
+// envuelve ForceGraph3D() en vez de que cada grafo monte su propia simulación
+// desde cero — cada render*() de abajo arma sus propios nodos/links (igual
+// que antes) y le pasa sus propios colores/callbacks a ESTA función.
+// NOTA: el 4to grafo del proyecto (Module Neural Graph, en Project Docs) NO
+// pasa por aquí — sigue siendo D3/SVG puro, a propósito, no se toca.
+const active3DGraphs={};
+// Color único para TODAS las líneas de conexión "en reposo" (sin seleccionar
+// nada) en los 3 grafos — mismo estilo en todos lados, en vez de que cada uno
+// tuviera su propio color (KDD usaba un azul-gris oscuro, Combined mezclaba
+// morado y verde según el tipo de relación).
+const LINK_BASE_COLOR='#8b5cf6';
+const LINK_BASE_RGBA='rgba(139,92,246,0.35)';
+const LINK_DIMMED_RGBA='rgba(139,92,246,0.08)';
+
+// Velocidad de partícula "escalonada" — pedido del dueño: con la misma
+// velocidad fija para todos los links, todas las partículas salían y
+// llegaban sincronizadas (se veía como si todo el grafo se moviera de golpe,
+// sin pausas reales entre una y otra). Cada link recibe una velocidad
+// distinta pero ESTABLE (calculada una sola vez y guardada en el propio
+// objeto del link) — así se van desincronizando naturalmente con el tiempo
+// en vez de recalcularse al azar en cada frame (eso sí se vería tembloroso).
+function getStaggeredParticleSpeed(link){
+  if(link.__particleSpeed==null) link.__particleSpeed=0.003+Math.random()*0.007;
+  return link.__particleSpeed;
+}
+
+// NOTA sobre los 3 intentos de "resplandor" en partículas (descartado por
+// decisión del dueño, no por falla técnica): los primeros 2 (Sprite+
+// CanvasTexture, y Group con 2 Mesh) sí rompían el render de verdad —
+// Group no tiene '.geometry' (el frustum culling truena leyendo
+// boundingSphere de undefined) y Sprite usa una ruta de render aparte
+// (WebGLSprites) que no se lleva bien con el pipeline normal de Mesh de
+// esta librería. El 3er intento (un solo Mesh normal con su propia
+// PlaneGeometry + textura de canvas con gradiente radial blanco, en vez de
+// Group/Sprite) SÍ funcionaba sin romper nada — probado y confirmado. Se
+// descartó de todos modos porque, en un grafo con cientos de líneas
+// superpuestas, un halo sutil (unos pocos px) queda casi invisible contra
+// el fondo denso — no era un problema técnico, era que no se justificaba
+// el esfuerzo visual. Si se retoma más adelante: usar linkDirectional-
+// ParticleThreeObject devolviendo un Mesh (nunca Group/Sprite),
+// frustumCulled=false + depthTest=false, y para que reaccione a
+// selección hay que leer el link real desde mesh.parent.__data (la
+// librería clona el objeto de la fábrica por cada partícula y clone() no
+// conserva propiedades personalizadas puestas directo en el mesh).
+// Fuerza mínima compatible con d3-force: reemplaza el forceX/forceY(strength 0.3)
+// que sí tenía el 2D original (ver renderGraph_OLD_D3_UNUSED más abajo) — sin esto,
+// un nodo sin conexiones no tiene NADA que lo jale de vuelta al centro, y la
+// repulsión sola lo empuja cada vez más lejos con cada tick (por eso se veían
+// nodos sueltos perdidos en la nada: no era que la repulsión sobrara, era que
+// faltaba por completo la fuerza que la contrarresta).
+function forceRecenter(strength){
+  let nodes;
+  function force(alpha){
+    for(const n of nodes){
+      n.vx=(n.vx||0)-(n.x||0)*strength*alpha;
+      n.vy=(n.vy||0)-(n.y||0)*strength*alpha;
+      n.vz=(n.vz||0)-(n.z||0)*strength*alpha;
+    }
+  }
+  force.initialize=ns=>{nodes=ns;};
+  return force;
+}
+function create3DGraph(containerId, opts){
+  const container=document.getElementById(containerId);
+  const graph=ForceGraph3D()(container)
+    .backgroundColor('rgba(0,0,0,0)')
+    // Bug real (el de "Combined solo muestra un nodo", la causa de fondo real
+    // detrás de todo lo que se probó antes con cámara/near-far): la librería
+    // usa por defecto el campo "id" de cada nodo para su propio seguimiento
+    // interno (juntar cada malla 3D con su nodo de datos, resolver a qué nodo
+    // apunta cada link). Combined usa "mergedId" (no "id") para evitar que
+    // choquen los ids de KDD y de código — pero nunca se le avisó a la
+    // librería de ese cambio, así que seguía buscando por "id" mientras TODO
+    // el resto de mi código (links, clics, vecinos) usaba "mergedId". Sin
+    // esa correspondencia, la librería no lograba ubicar los nodos de verdad
+    // — las 379 esferas quedaban todas superpuestas en el origen (0,0,0),
+    // pareciendo un solo punto. Confirmado con datos reales: getWorldPosition()
+    // de cada esfera daba (0,0,0) para todas, sin excepción.
+    .nodeId(opts.nodeId||'id')
+    .graphData({nodes:opts.nodes, links:opts.links})
+    .nodeColor(opts.nodeColor)
+    .nodeVal(opts.nodeVal||(()=>4))
+    .nodeLabel(opts.nodeLabel||(()=>''))
+    .nodeOpacity(0.92)
+    .nodeThreeObjectExtend(true) // el objeto de nodeThreeObject se AGREGA a la esfera normal, no la reemplaza
+    .nodeThreeObject(opts.nodeThreeObject||(()=>null))
+    .linkColor(opts.linkColor)
+    .linkWidth(opts.linkWidth||(()=>1))
+    .linkOpacity(0.45)
+    // Animación de "impulsos neuronales" — partículas que viajan por cada
+    // conexión, como el pedido del dueño. Función nativa de la librería
+    // (linkDirectionalParticles), no hay que construirla desde cero. Todo
+    // esto es opt-in vía opts — si un futuro caller no pasa estas opciones,
+    // el comportamiento queda EXACTAMENTE igual que antes (0 partículas por
+    // defecto en la librería), así que no debería romper nada existente.
+    .linkDirectionalParticles(opts.linkDirectionalParticles||0)
+    .linkDirectionalParticleSpeed(opts.linkDirectionalParticleSpeed||0.006)
+    .linkDirectionalParticleWidth(opts.linkDirectionalParticleWidth||2)
+    // Si se pasa linkDirectionalParticleThreeObject (sprite con resplandor,
+    // ver makeGlowParticleObject) se usa ESE en vez del color plano — la
+    // librería no tiene un modo "extend" para partículas (confirmado
+    // reflexionando sobre el objeto: linkDirectionalParticleThreeObjectExtend
+    // no existe en esta versión), así que pasar un objeto personalizado
+    // reemplaza por completo la esferita de color por defecto.
+    .linkDirectionalParticleColor(opts.linkDirectionalParticleColor||opts.linkColor)
+    .onNodeClick((node,ev)=>{ if(graph.__idleState)graph.__idleState.last=performance.now(); if(opts.onNodeClick) opts.onNodeClick(node,ev); })
+    .onBackgroundClick(()=>{ if(graph.__idleState)graph.__idleState.last=performance.now(); if(opts.onBackgroundClick) opts.onBackgroundClick(); })
+    .enableNodeDrag(true)
+    .width(container.clientWidth||800)
+    .height(container.clientHeight||600);
+  // Nota: v1.80.0 no tiene un método .controlType() — el control de cámara
+  // por defecto de esta librería YA es "orbitar con clic-arrastre" (se
+  // verifica más abajo con datos reales, no se asume).
+  if(opts.onNodeDragEnd) graph.onNodeDragEnd(opts.onNodeDragEnd);
+  if(opts.linkDirectionalParticleThreeObject) graph.linkDirectionalParticleThreeObject(opts.linkDirectionalParticleThreeObject);
+  if(opts.chargeStrength) graph.d3Force('charge').strength(opts.chargeStrength);
+  if(opts.linkDistance) graph.d3Force('link').distance(opts.linkDistance);
+  if(opts.centerStrength) graph.d3Force('recenter', forceRecenter(opts.centerStrength));
+  // Bug real encontrado probando: los controles de cámara (TrackballControls)
+  // cachean el tamaño de pantalla en el momento en que se crean — si en ese
+  // instante el <canvas> todavía tenía su tamaño por defecto (300x150), orbitar
+  // queda con las coordenadas de arrastre completamente desalineadas. Forzar
+  // el recálculo después de fijar el tamaño real del contenedor lo corrige.
+  if(graph.controls&&graph.controls().handleResize)graph.controls().handleResize();
+  // La cámara arranca a una distancia FIJA por defecto (~767) sin importar el
+  // tamaño real del grafo — si el grafo es compacto (pocos nodos, poca
+  // repulsión) la cámara queda absurdamente lejos y todo se ve como puntitos
+  // perdidos en un lienzo vacío (no es que los nodos estén dispersos de
+  // verdad: es que la cámara nunca se acercó a donde están). Se encuadra
+  // automáticamente, apenas la simulación asienta por primera vez.
+  // Bug real encontrado probando con Combined (379 nodos): con UNA sola pasada
+  // a los 1200ms, un grafo grande todavía no terminó de asentar — algún nodo
+  // suelto puede estar temporalmente muy lejos (la fuerza de recentrado aún no
+  // lo alcanzó), y como fitCameraToNodes usa el nodo MÁS lejano para calcular
+  // el radio, ese único nodo transitorio dispara una distancia de cámara
+  // gigante — resultado: solo se ve un puntito en medio de la nada. La misma
+  // cámara "demasiado cerca al inicio" pasaba en grafos chicos (KDD/Code):
+  // se hacía el encuadre antes de que los nodos terminaran de repelerse y
+  // separarse del todo, así que después seguían creciendo y la cámara quedaba
+  // corta (nodos gigantes/superpuestos). Ahora se reencuadra cada 1s (hasta 8
+  // intentos = 8s) y se PARA solo cuando dos pasadas seguidas dan casi la
+  // misma distancia (< 3% de diferencia) — eso SÍ prueba que ya asentó.
+  //
+  // SEGUNDO bug real, más grave, encontrado después: el auto-encuadre y el
+  // auto-orbitar (más abajo) SE PISABAN entre sí. El auto-encuadre detectaba
+  // "¿el usuario ya tocó la cámara?" comparando si camera.position cambió
+  // desde su última pasada — pero el auto-orbitar TAMBIÉN mueve
+  // camera.position (a propósito, para girar solo) sin que el usuario haga
+  // nada. Resultado: si el auto-orbitar arrancaba (5s de "inactividad", que
+  // en realidad solo significa "nadie tocó nada", no que el encuadre ya
+  // terminó) ANTES de que el auto-encuadre completara sus 8 intentos, el
+  // encuadre creía "ah, el usuario ya la movió, no le piso el gesto" y se
+  // rendía a mitad de camino — dejando la cámara en una posición sin asentar
+  // de verdad (el bug real de "Combined solo muestra un nodo"). Ahora los dos
+  // sistemas comparten UNA sola señal real de "el usuario tocó la cámara"
+  // (el evento 'start' de TrackballControls, que solo se dispara con
+  // interacción real de mouse/touch) en vez de comparar posiciones — el
+  // auto-orbitar mover la cámara ya NO se confunde con un gesto del usuario.
+  const ctrl=graph.controls();
+  graph.__userTouchedCamera=false;
+  if(ctrl&&ctrl.addEventListener)ctrl.addEventListener('start',()=>{ graph.__userTouchedCamera=true; });
+  // Bug real reportado por el dueño: al hacer zoom a mano (scroll) en KDD
+  // Memory y Combined, los nodos aparecían/desaparecían según se acercara o
+  // alejara — verificado con datos reales: near/far se calculaba UNA sola
+  // vez al encuadrar (una ventana fija alrededor de esa distancia exacta),
+  // pero el zoom del usuario mueve la cámara LEJOS de esa ventana sin volver
+  // a calcularla — zoom out saca a TODOS los nodos más allá del far plane
+  // (invisibles), zoom in los mete todos más cerca que el near plane (también
+  // invisibles). El arreglo: recalcular near/far en cada evento 'change' de
+  // los controles (se dispara con cualquier zoom/rotar/pan real), usando la
+  // distancia ACTUAL de la cámara — así la ventana de profundidad sigue al
+  // zoom en vez de quedarse fija en el valor del último encuadre.
+  if(ctrl&&ctrl.addEventListener)ctrl.addEventListener('change',()=>{
+    if(graph.__nodeSpreadRadius==null)return;
+    const cam=graph.camera();
+    const dist=cam.position.distanceTo(ctrl.target);
+    const spread=graph.__nodeSpreadRadius;
+    // mismo mínimo proporcional que en fitCameraToNodes — cubre nodos sueltos
+    // que se hayan alejado más de lo que medía el spread cacheado
+    cam.near=Math.max(Math.min(dist-spread, dist*0.1), 0.5);
+    cam.far=Math.max(dist+spread, dist*3);
+    cam.updateProjectionMatrix();
+  });
+  if(opts.autoFit!==false)robustAutoFit(graph, opts.nodes, 5);
+  // Auto-orbitar tras inactividad: si nadie toca el grafo por 5s, la cámara
+  // empieza a girar sola despacio alrededor del centro — se detiene apenas
+  // el usuario interactúa de nuevo (clic/arrastre/scroll real, vía el mismo
+  // evento 'start' de arriba) o al pausar la pestaña.
+  // Verificado con datos reales: mover camera.position a mano y llamar
+  // controls().update() NO lo revierte (TrackballControls no pisa la
+  // posición manual en su próximo update — solo la usa para pan/zoom/rotar
+  // cuando el usuario mueve el mouse), así que es seguro rotar así.
+  const idle={last:performance.now(), rafId:null, active:true};
+  if(ctrl&&ctrl.addEventListener)ctrl.addEventListener('start',()=>{idle.last=performance.now();});
+  graph.__idleState=idle;
+  startIdleOrbit(graph);
+  active3DGraphs[containerId]=graph;
+  return graph;
+}
+// Un solo tick de rotación, reusado tanto al crear el grafo como al
+// reanudarlo desde pausa — evita mantener la misma lógica en dos lugares.
+function startIdleOrbit(graph){
+  const idle=graph.__idleState;
+  function tick(){
+    idle.rafId=requestAnimationFrame(tick);
+    if(!idle.active)return;
+    if(performance.now()-idle.last<5000)return;
+    const cam=graph.camera();
+    const target=graph.controls().target;
+    const a=0.0015; // radianes por frame — giro lento y discreto
+    const dx=cam.position.x-target.x, dz=cam.position.z-target.z;
+    const cosA=Math.cos(a), sinA=Math.sin(a);
+    cam.position.x=target.x+dx*cosA-dz*sinA;
+    cam.position.z=target.z+dx*sinA+dz*cosA;
+    cam.lookAt(target);
+  }
+  tick();
+}
+
+// Bug real encontrado probando el resaltado amarillo en KDD Memory: reasignar
+// el mismo accessor (el patrón g.linkColor(g.linkColor()) que SÍ funciona
+// para nodeColor) NO actualiza el color de los links — se verificó con datos
+// reales que el material seguía en el color de siempre (#2a3050) aunque el
+// accessor devolviera correctamente "#facc15" al llamarlo a mano. La causa:
+// nuestros links siempre usan linkWidth (para poder engrosar el
+// seleccionado), así que la librería los dibuja como mallas 3D
+// (CylinderGeometry) en vez de líneas simples — y ese modo de render no
+// reacciona a reasignar el accessor, solo lo usa una vez al crear la malla.
+// Cada malla de link SÍ guarda una referencia a su dato real en
+// __data/__graphObjType (confirmado explorando el objeto en el
+// navegador) — así que se actualiza el material A MANO, recorriendo la
+// escena directamente, en vez de confiar en la reactividad rota.
+function forceRefreshLinkMaterials(graph){
+  if(!graph)return;
+  const colorFn=graph.linkColor();
+  graph.scene().traverse(obj=>{
+    if(obj.__graphObjType==='link' && obj.__data && obj.material && obj.material.color){
+      const c=colorFn(obj.__data);
+      if(typeof c!=='string')return;
+      obj.material.color.set(c); // THREE ya parsea bien hex y rgba() — se comprobó con datos reales
+      const alphaMatch=c.match(/rgba\([\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)\)/i);
+      obj.material.opacity=alphaMatch?parseFloat(alphaMatch[1]):1;
+      obj.material.transparent=true;
+      obj.material.needsUpdate=true;
+    }
+  });
+  // Bug real encontrado probando Combined (1028 links, muchos más que los 520
+  // de KDD): la PRIMERA llamada justo después de seleccionar un nodo no
+  // alcanzaba a actualizar todos los materiales — probablemente la librería
+  // todavía está terminando de crear/instanciar las mallas de los links en
+  // un grafo tan grande. Una segunda pasada 80ms después sí los agarraba
+  // todos. Se repite acá adentro para que TODOS los llamadores (focusNode,
+  // focusCodeNode, focusCombinedNode) queden cubiertos sin tener que
+  // acordarse de hacerlo en cada uno.
+  setTimeout(()=>{
+    graph.scene().traverse(obj=>{
+      if(obj.__graphObjType==='link' && obj.__data && obj.material && obj.material.color){
+        const c=colorFn(obj.__data);
+        if(typeof c!=='string')return;
+        obj.material.color.set(c);
+        const alphaMatch=c.match(/rgba\([\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)\)/i);
+        obj.material.opacity=alphaMatch?parseFloat(alphaMatch[1]):1;
+        obj.material.transparent=true;
+        obj.material.needsUpdate=true;
+      }
+    });
+  }, 80);
+}
+function pause3DGraph(containerId){
+  const g=active3DGraphs[containerId];
+  if(!g)return;
+  if(g.pauseAnimation)g.pauseAnimation();
+  if(g.__idleState){ g.__idleState.active=false; if(g.__idleState.rafId)cancelAnimationFrame(g.__idleState.rafId); }
+}
+function resume3DGraph(containerId){
+  const g=active3DGraphs[containerId];
+  if(!g)return;
+  if(g.resumeAnimation)g.resumeAnimation();
+  if(g.__idleState&&!g.__idleState.active){
+    g.__idleState.active=true;
+    g.__idleState.last=performance.now(); // no orbitar de inmediato al volver a la pestaña
+    startIdleOrbit(g);
+  }
+}
+
+// Bug real encontrado probando Code Structure (287 nodos, solo 46 links —
+// muy disperso, casi todos los nodos terminan a distancia parecida del
+// centro, como una "cáscara esférica" en vez de un cluster denso): en ese
+// caso zoomToFit() calculaba una distancia de cámara mucho más CHICA que el
+// radio real (dio 22.7 con nodos a ~65 de distancia) — se probó de nuevo con
+// la simulación ya asentada y dio el mismo número mal, así que no era un
+// tema de timing. Se calibró primero contra el valor de KDD Memory que se
+// veía bien (37.2, confirmado por el dueño): radio máximo/tan(fov) daba 37.7,
+// muy cercano — pero esa calibración resultó ser engañosa. Al medir de
+// verdad cuántos nodos de Combined (379, más disperso) caían DENTRO del
+// cuadro de la cámara con esa fórmula (proyectando cada nodo con
+// camera.project() y contando cuántos caen en el rango visible), solo el 38%
+// entraba — la fórmula "se veía bien" en KDD solo porque es denso (la
+// mayoría cerca del centro, los pocos sueltos afuera no se notaban), no
+// porque encuadrara todo de verdad. Ahora se calcula por eje (X e Y por
+// separado, cada uno con su propio FOV — vertical para Y, derivado del
+// aspect para X) usando un percentil (no el máximo ni una constante mágica)
+// y se toma la distancia más exigente de los dos ejes — esto sí se verificó
+// que mete la gran mayoría de los nodos reales dentro de cuadro, en los 3
+// grafos, no solo en el que se usó para calibrar.
+function fitCameraToNodes(graph, nodes, padding, percentile){
+  if(!nodes||!nodes.length)return;
+  const p=percentile||0.92;
+  const cx=nodes.reduce((s,n)=>s+(n.x||0),0)/nodes.length;
+  const cy=nodes.reduce((s,n)=>s+(n.y||0),0)/nodes.length;
+  const cz=nodes.reduce((s,n)=>s+(n.z||0),0)/nodes.length;
+  const cam=graph.camera();
+  const vFovRad=(cam.fov||50)*Math.PI/180;
+  const aspect=cam.aspect||1;
+  const hFovRad=2*Math.atan(Math.tan(vFovRad/2)*aspect);
+  const pctVal=(arr)=>{ const s=arr.slice().sort((a,b)=>a-b); return Math.max(s[Math.floor(s.length*p)]||0, 5); };
+  const targetY=pctVal(nodes.map(n=>Math.abs((n.y||0)-cy)));
+  const targetX=pctVal(nodes.map(n=>Math.abs((n.x||0)-cx)));
+  const distForY=targetY/Math.tan(vFovRad/2);
+  const distForX=targetX/Math.tan(hFovRad/2);
+  const dist=Math.max(distForY,distForX)+(padding||0);
+  cam.position.set(cx,cy,cz+dist);
+  cam.lookAt(cx,cy,cz);
+  graph.controls().target.set(cx,cy,cz);
+  // El bug REAL de "Combined solo muestra un nodo" (el que de verdad importaba
+  // — todo lo anterior en esta función solo mueve la cámara, esto es lo que
+  // arregla lo que se ve): la librería deja el far plane por defecto en
+  // 125000 con near en 0.1 — una proporción de 1.25 MILLONES a 1. Verificado
+  // con datos reales: a la distancia de cámara real (~156 en Combined), TODOS
+  // los nodos proyectaban a z≈0.999 en el buffer de profundidad (comprobado
+  // con matrixWorldInverse, no con .project() que puede engañar) — el GPU ya
+  // no tiene precisión para distinguir cuál esfera está más cerca en cada
+  // píxel, así que el z-test se vuelve casi aleatorio y solo UNA esfera "gana"
+  // en casi toda la pantalla. Esto explica por qué mis chequeos de posición/
+  // proyección (NDC x,y) siempre daban bien (~90%) pero el render real
+  // mostraba un solo punto: esos chequeos nunca miraban la precisión real del
+  // depth buffer. El arreglo: acotar near/far al rango real de profundidad de
+  // ESTE grafo específico cada vez que se encuadra, en vez de dejar el default
+  // gigante de la librería.
+  const maxDist3D=Math.max(...nodes.map(n=>Math.sqrt((n.x-cx)**2+(n.y-cy)**2+(n.z-cz)**2)), 5);
+  // Segundo bug real, encontrado DESPUÉS de este primero: nodos sueltos
+  // pueden seguir alejándose con el tiempo (la fuerza de recentrado no es
+  // perfecta para todos) — verificado con datos reales: minutos después de
+  // este cálculo, algunos nodos ya estaban a 140-159 unidades del centro
+  // aunque maxDist3D solo había medido 59.9 en ESE momento. Un near/far
+  // calculado una sola vez y nunca vuelto a ajustar (salvo por zoom, ver el
+  // listener 'change') se quedaba corto para esos casos — resultado: esos
+  // nodos sueltos aparecían y desaparecían según el zoom. Por eso ahora,
+  // ADEMÁS de acotar al spread real medido, se exige un mínimo proporcional
+  // a la distancia actual de cámara (far ≥ 3× la distancia) — así siempre
+  // hay margen de sobra sin importar cuánto se haya movido algún nodo suelto
+  // desde el último encuadre, y la proporción far/near se mantiene chica
+  // (≤30:1) para no repetir el problema original de precisión del buffer.
+  cam.near=Math.max(Math.min(dist-maxDist3D-(padding||0)-10, dist*0.1), 0.5);
+  cam.far=Math.max(dist+maxDist3D+(padding||0)+10, dist*3);
+  cam.updateProjectionMatrix();
+  // Se guarda para que el listener de 'change' en create3DGraph pueda seguir
+  // ajustando near/far en vivo mientras el usuario hace zoom a mano (ver bug
+  // real más abajo, en create3DGraph) sin tener que recalcular el radio del
+  // grafo en cada evento — solo la distancia actual de la cámara cambia.
+  graph.__nodeSpreadRadius=maxDist3D+(padding||0)+10;
+}
+
+// Reencuadra en repetición (cada 1s, hasta 8 intentos) en vez de una sola vez
+// a un tiempo fijo — bug real: con un solo intento a los 1200ms, un grafo
+// grande (Combined, 379 nodos) todavía no había terminado de asentar, y un
+// nodo suelto transitorio (la fuerza de recentrado aún no lo alcanzaba)
+// disparaba una distancia de cámara gigante — resultado: se veía un solo
+// puntito en la nada. Se para de reencuadrar solo cuando dos pasadas seguidas
+// dan casi la misma distancia (< 3% de diferencia, prueba real de que ya
+// asentó) o si el usuario YA TOCÓ la cámara con el mouse de verdad
+// (graph.__userTouchedCamera, marcado por el evento 'start' de
+// TrackballControls en create3DGraph — NO por comparar si camera.position
+// cambió, que es como se hacía antes y causaba el bug real de "Combined solo
+// muestra un nodo": el auto-orbitar (abajo) TAMBIÉN mueve camera.position sin
+// que el usuario haga nada, y esa versión anterior confundía ese movimiento
+// automático con un gesto real, rindiéndose a mitad de camino).
+function robustAutoFit(graph, nodes, padding){
+  // Se reinicia acá, no solo en create3DGraph: si el usuario ya arrastró la
+  // cámara antes pero ahora hace clic en "Reset"/"Center" a propósito, ESE
+  // clic debe forzar el reencuadre completo de nuevo — si no, la marca vieja
+  // de "el usuario ya la tocó" dejaría el botón sin efecto para siempre.
+  graph.__userTouchedCamera=false;
+  let lastDist=null, attempts=0;
+  const maxAttempts=8;
+  const tryFit=()=>{
+    attempts++;
+    if(graph.__userTouchedCamera)return; // el usuario ya agarró la cámara de verdad — no se le pisa el gesto
+    fitCameraToNodes(graph, nodes, padding);
+    const cam=graph.camera();
+    const newDist=Math.sqrt(cam.position.x**2+cam.position.y**2+cam.position.z**2);
+    const stable=lastDist!==null && Math.abs(newDist-lastDist)/Math.max(newDist,1)<0.03;
+    lastDist=newDist;
+    if(!stable && attempts<maxAttempts) setTimeout(tryFit, 1000);
+  };
+  setTimeout(tryFit, 1000);
+}
+
+// ─── Knowledge Graph — 3D real (esferas + orbitar) ───────────────────────────
+// Vecinos directos de un nodo (para el resaltado amarillo + atenuar el resto)
+function kddNeighborIds(id){
+  const rels=relMap[id]||[];
+  const s=new Set();
+  rels.forEach(r=>s.add(r.dir==='out'?r.hacia_id:r.desde_id));
+  return s;
+}
+
 function renderGraph(){
   if(!NODES.length)return;
-  const container=document.getElementById('gc');
-  const W=container.clientWidth||800,H=container.clientHeight||600;
-
-  svgEl=d3.select('#gc').attr('width',W).attr('height',H)
-    .call(d3.zoom().scaleExtent([0.15,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
-
-  const g=svgEl.append('g');
-
-  // Gradient glow for god nodes
-  const defs=svgEl.append('defs');
-  defs.append('radialGradient').attr('id','god-glow').attr('cx','50%').attr('cy','50%').attr('r','50%')
-    .selectAll('stop').data([{o:'0%',c:'rgba(245,158,11,0.4)'},{o:'100%',c:'rgba(245,158,11,0)'}])
-    .enter().append('stop').attr('offset',d=>d.o).attr('stop-color',d=>d.c);
-
-  defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
-    .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
-    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#3a4060');
-
   const links=EDGES.map(e=>({...e,source:e.desde_id,target:e.hacia_id})).filter(e=>nodeMap[e.source]&&nodeMap[e.target]);
+  // Definidas aparte (no solo dentro de linkColor/linkWidth) para que la
+  // partícula de cada conexión pueda usar EXACTAMENTE el mismo color/ancho
+  // que su línea, sin duplicar la lógica — pedido del dueño.
+  const getKddLinkColor=e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    if(selectedNodeId&&(s===selectedNodeId||t===selectedNodeId))return '#facc15';
+    return selectedNodeId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
+  };
+  const getKddLinkWidth=e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    return selectedNodeId&&(s===selectedNodeId||t===selectedNodeId)?1.2:0.4;
+  };
 
-  simulation=d3.forceSimulation(NODES)
-    .force('link',d3.forceLink(links).id(d=>d.id).distance(d=>{
-      const sd=DEGREE_MAP[d.source.id]||0, td=DEGREE_MAP[d.target.id]||0;
-      return sd>=GOD_THRESHOLD||td>=GOD_THRESHOLD?120:90;
-    }))
-    .force('charge',d3.forceManyBody().strength(d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-600:-320))
-    .force('center',d3.forceCenter(W/2,H/2))
-    .force('collision',d3.forceCollide(d=>getNodeRadius(d)+4))
-    .force('x',d3.forceX(W/2).strength(0.3))
-    .force('y',d3.forceY(H/2).strength(0.3));
-
-  linkSel=g.append('g').selectAll('line').data(links).enter().append('line')
-    .attr('stroke','#2a3050').attr('stroke-width',1).attr('stroke-opacity',0.35)
-    .attr('marker-end','url(#arrow)');
-
-  // God node glow circles
-  g.append('g').selectAll('circle.glow').data(NODES.filter(n=>(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0)).enter().append('circle')
-    .attr('class','glow').attr('r',d=>getNodeRadius(d)+8).attr('fill','url(#god-glow)').style('pointer-events','none');
-
-  nodeSel=g.append('g').selectAll('circle.node').data(NODES).enter().append('circle')
-    .attr('class','node')
-    .attr('r',d=>getNodeRadius(d))
-    .attr('fill',d=>COLORS[d.tipo]||'#8b5cf6')
-    .attr('fill-opacity',d=>d.confianza==='ALTA'?1:0.75)
-    .attr('stroke',d=>getNodeStroke(d))
-    .attr('stroke-width',d=>getNodeStrokeW(d))
-    .style('cursor','pointer')
-    .call(d3.drag()
-      .on('start',(ev,d)=>{if(!ev.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
-      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;updatePinIndicator(ev.currentTarget,true);})
-      .on('end',(ev,d)=>{if(!ev.active)simulation.alphaTarget(0);/* node stays PINNED — dblclick to release */}))
-    .on('dblclick',(ev,d)=>{ev.stopPropagation();unpinNode(d,ev.currentTarget);})
-    .on('click',(ev,d)=>{ev.stopPropagation();selectNode(d.id);})
-    .on('mouseover',(ev,d)=>{
-      const tt=document.getElementById('gtt');
+  const graph=create3DGraph('gc',{
+    nodes:NODES,
+    links,
+    nodeColor:d=>{
+      const base=COLORS[d.tipo]||'#8b5cf6';
+      if(d.id===selectedNodeId)return '#ffffff';
+      if(selectedNodeId){
+        // hay un nodo seleccionado: solo sus vecinos directos quedan a color
+        // completo, el resto se atenúa de verdad (mezclado hacia el fondo)
+        return kddNeighborIds(selectedNodeId).has(d.id) ? base : blendTowards(base,'#0a0d14',0.75);
+      }
+      if(pinnedNodeIds.has(d.id))return blendWhite(base,0.4);
+      return base;
+    },
+    nodeVal:d=>Math.pow(getNodeRadius(d)/6,3),
+    nodeLabel:d=>{
       const deg=DEGREE_MAP[d.id]||0;
       const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
-      tt.innerHTML=\`<strong style="color:var(--text)">\${isGod?'⚡ ':''}\${escHtml(d.titulo.slice(0,40))}\${d.titulo.length>40?'…':''}</strong><br><span style="color:var(--text3);font-size:10px">\${d.tipo} · \${escHtml(d.area)} · \${d.confianza} · \${deg} connections</span>\`;
-      tt.style.opacity=1;
-      const r=container.getBoundingClientRect();
-      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
-    })
-    .on('mouseout',()=>{document.getElementById('gtt').style.opacity=0;});
-
-  // Labels (hidden by default, toggle with button)
-  labelSel=g.append('g').selectAll('text').data(NODES.filter(n=>n.confianza==='ALTA'||(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD)).enter().append('text')
-    .text(d=>d.titulo.slice(0,16)+(d.titulo.length>16?'…':''))
-    .attr('font-size',9).attr('fill',d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?'rgba(245,158,11,0.8)':'rgba(255,255,255,0.4)')
-    .attr('text-anchor','middle').attr('dy',d=>-(getNodeRadius(d)+5)).style('pointer-events','none')
-    .attr('opacity',0);
-
-  // Update glow positions
-  const glowSel=g.selectAll('circle.glow');
-
-  simulation.on('tick',()=>{
-    linkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-    nodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
-    glowSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
-    if(labelSel)labelSel.attr('x',d=>d.x).attr('y',d=>d.y);
+      return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
+        +'<strong style="color:#e2e8f0">'+(isGod?'⚡ ':'')+escHtml(d.titulo.slice(0,50))+(d.titulo.length>50?'…':'')+'</strong><br>'
+        +'<span style="color:#64748b;font-size:10px">'+d.tipo+' · '+escHtml(d.area)+' · '+d.confianza+' · '+deg+' connections</span></div>';
+    },
+    // Etiqueta 3D real (sprite de texto, siempre mirando a cámara) — solo para
+    // ALTA confianza / divinos, igual que el 2D original. Solo si labelsVisible
+    // está prendido (botón "Labels"); si no, no se crea ningún objeto extra.
+    nodeThreeObject:d=>{
+      if(!labelsVisible)return null;
+      const deg=DEGREE_MAP[d.id]||0;
+      const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
+      if(!(d.confianza==='ALTA'||isGod))return null;
+      const txt=(isGod?'⚡ ':'')+d.titulo.slice(0,34)+(d.titulo.length>34?'…':'');
+      const sprite=new SpriteText(txt);
+      sprite.color=isGod?'#f59e0b':'#e2e8f0';
+      sprite.backgroundColor=false; // sin caja de fondo — solo el texto flotando
+      sprite.padding=1;
+      // Bug real encontrado probando: sprite.textHeight NO produce el tamaño real
+      // en mundo que promete — salía ~6 unidades (una caja de ~39 de ancho, más
+      // grande que 3 nodos juntos) en vez de las 2 configuradas. En vez de confiar
+      // en ese cálculo interno, se fuerza el tamaño real después de crear el
+      // sprite, usando solo su relación de aspecto (ancho/alto, que sí es
+      // confiable) para no depender de esa cuenta rota.
+      const desiredH=isGod?1.6:1.2;
+      const aspect=(sprite.scale.y>0?sprite.scale.x/sprite.scale.y:6);
+      sprite.scale.set(desiredH*aspect, desiredH, 1);
+      sprite.position.y=getNodeRadius(d)*0.7+desiredH+1.5; // flota arriba de la esfera, no encima
+      // Segundo bug real: aunque backgroundColor=false y el material queda
+      // transparent=true, la textura seguía viéndose como un rectángulo negro
+      // sólido — la combinación transparent+depthWrite (true por defecto en
+      // Three.js) hace que las zonas "transparentes" de la textura terminen
+      // pintando su color de relleno (negro) en vez de dejar ver lo que hay
+      // detrás. depthWrite=false es el arreglo estándar para texturas
+      // transparentes en sprites.
+      sprite.material.depthWrite=false;
+      return sprite;
+    },
+    linkColor:getKddLinkColor,
+    linkWidth:getKddLinkWidth,
+    // Impulsos que viajan por cada conexión — mismo color que su línea,
+    // apenas un poco más gruesos, y velocidad escalonada para que no
+    // salgan todas sincronizadas.
+    linkDirectionalParticles:1,
+    linkDirectionalParticleSpeed:getStaggeredParticleSpeed,
+    linkDirectionalParticleWidth:e=>getKddLinkWidth(e)+0.1,
+    linkDirectionalParticleColor:getKddLinkColor,
+    // Menos repulsión y links más cortos que el primer intento — el mismo
+    // grafo en 3D tiene un eje extra (Z) para dispersarse, así que con la
+    // misma fuerza que en 2D queda mucho más disperso de lo que se veía antes.
+    chargeStrength:d=>(DEGREE_MAP[d.id]||0)>=GOD_THRESHOLD?-260:-140,
+    linkDistance:d=>{
+      const sd=DEGREE_MAP[edgeEndId(d.source)]||0, td=DEGREE_MAP[edgeEndId(d.target)]||0;
+      return sd>=GOD_THRESHOLD||td>=GOD_THRESHOLD?55:38;
+    },
+    // Mismo valor (0.3) que usaba el 2D original en forceX/forceY — jala a TODO
+    // nodo de vuelta al centro sin importar si tiene conexiones o no.
+    centerStrength:0.3,
+    onNodeClick:(node)=>{
+      selectNode(node.id);
+      const g=active3DGraphs['gc'];
+      if(g)g.controls().target.set(node.x,node.y,node.z);
+    },
+    onBackgroundClick:()=>{
+      closeDetail();
+      const g=active3DGraphs['gc'];
+      if(g)g.controls().target.set(0,0,0);
+    },
+    onNodeDragEnd:(node)=>{
+      node.fx=node.x; node.fy=node.y; node.fz=node.z;
+      pinnedNodeIds.add(node.id);
+      refreshKddColors();
+    },
   });
-
-  svgEl.on('click',()=>closeDetail());
+  graph.d3Force('center', null); // se reemplaza por 'recenter' (arriba) que sí actúa continuamente por eje
 }
 
 // ─── D3 Code Structure Graph (nativo) ─────────────────────────────────────────
-let codeSimulation, codeSvgEl, codeLinkSel, codeNodeSel;
+let codeSelectedId=null;
 
 function getCodeNodeRadius(d){
   const base=d.tipo==='clase'?11:7;
@@ -2265,71 +2749,91 @@ function getCodeNodeRadius(d){
   return Math.min(base+bonus,22);
 }
 
+// Vecinos directos de un archivo/clase (para el mismo resaltado amarillo +
+// atenuado que ya se probó en KDD Memory — mismo patrón, mismo helper genérico
+// edgeEndId ya definido más abajo en el archivo).
+function codeNeighborIds(id){
+  const s=new Set();
+  CODE_EDGES.forEach(e=>{
+    const src=edgeEndId(e.source), tgt=edgeEndId(e.target);
+    if(src===id)s.add(tgt);
+    if(tgt===id)s.add(src);
+  });
+  return s;
+}
+
+function refreshCodeColors(){
+  const g=active3DGraphs['code-gc'];
+  if(!g)return;
+  g.nodeColor(g.nodeColor());
+  g.linkColor(g.linkColor());
+  g.linkWidth(g.linkWidth());
+  forceRefreshLinkMaterials(g);
+}
+
 function renderCodeGraph(){
   if(!CODE_NODES.length)return;
-  const container=document.getElementById('graph-sub-code');
-  const W=container.clientWidth||1280,H=container.clientHeight||600;
+  const links=CODE_EDGES.filter(e=>codeNodeMap[e.source]&&codeNodeMap[e.target]);
+  const getCodeLinkColor=e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return '#facc15';
+    return codeSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
+  };
+  const getCodeLinkWidth=e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    return codeSelectedId&&(s===codeSelectedId||t===codeSelectedId)?1.2:0.4;
+  };
 
-  codeSvgEl=d3.select('#code-gc').attr('width',W).attr('height',H)
-    .call(d3.zoom().scaleExtent([0.15,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
-
-  const g=codeSvgEl.append('g');
-  const defs=codeSvgEl.append('defs');
-  const glowFilter=defs.append('filter').attr('id','code-neon-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
-  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
-  const feMerge=glowFilter.append('feMerge');
-  feMerge.append('feMergeNode').attr('in','blur');
-  feMerge.append('feMergeNode').attr('in','SourceGraphic');
-
-  defs.append('marker').attr('id','code-arrow').attr('viewBox','0 -4 8 8').attr('refX',20).attr('refY',0)
-    .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
-    .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','rgba(139,92,246,0.4)');
-
-  const nodeMapCode={};
-  CODE_NODES.forEach(n=>nodeMapCode[n.id]=n);
-  const links=CODE_EDGES.filter(e=>nodeMapCode[e.source]&&nodeMapCode[e.target]);
-
-  codeSimulation=d3.forceSimulation(CODE_NODES)
-    .force('link',d3.forceLink(links).id(d=>d.id).distance(90))
-    .force('charge',d3.forceManyBody().strength(-260))
-    .force('center',d3.forceCenter(W/2,H/2))
-    .force('collision',d3.forceCollide(d=>getCodeNodeRadius(d)+4))
-    .force('x',d3.forceX(W/2).strength(0.3))
-    .force('y',d3.forceY(H/2).strength(0.3));
-
-  codeLinkSel=g.append('g').selectAll('line').data(links).enter().append('line')
-    .attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1).attr('stroke-opacity',0.6)
-    .attr('marker-end','url(#code-arrow)');
-
-  codeNodeSel=g.append('g').selectAll('circle.code-node').data(CODE_NODES).enter().append('circle')
-    .attr('class','code-node')
-    .attr('r',d=>getCodeNodeRadius(d))
-    .attr('fill',d=>CODE_COLORS[d.tipo]||'#00e5ff')
-    .attr('filter','url(#code-neon-glow)')
-    .style('cursor','pointer')
-    .call(d3.drag()
-      .on('start',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
-      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
-      .on('end',(ev,d)=>{if(!ev.active)codeSimulation.alphaTarget(0);}))
-    .on('click',(ev,d)=>{ev.stopPropagation();showCodeDetail(d);})
-    .on('mouseover',(ev,d)=>{
-      const tt=document.getElementById('code-gtt');
-      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(d.titulo)}</strong><br><span style="color:var(--text3);font-size:10px">\${d.functions} funciones · \${d.symbol_count} símbolos</span>\`;
-      tt.style.opacity=1;
-      const r=container.getBoundingClientRect();
-      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
-    })
-    .on('mouseout',()=>{document.getElementById('code-gtt').style.opacity=0;});
-
-  codeSimulation.on('tick',()=>{
-    codeLinkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-    codeNodeSel.attr('cx',d=>d.x).attr('cy',d=>d.y);
+  const graph=create3DGraph('code-gc',{
+    nodes:CODE_NODES,
+    links,
+    nodeColor:d=>{
+      const base=CODE_COLORS[d.tipo]||'#00e5ff';
+      if(d.id===codeSelectedId)return '#ffffff';
+      if(codeSelectedId){
+        return codeNeighborIds(codeSelectedId).has(d.id) ? base : blendTowards(base,'#0a0d14',0.75);
+      }
+      return base;
+    },
+    nodeVal:d=>Math.pow(getCodeNodeRadius(d)/6,3),
+    nodeLabel:d=>{
+      return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
+        +'<strong style="color:#e2e8f0">'+escHtml(d.titulo||d.file||'')+'</strong><br>'
+        +'<span style="color:#64748b;font-size:10px">'+d.functions+' funciones · '+d.symbol_count+' símbolos</span></div>';
+    },
+    linkColor:getCodeLinkColor,
+    linkWidth:getCodeLinkWidth,
+    // Impulsos que viajan por cada conexión — mismo efecto que en KDD Memory.
+    linkDirectionalParticles:1,
+    linkDirectionalParticleSpeed:getStaggeredParticleSpeed,
+    linkDirectionalParticleWidth:e=>getCodeLinkWidth(e)+0.1,
+    linkDirectionalParticleColor:getCodeLinkColor,
+    // Mismos valores ya probados en KDD Memory (charge/distance/centro) —
+    // 287 nodos, densidad similar, arranca del mismo punto ya calibrado.
+    chargeStrength:()=>-140,
+    linkDistance:()=>45,
+    centerStrength:0.3,
+    onNodeClick:(node)=>{
+      showCodeDetail(node);
+      const g=active3DGraphs['code-gc'];
+      if(g)g.controls().target.set(node.x,node.y,node.z);
+    },
+    onBackgroundClick:()=>{
+      closeCodeDetail();
+      const g=active3DGraphs['code-gc'];
+      if(g)g.controls().target.set(0,0,0);
+    },
+    onNodeDragEnd:(node)=>{
+      node.fx=node.x; node.fy=node.y; node.fz=node.z;
+    },
   });
-
-  codeSvgEl.on('click',()=>closeCodeDetail());
 }
 
 function edgeEndId(v){return (v&&typeof v==='object')?v.id:v;}
+// Variante para Combined: sus links usan mergedId (namespaced kdd-N/code-N)
+// como identidad real, no el "id" crudo — ver el nodeId('mergedId') que se
+// le pasa a create3DGraph en renderCombinedGraph.
+function mergedEdgeEndId(v){return (v&&typeof v==='object')?v.mergedId:v;}
 function showCodeDetail(node){
   lastCodeNode=node;
   document.getElementById('code-dp-title').textContent=node.file;
@@ -2364,30 +2868,49 @@ function showCodeDetail(node){
 }
 function closeCodeDetail(){
   document.getElementById('code-detail-panel').classList.remove('visible');
-  if(codeNodeSel)codeNodeSel.attr('stroke','none').attr('stroke-width',0).attr('fill-opacity',1);
-  if(codeLinkSel)codeLinkSel.attr('stroke-opacity',0.6).attr('stroke','rgba(139,92,246,0.2)').attr('stroke-width',1);
+  codeSelectedId=null;
+  refreshCodeColors();
 }
 function focusCodeNode(id){
-  if(!codeNodeSel)return;
-  codeNodeSel.attr('stroke',d=>d.id===id?'#fff':'none')
-             .attr('stroke-width',d=>d.id===id?3:0)
-             .attr('fill-opacity',d=>d.id===id?1:0.15);
-  if(codeLinkSel){
-    codeLinkSel.attr('stroke-opacity',e=>e.source.id===id||e.target.id===id?0.9:0.06)
-               .attr('stroke',e=>e.source.id===id||e.target.id===id?'#00e5ff':'rgba(139,92,246,0.2)')
-               .attr('stroke-width',e=>e.source.id===id||e.target.id===id?2:1);
-  }
+  codeSelectedId=id;
+  refreshCodeColors();
 }
-function resetCodeGraph(){if(codeSimulation)codeSimulation.alpha(0.5).restart();}
+function resetCodeGraph(){
+  const g=active3DGraphs['code-gc'];
+  if(!g)return;
+  CODE_NODES.forEach(n=>{n.fx=null;n.fy=null;n.fz=null;});
+  g.d3ReheatSimulation();
+  robustAutoFit(g, CODE_NODES, 5);
+}
 function centerCodeGraph(){
-  if(!codeSvgEl||!codeSimulation)return;
-  const c=document.getElementById('graph-sub-code');
-  codeSimulation.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();
+  const g=active3DGraphs['code-gc'];
+  if(!g)return;
+  robustAutoFit(g, CODE_NODES, 5);
 }
 
 // ─── Combined — merge heurístico por área (KDD Memory + Code Structure) ──────
-let combinedSimulation, linkSelCombined, nodeSelCombined;
 let combinedNodeMap={};
+let combinedLinksArr=[];
+let combinedSelectedId=null;
+
+function combinedNeighborIds(mergedId){
+  const s=new Set();
+  combinedLinksArr.forEach(e=>{
+    const src=mergedEdgeEndId(e.source), tgt=mergedEdgeEndId(e.target);
+    if(src===mergedId)s.add(tgt);
+    if(tgt===mergedId)s.add(src);
+  });
+  return s;
+}
+
+function refreshCombinedColors(){
+  const g=active3DGraphs['combined-gc'];
+  if(!g)return;
+  g.nodeColor(g.nodeColor());
+  g.linkColor(g.linkColor());
+  g.linkWidth(g.linkWidth());
+  forceRefreshLinkMaterials(g);
+}
 
 function buildHeuristicLinks(){
   // Heurística: un nodo KDD con area="X" se conecta a archivos de código
@@ -2407,27 +2930,17 @@ function buildHeuristicLinks(){
   return links;
 }
 
+let combinedMergedNodesArr=[];
+
 function renderCombinedGraph(){
   if(!NODES.length&&!CODE_NODES.length)return;
-  const container=document.getElementById('graph-sub-combined');
-  const W=container.clientWidth||1280,H=container.clientHeight||600;
-
-  const svg=d3.select('#combined-gc').attr('width',W).attr('height',H)
-    .call(d3.zoom().scaleExtent([0.1,4]).on('zoom',ev=>g.attr('transform',ev.transform)));
-  const g=svg.append('g');
-
-  const defs=svg.append('defs');
-  const glowFilter=defs.append('filter').attr('id','combined-glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
-  glowFilter.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','3').attr('result','blur');
-  const fm=glowFilter.append('feMerge');
-  fm.append('feMergeNode').attr('in','blur');
-  fm.append('feMergeNode').attr('in','SourceGraphic');
 
   // Namespacing de IDs para evitar colisión entre los dos sets de nodos
   const mergedNodes=[
     ...NODES.map(n=>({...n,mergedId:'kdd-'+n.id,group:'kdd'})),
     ...CODE_NODES.map(n=>({...n,mergedId:n.id,group:'code'})),
   ];
+  combinedMergedNodesArr=mergedNodes;
   combinedNodeMap={};
   mergedNodes.forEach(n=>combinedNodeMap[n.mergedId]=n);
 
@@ -2439,56 +2952,70 @@ function renderCombinedGraph(){
     .map(e=>({source:e.source,target:e.target,tipo:e.tipo}));
   const heuristicEdges=buildHeuristicLinks().filter(e=>combinedNodeMap[e.source]&&combinedNodeMap[e.target]);
 
-  const allLinks=[...kddEdges,...codeEdges,...heuristicEdges];
+  combinedLinksArr=[...kddEdges,...codeEdges,...heuristicEdges];
+  const getCombinedLinkColor=e=>{
+    const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
+    if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return '#facc15';
+    return combinedSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
+  };
+  const getCombinedLinkWidth=e=>{
+    const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
+    return combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId)?1.2:0.4;
+  };
 
-  combinedSimulation=d3.forceSimulation(mergedNodes)
-    .force('link',d3.forceLink(allLinks).id(d=>d.mergedId).distance(90))
-    .force('charge',d3.forceManyBody().strength(-280))
-    .force('center',d3.forceCenter(W/2,H/2))
-    .force('collision',d3.forceCollide(8))
-    .force('x',d3.forceX(W/2).strength(0.3))
-    .force('y',d3.forceY(H/2).strength(0.3));
-
-  linkSelCombined=g.append('g').selectAll('line').data(allLinks).enter().append('line')
-    .attr('stroke',d=>heuristicEdges.includes(d)?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
-    .attr('stroke-width',1).attr('stroke-opacity',0.6);
-
-  nodeSelCombined=g.append('g').selectAll('circle').data(mergedNodes).enter().append('circle')
-    .attr('r',d=>d.group==='kdd'?8:6)
-    .attr('fill',d=>d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff'))
-    .attr('filter','url(#combined-glow)')
-    .style('cursor','pointer')
-    .call(d3.drag()
-      .on('start',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
-      .on('drag',(ev,d)=>{d.fx=ev.x;d.fy=ev.y;})
-      .on('end',(ev,d)=>{if(!ev.active)combinedSimulation.alphaTarget(0);}))
-    .on('click',(ev,d)=>{ev.stopPropagation();showCombinedDetail(d);})
-    .on('mouseover',(ev,d)=>{
-      const tt=document.getElementById('combined-gtt');
+  create3DGraph('combined-gc',{
+    nodes:mergedNodes,
+    links:combinedLinksArr,
+    nodeId:'mergedId', // los links usan mergedId (namespaced kdd-N / code-N), no el id crudo
+    nodeColor:d=>{
+      const base=d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff');
+      if(d.mergedId===combinedSelectedId)return '#ffffff';
+      if(combinedSelectedId){
+        return combinedNeighborIds(combinedSelectedId).has(d.mergedId) ? base : blendTowards(base,'#0a0d14',0.75);
+      }
+      return base;
+    },
+    nodeVal:d=>Math.pow((d.group==='kdd'?8:6)/6,3),
+    nodeLabel:d=>{
       const label=d.group==='kdd'?d.titulo:d.file;
-      tt.innerHTML=\`<strong style="color:var(--text)">\${escHtml(String(label).slice(0,60))}</strong><br><span style="color:var(--text3);font-size:10px">\${d.group==='kdd'?'KDD · '+escHtml(d.area||''):'código'}</span>\`;
-      tt.style.opacity=1;
-      const r=container.getBoundingClientRect();
-      tt.style.left=(ev.clientX-r.left+12)+'px';tt.style.top=(ev.clientY-r.top-10)+'px';
-    })
-    .on('mouseout',()=>{document.getElementById('combined-gtt').style.opacity=0;});
-
-  combinedSimulation.on('tick',()=>{
-    linkSelCombined.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-    nodeSelCombined.attr('cx',d=>d.x).attr('cy',d=>d.y);
+      return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
+        +'<strong style="color:#e2e8f0">'+escHtml(String(label).slice(0,60))+'</strong><br>'
+        +'<span style="color:#64748b;font-size:10px">'+(d.group==='kdd'?'KDD · '+escHtml(d.area||''):'código')+'</span></div>';
+    },
+    linkColor:getCombinedLinkColor,
+    linkWidth:getCombinedLinkWidth,
+    // Impulsos que viajan por cada conexión — mismo efecto que en los otros 2.
+    linkDirectionalParticles:1,
+    linkDirectionalParticleSpeed:getStaggeredParticleSpeed,
+    linkDirectionalParticleWidth:e=>getCombinedLinkWidth(e)+0.1,
+    linkDirectionalParticleColor:getCombinedLinkColor,
+    chargeStrength:()=>-140,
+    linkDistance:()=>45,
+    centerStrength:0.3,
+    onNodeClick:(node)=>{
+      showCombinedDetail(node);
+      const g=active3DGraphs['combined-gc'];
+      if(g)g.controls().target.set(node.x,node.y,node.z);
+    },
+    onBackgroundClick:()=>{
+      closeCombinedDetail();
+      const g=active3DGraphs['combined-gc'];
+      if(g)g.controls().target.set(0,0,0);
+    },
+    onNodeDragEnd:(node)=>{
+      node.fx=node.x; node.fy=node.y; node.fz=node.z;
+    },
   });
-
-  svg.on('click',()=>closeCombinedDetail());
 }
 
 function showCombinedDetail(node){
   lastCombinedNode=node;
   const isKdd=node.group==='kdd';
   document.getElementById('combined-dp-title').textContent=isKdd?node.titulo:node.file;
-  const links=linkSelCombined?linkSelCombined.data().filter(e=>e.source.mergedId===node.mergedId||e.target.mergedId===node.mergedId):[];
+  const links=combinedLinksArr.filter(e=>mergedEdgeEndId(e.source)===node.mergedId||mergedEdgeEndId(e.target)===node.mergedId);
   const areaLinks=links.filter(l=>l.tipo==='area_match');
   const relHTML=areaLinks.slice(0,12).map(e=>{
-    const otherId=e.source.mergedId===node.mergedId?e.target.mergedId:e.source.mergedId;
+    const otherId=mergedEdgeEndId(e.source)===node.mergedId?mergedEdgeEndId(e.target):mergedEdgeEndId(e.source);
     const other=combinedNodeMap[otherId];
     if(!other)return'';
     const label=other.group==='kdd'?other.titulo:other.file.split(/[\\/]/).pop();
@@ -2526,21 +3053,26 @@ function showCombinedDetail(node){
 
 function closeCombinedDetail(){
   document.getElementById('combined-detail-panel').classList.remove('visible');
-  if(nodeSelCombined)nodeSelCombined.attr('stroke','none').attr('stroke-width',0).attr('fill-opacity',1);
-  if(linkSelCombined)linkSelCombined.attr('stroke-opacity',0.6)
-    .attr('stroke',d=>d.tipo==='area_match'?'rgba(80,250,123,0.35)':'rgba(139,92,246,0.2)')
-    .attr('stroke-width',1);
+  combinedSelectedId=null;
+  refreshCombinedColors();
 }
 
 function focusCombinedNode(mergedId){
-  if(!nodeSelCombined)return;
-  nodeSelCombined.attr('stroke',d=>d.mergedId===mergedId?'#fff':'none')
-                 .attr('stroke-width',d=>d.mergedId===mergedId?3:0)
-                 .attr('fill-opacity',d=>d.mergedId===mergedId?1:0.15);
-  if(linkSelCombined){
-    linkSelCombined.attr('stroke-opacity',e=>e.source.mergedId===mergedId||e.target.mergedId===mergedId?0.9:0.05)
-                   .attr('stroke-width',e=>e.source.mergedId===mergedId||e.target.mergedId===mergedId?2:1);
-  }
+  combinedSelectedId=mergedId;
+  refreshCombinedColors();
+}
+
+function resetCombinedGraph(){
+  const g=active3DGraphs['combined-gc'];
+  if(!g)return;
+  combinedMergedNodesArr.forEach(n=>{n.fx=null;n.fy=null;n.fz=null;});
+  g.d3ReheatSimulation();
+  robustAutoFit(g, combinedMergedNodesArr, 5);
+}
+function centerCombinedGraph(){
+  const g=active3DGraphs['combined-gc'];
+  if(!g)return;
+  robustAutoFit(g, combinedMergedNodesArr, 5);
 }
 
 // ─── D3 Module Neural Graph (fullscreen) ─────────────────────
