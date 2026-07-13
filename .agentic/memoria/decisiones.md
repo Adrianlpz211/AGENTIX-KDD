@@ -16,7 +16,32 @@ Impacto: qué módulos o patrones afecta
 
 ## Registro de decisiones
 
-_Sin decisiones registradas aún. El agente Memoria las irá añadiendo._
+## [2026-07-12] Período de prueba: 14 días fijos — SUPERSEDED
+Decisión: el período de prueba (trial) es de exactamente 14 días, sin flexibilidad
+Razón: es una decisión de producto ya tomada por el usuario. No es negociable
+       ni configurable sin aprobación explícita del usuario.
+Contexto: registro preventivo antes de implementar features que involucren
+          lógica de trial/expiración.
+Alternativas descartadas:
+  - Trial configurable por admin: descartado — el usuario especificó que es fijo
+  - Trial variable por plan: descartado — no aplica, es un valor único
+Impacto: cualquier módulo de billing, suscripciones o acceso debe respetar
+         este valor hardcoded (14 días) hasta que el usuario apruebe un cambio.
+Superseded por: decisión del 2026-07-12 (mismo día) — ver entrada siguiente.
+
+## [2026-07-12] Período de prueba: 7 días (test A/B de conversión) — GLOBAL
+Decisión: el período de prueba (trial) se cambia de 14 a **7 días** en todo
+          el proyecto (todos los benchmarks y escenarios).
+Razón: el owner quiere probar si un período más corto mejora la conversión.
+       Confirmado explícitamente por el owner en chat.
+Contexto: cambio global solicitado con `aa:`. Se actualizó config/plans.json
+          en las 6 copias existentes (vscode, arena, arena-a, arena-b,
+          opencode, scenarios/03-cross-session-memory/seed).
+Alternativas descartadas: ninguna — cambio directo de valor, sin lógica nueva.
+Impacto: config/plans.json (trialDays: 14 → 7) en las 6 copias. src/billing.js
+         no requirió cambios — consume plans.trialDays dinámicamente. Verificado
+         con trialEndDate() que el nuevo período da exactamente 7 días.
+Estado: ACTIVO — 🔒 LOCKED: no cambiar sin aprobación explícita del owner.
 
 ---
 

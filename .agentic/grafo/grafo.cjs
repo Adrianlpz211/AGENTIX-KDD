@@ -393,6 +393,25 @@ function sincronizar() {
   ];
   let total = 0, nuevos = 0, actualizados = 0;
 
+  // archivos_aplica/hash_contexto: sin esto, todo nodo quedaba con '[]'/null para
+  // siempre y knowledge-validator.cjs nunca tenía con qué detectar obsolescencia.
+  // Aproximación razonable (no exacta por nodo): los archivos del último commit,
+  // vía el mismo git diff-tree que ya usa post-cycle.cjs para episodios.
+  let archivosRecientes = [];
+  try {
+    const { execSync } = require('child_process');
+    const diff = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: process.cwd(), stdio: 'pipe', timeout: 5000 }).toString();
+    archivosRecientes = diff.split('\n').map(f => f.trim()).filter(Boolean);
+  } catch { /* sin git o sin commits — queda vacío, no rompe nada */ }
+  let hashContexto = null;
+  if (archivosRecientes.length) {
+    try {
+      const kv = require('./knowledge-validator.cjs');
+      hashContexto = kv.computeContextHash(archivosRecientes, process.cwd());
+    } catch {}
+  }
+  const archivosJSON = JSON.stringify(archivosRecientes);
+
   for (const { file, tipo } of archivos) {
     const fp = path.join(MEMORIA_PATH, file);
     if (!fs.existsSync(fp)) continue;
@@ -404,8 +423,9 @@ function sincronizar() {
           e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, e.tipo, e.titulo);
         actualizados++;
       } else {
-        db.run("INSERT INTO nodos (tipo,titulo,contenido,area,confianza,aplicado,util,estado,ultima_validacion,fecha_update) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
-          e.tipo, e.titulo, e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion);
+        db.run(`INSERT INTO nodos (tipo,titulo,contenido,area,confianza,aplicado,util,estado,ultima_validacion,fecha_update,archivos_aplica,hash_contexto)
+                VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),?,?)`,
+          e.tipo, e.titulo, e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, archivosJSON, hashContexto);
         nuevos++;
       }
       total++;

@@ -6,6 +6,27 @@ ahí, sin tecnicismos.
 
 ![Guía visual del grafo de conocimiento](../assets/grafo-guia.svg)
 
+## Cómo se navega (3D real)
+
+El grafo se renderiza en 3D — esferas de verdad, no círculos planos — con cámara orbitable:
+
+- **Clic + arrastrar** → orbita la cámara alrededor del grafo.
+- **Scroll** → zoom in/out.
+- **Clic en un nodo** → lo selecciona y resalta (en amarillo) todas sus conexiones reales; el
+  resto del grafo se atenúa para que se note el subgrafo relevante.
+- **Reset / Center** (parte inferior) → si te perdiste orbitando, vuelve a encuadrar todo el
+  grafo automáticamente.
+- El **"?" flotante** (esquina inferior derecha) abre un glosario en lenguaje simple de los
+  términos que aparecen en ese grafo específico — útil si no eres quien escribió el código.
+
+Hay tres pestañas, cada una con su propio grafo 3D:
+
+| Pestaña | Qué muestra |
+|---|---|
+| **KDD Memory** | La memoria de decisiones/errores/patrones que describe el resto de esta guía. |
+| **Code Structure** | El mapa real del código (archivos/símbolos e imports entre ellos), sacado del índice AST — no tiene "divine"/error/patrón, tiene sus propios tipos (archivo, clase, función). |
+| **Combined** | Fusiona los dos grafos anteriores — las líneas moradas son relaciones reales guardadas; las verdes son una **aproximación por coincidencia de área/ruta**, no un vínculo exacto guardado en la base de datos. |
+
 ## El código de colores
 
 | Color | Tipo | Qué es |

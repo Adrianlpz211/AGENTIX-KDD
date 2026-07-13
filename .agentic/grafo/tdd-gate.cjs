@@ -38,6 +38,26 @@ const TEST_COMMANDS = [
   'python3 -m pytest',
 ];
 
+// ─── DB ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Abre memoria.db con 3 niveles de respaldo: better-sqlite3 del PROYECTO (vía
+ * createRequire, ya que vive en el node_modules del proyecto, no de Agentix),
+ * better-sqlite3 accesible directo, y node:sqlite nativo (Node 22+) como
+ * último recurso — sin esto, un proyecto que solo tiene node:sqlite instalado
+ * (sin better-sqlite3 en ningún lado) se queda con DB=null en silencio.
+ */
+function openProjectDB(dbPath, projectRoot) {
+  try {
+    const { createRequire } = require('module');
+    const projReq = createRequire(require('path').join(projectRoot || process.cwd(), 'package.json'));
+    return new (projReq('better-sqlite3'))(dbPath);
+  } catch {}
+  try { return new (require('better-sqlite3'))(dbPath); } catch {}
+  try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath); } catch {}
+  return null;
+}
+
 // ─── TEST RUNNER ──────────────────────────────────────────────────────────────
 
 /**
@@ -69,10 +89,13 @@ function detectTestCommand(projectRoot) {
   }
 
   // 3. Probar comandos conocidos
+  // shell:true es necesario en Windows — npm/npx son en realidad npm.cmd/npx.cmd, y sin
+  // shell spawnSync falla con ENOENT (status=null) para TODOS los comandos npm/npx, cayendo
+  // siempre a pytest como "detectado" incluso en proyectos Node puros sin Python.
   for (const cmd of TEST_COMMANDS) {
     try {
       const result = spawnSync(cmd.split(' ')[0], cmd.split(' ').slice(1), {
-        cwd: projectRoot, timeout: 10000, stdio: 'pipe'
+        cwd: projectRoot, timeout: 10000, stdio: 'pipe', shell: true
       });
       if (result.status !== null) return cmd;
     } catch {}
@@ -177,6 +200,19 @@ function parseTestOutput(raw, exitCode) {
     result.passed = parseInt(mochaPassing?.[1] || '0');
     result.failed = parseInt(mochaFailing?.[1] || '0');
     result.total  = result.passed + result.failed;
+  }
+
+  // ── Node.js test runner nativo (node --test) ──────────────────────────────
+  // "ℹ tests 5" / "ℹ pass 5" / "ℹ fail 0" — sin esto, cualquier proyecto que use
+  // el test runner integrado de Node (sin dependencias externas) siempre daba
+  // 0/0/0, aunque los tests hubieran pasado de verdad.
+  const nodeTestTotal = raw.match(/[ℹi]\s*tests\s+(\d+)/i);
+  const nodeTestPass  = raw.match(/[ℹi]\s*pass\s+(\d+)/i);
+  const nodeTestFail  = raw.match(/[ℹi]\s*fail\s+(\d+)/i);
+  if (nodeTestTotal && result.total === 0) {
+    result.total  = parseInt(nodeTestTotal[1] || '0');
+    result.passed = parseInt(nodeTestPass?.[1] || '0');
+    result.failed = parseInt(nodeTestFail?.[1] || '0');
   }
 
   // ── pytest (básico) ──────────────────────────────────────────────────────
@@ -372,17 +408,7 @@ function runSelfHealingLoop(opts) {
         const contractGuardPath = require('path').join(__dirname, 'contract-guard.cjs');
         const cg = require(contractGuardPath);
         const dbPath = require('path').join(projectRoot || process.cwd(), '.agentic/memoria.db');
-        // Cargar better-sqlite3 desde el node_modules del PROYECTO vía createRequire
-        // (la manipulación de require.resolve.paths anterior no funcionaba de forma fiable)
-        const DB = (() => {
-          try {
-            const { createRequire } = require('module');
-            const projReq = createRequire(require('path').join(projectRoot || process.cwd(), 'package.json'));
-            return new (projReq('better-sqlite3'))(dbPath);
-          } catch {
-            try { return new (require('better-sqlite3'))(dbPath); } catch { return null; }
-          }
-        })();
+        const DB = openProjectDB(dbPath, projectRoot);
         if (DB && cg && typeof cg.registerPassingTests === 'function') {
           cg.registerPassingTests(DB, { passed: result.passed, total: result.total, area: area || 'global', command });
           console.log(`[TDD-GATE] 📋 Contracts: ${result.passed} tests → candidates`);
@@ -393,9 +419,7 @@ function runSelfHealingLoop(opts) {
           const rgPath = require('path').join(__dirname, 'regression-guard.cjs');
           if (require('fs').existsSync(rgPath)) {
             const rg = require(rgPath);
-            const DB2 = (() => {
-              try { return new (require('better-sqlite3'))(dbPath); } catch { return null; }
-            })();
+            const DB2 = openProjectDB(dbPath, projectRoot);
             if (DB2) {
               const behavior = rg.registerBehavior(DB2, {
                 module:      area || 'global',

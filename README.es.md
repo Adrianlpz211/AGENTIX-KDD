@@ -168,6 +168,19 @@ akdd health [--fix]            # Diagnóstico del sistema (--fix repara lo que p
 akdd dashboard                 # Tablero visual en localhost:3847
 ```
 
+La pestaña Knowledge Graph se renderiza en **3D real** (esferas, no círculos planos) —
+arrastra para orbitar, scroll para zoom, clic en un nodo para resaltar sus conexiones. En
+realidad son tres grafos distintos:
+
+- **KDD Memory** — la memoria de decisiones/errores/patrones descrita arriba.
+- **Code Structure** — un mapa nativo de tu código real (archivos/símbolos y sus imports),
+  sacado directo del índice AST. Sin llamadas a LLM, costo cero en tokens.
+- **Combined** — fusiona los dos anteriores, para ver cómo se relacionan tu código y las
+  decisiones acumuladas del proyecto.
+
+Cada uno tiene un "?" flotante que abre un glosario en lenguaje simple de los términos que
+estás viendo.
+
 ¿Primera vez en la pestaña Knowledge Graph del dashboard, o te confunden los números de
 contratos de Preservation Intel? Dos guías visuales:
 

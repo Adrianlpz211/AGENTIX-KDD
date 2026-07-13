@@ -166,6 +166,17 @@ akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd dashboard                 # Visual board at localhost:3847
 ```
 
+The Knowledge Graph tab renders in **real 3D** (spheres, not flat circles) — drag to orbit,
+scroll to zoom, click a node to highlight its connections. It's actually three graphs:
+
+- **KDD Memory** — the decisions/errors/patterns memory described above.
+- **Code Structure** — a native map of your actual code (files/symbols and their imports),
+  built straight from the AST index. No LLM calls, zero token cost.
+- **Combined** — merges both, so you can see how your code and your project's accumulated
+  decisions relate to each other.
+
+Each one has a floating "?" that opens a plain-language glossary of the terms you're looking at.
+
 New to the dashboard's Knowledge Graph tab or confused by Preservation Intel's contract
 counts? Two visual guides (Spanish, plain language, no jargon):
 

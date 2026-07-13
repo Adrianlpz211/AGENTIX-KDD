@@ -655,6 +655,58 @@ function main() {
   results.contratos = registrarContratos();
   if (!silent) console.log(results.contratos.success ? `✅ ${results.contratos.pasando} tests registrados` : `⚠️  ${results.contratos.reason}`);
 
+  // Step 2.5: Register episodio — sin esto, memoria episódica (episodios) nunca
+  // se llena en el flujo automático de aa: (solo se llenaba a mano vía MCP
+  // registrar_episodio), y sin episodios, prediccion.cjs no tiene nada que minar.
+  try {
+    const grafoPath = require('path').join(GRAFO_DIR, 'grafo.cjs');
+    const g = require(grafoPath);
+    if (typeof g.registrarEpisodio === 'function') {
+      // Archivos tocados: del último commit si hay uno (git diff), para que
+      // prediccion.cjs tenga algo real que minar más adelante — sin esto,
+      // archivos_tocados siempre queda vacío y "archivo de alto riesgo" nunca
+      // se puede detectar por más ciclos que se acumulen.
+      let archivosTocados = [];
+      try {
+        const diff = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
+        archivosTocados = diff.split('\n').map(f => f.trim()).filter(Boolean);
+      } catch { /* sin git o sin commits todavía — queda vacío, no es error */ }
+
+      g.registrarEpisodio({
+        ciclo_id: results.ciclo,
+        tipo: 'ciclo_aa',
+        descripcion: taskName,
+        accion_tomada: `${testsPassing} tests`,
+        resultado: results.contratos.success ? 'exito' : 'parcial',
+        razon_resultado: results.contratos.success ? null : results.contratos.reason,
+        archivos_tocados: archivosTocados,
+        area,
+        modulo: area,
+      });
+    }
+  } catch { /* episodio es un plus, nunca bloquea post-cycle */ }
+
+  // Step 2.6: Validar conocimiento existente — detecta memoria obsoleta (patrón
+  // no revalidado en 90+ días) o sospechosa (los archivos a los que aplica
+  // cambiaron desde la última validación, o parece inyectada). Escrito desde
+  // hace tiempo (Brecha (d)) pero nunca se llamaba de ningún lado.
+  try {
+    const kvPath = require('path').join(GRAFO_DIR, 'knowledge-validator.cjs');
+    if (fs.existsSync(kvPath)) {
+      const kv = require(kvPath);
+      const scan = kv.scanAll(ROOT);
+      if (!silent && scan && !scan.error) {
+        if (scan.sospechoso > 0 || scan.poison_candidates > 0) {
+          console.log(`  2.6 Knowledge Validator... ⚠️  ${scan.sospechoso} sospechosos, ${scan.poison_candidates} candidatos a poisoning`);
+        } else if (scan.obsoleto > 0) {
+          console.log(`  2.6 Knowledge Validator... ⚠️  ${scan.obsoleto} obsoletos`);
+        } else {
+          console.log(`  2.6 Knowledge Validator... ✅ ${scan.activo}/${scan.total} activos`);
+        }
+      }
+    }
+  } catch { /* validación es un plus, nunca bloquea post-cycle */ }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);

@@ -1207,15 +1207,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     </div>
   </div>
 
-  <div class="glossary-modal" id="glossary-modal" onclick="if(event.target===this)closeGlossary()">
-    <div class="glossary-card">
-      <div class="glossary-header">
-        <div class="glossary-header-title" id="glossary-title"></div>
-        <div class="dp-close" onclick="closeGlossary()">×</div>
-      </div>
-      <div class="glossary-body" id="glossary-body"></div>
-    </div>
-  </div>
 
 </div>
 
@@ -1700,6 +1691,16 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 
 </div>
+</div>
+
+<div class="glossary-modal" id="glossary-modal" onclick="if(event.target===this)closeGlossary()">
+  <div class="glossary-card">
+    <div class="glossary-header">
+      <div class="glossary-header-title" id="glossary-title"></div>
+      <div class="dp-close" onclick="closeGlossary()">×</div>
+    </div>
+    <div class="glossary-body" id="glossary-body"></div>
+  </div>
 </div>
 
 <script>

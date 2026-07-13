@@ -110,6 +110,33 @@ async function enrich(task) {
       } catch {}
     }
 
+    // 6. Motor de predicción — mina patrones causales de episodios pasados
+    //    ("cada vez que tocas X sin hacer Y → falla") y avisa ANTES de actuar,
+    //    no solo después. Estaba escrito desde v2.2 pero nunca se llamaba desde
+    //    aquí — el brief nunca lo incluía. Nunca bloquea: si no hay suficientes
+    //    episodios (< 5) o algo falla, simplemente no agrega nada.
+    try {
+      const prediccion = require(path.join(__dirname, 'prediccion.cjs'));
+      const modulo = areas[0] || 'global';
+      // prediccion.cjs espera un adaptador con .all()/.get() (el que arma grafo.cjs
+      // internamente), no la conexión cruda de openDB() de este archivo (que solo
+      // tiene .prepare()) — sin este envoltorio, db.all(...) truena adentro de
+      // minarPatronesCausales, el try/catch lo traga, y nunca hay predicción.
+      const dbAdapter = {
+        all: (sql, ...params) => { try { return db.prepare(sql).all(...params.flat()); } catch { return []; } },
+        get: (sql, ...params) => { try { return db.prepare(sql).get(...params.flat()); } catch { return null; } },
+        run: (sql, ...params) => { try { db.prepare(sql).run(...params.flat()); } catch {} },
+      };
+      const evaluacion = prediccion.evaluarRiesgoTarea(task, [], modulo, dbAdapter);
+      if (evaluacion.tiene_alertas || evaluacion.tiene_precondiciones) {
+        [...evaluacion.alertas, ...evaluacion.precondiciones].forEach(a => {
+          brief.avisos.push(`🔮 Predicción: ${a.mensaje}`);
+        });
+        if (evaluacion.nivel_riesgo === 'ALTO') brief.riesgo = 'ALTO';
+        else if (evaluacion.nivel_riesgo === 'MEDIO' && brief.riesgo === 'BAJO') brief.riesgo = 'MEDIO';
+      }
+    } catch { /* la predicción es un plus, nunca un requisito */ }
+
     if (brief.riesgo === 'BAJO' && brief.contexto.some(c => c.confianza === 'BAJA')) {
       brief.riesgo = 'MEDIO';
     }
