@@ -353,6 +353,18 @@ function getGraphData() {
   } catch { return { nodes: [], edges: [], ciclos: [], fases: [] }; }
 }
 
+// Agrupa un archivo en un "módulo" visual a partir de su ruta — más útil que el
+// lenguaje para diferenciar colores cuando el proyecto es mono-lenguaje (ej. un
+// Next.js todo en TypeScript): src/app vs src/lib vs src/components vs scripts,
+// etc. quedan visualmente separados aunque compartan extensión.
+function deriveModulo(file) {
+  const parts = String(file).split(/[\\/]/).filter(Boolean);
+  parts.pop(); // quitar el nombre de archivo
+  if (!parts.length) return 'raíz';
+  if (parts[0] === 'src' && parts.length > 1) return 'src/' + parts[1];
+  return parts[0];
+}
+
 function getCodeStructureGraph() {
   const empty = { nodes: [], edges: [] };
   if (!fs.existsSync(dbPath)) return empty;
@@ -364,7 +376,8 @@ function getCodeStructureGraph() {
            MAX(pagerank) as pagerank,
            COUNT(*) as symbol_count,
            SUM(CASE WHEN kind='function' THEN 1 ELSE 0 END) as functions,
-           SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes
+           SUM(CASE WHEN kind='class' THEN 1 ELSE 0 END) as classes,
+           MAX(language) as language
     FROM ast_symbols
     GROUP BY file
     ORDER BY pagerank DESC
@@ -375,16 +388,32 @@ function getCodeStructureGraph() {
     WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
     GROUP BY from_file, to_file, kind
   `;
+  // Nombres reales de lo que cada archivo define — para "¡NO ENTIENDO!": listar
+  // qué funciones/clases exporta es más honesto que inventar un resumen de
+  // "para qué sirve" sin leer el contenido del archivo.
+  const SYMBOLS_SQL = `
+    SELECT file, symbol_name, kind, exported
+    FROM ast_symbols
+    WHERE kind IN ('function','class')
+    ORDER BY exported DESC, symbol_name ASC
+  `;
 
-  function buildGraph(files, rawEdges) {
+  function buildGraph(files, rawEdges, rawSymbols) {
+    const symbolsByFile = {};
+    (rawSymbols || []).forEach(s => {
+      (symbolsByFile[s.file] = symbolsByFile[s.file] || []).push({ name: s.symbol_name, kind: s.kind, exported: !!s.exported });
+    });
     const nodes = files.map((f, i) => ({
       id: `code-${i}`,
       file: f.file,
       titulo: f.file.split(/[\\/]/).pop(),
       tipo: f.classes > 0 ? 'clase' : 'archivo',
+      language: f.language || 'other',
+      modulo: deriveModulo(f.file),
       symbol_count: f.symbol_count,
       functions: f.functions,
       pagerank: f.pagerank || 0,
+      symbols: symbolsByFile[f.file] || [],
     }));
     const fileToId = {};
     nodes.forEach(n => { fileToId[n.file] = n.id; });
@@ -403,7 +432,8 @@ function getCodeStructureGraph() {
     try {
       const files = _db.prepare(FILES_SQL).all();
       const rawEdges = _db.prepare(EDGES_SQL).all();
-      return buildGraph(files, rawEdges);
+      const rawSymbols = _db.prepare(SYMBOLS_SQL).all();
+      return buildGraph(files, rawEdges, rawSymbols);
     } finally {
       try { _db.close(); } catch {}
     }
@@ -417,8 +447,9 @@ function getCodeStructureGraph() {
       };
       const files = allSQL(FILES_SQL);
       const rawEdges = allSQL(EDGES_SQL);
+      const rawSymbols = allSQL(SYMBOLS_SQL);
       try { _db.close(); } catch {}
-      return buildGraph(files, rawEdges);
+      return buildGraph(files, rawEdges, rawSymbols);
     } catch(e2) {
       return empty;
     }
@@ -539,6 +570,30 @@ function getEffectivenessData() {
 
 const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
 const codeStructure = getCodeStructureGraph();
+
+// Mismo mapa que LANG_COLORS del cliente (script inline) — duplicado acá porque el
+// legend del Code Structure se arma server-side, antes de que el <script> exista.
+const LANG_COLORS_SERVER = {
+  javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
+  rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
+  csharp:'#9b4f96', php:'#8993be', ruby:'#cc342d', swift:'#f05138', scala:'#dc322f',
+  elixir:'#a37eba', other:'#00e5ff',
+};
+const LANG_LABELS_SERVER = {
+  javascript:'JavaScript', typescript:'TypeScript', python:'Python', go:'Go',
+  rust:'Rust', java:'Java', kotlin:'Kotlin', cpp:'C++', c:'C', csharp:'C#',
+  php:'PHP', ruby:'Ruby', swift:'Swift', scala:'Scala', elixir:'Elixir', other:'otro',
+};
+const langsPresent = [...new Set(codeStructure.nodes.map(n => n.language).filter(Boolean))].sort();
+
+// Paleta por módulo (carpeta) — se calcula en runtime porque los módulos varían por
+// proyecto (no hay un mapa fijo posible como con lenguajes). Hue distribuido parejo
+// en la rueda de color, orden alfabético para que sea estable entre recargas.
+const modulesPresent = [...new Set(codeStructure.nodes.map(n => n.modulo).filter(Boolean))].sort();
+const MOD_COLORS_SERVER = {};
+modulesPresent.forEach((m, i) => {
+  MOD_COLORS_SERVER[m] = `hsl(${Math.round((i * 360) / Math.max(modulesPresent.length, 1))},70%,60%)`;
+});
 
 // Calcular grado de conexiones por nodo (como Graphify — nodos divinos)
 const degreeMap = {};
@@ -1161,13 +1216,24 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <button class="help-fab" onclick="showTermsGlossary('code')" title="¿Qué significan los términos de este grafo?">?</button>
     <div id="code-gc"></div>
     <div class="gtt" id="code-gtt"></div>
-    <div class="graph-legend">
+    <div class="graph-legend" style="max-width:220px;flex-wrap:wrap">
+      ${modulesPresent.length ? modulesPresent.map(m => `<div class="lg-item"><div class="lg-dot" style="background:${MOD_COLORS_SERVER[m]}"></div><span>${m}</span></div>`).join('') : `
       <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
-      <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>`}
     </div>
     <div class="graph-controls">
       <button class="gc-btn" onclick="resetCodeGraph()">⟳ Reset</button>
       <button class="gc-btn" onclick="centerCodeGraph()">⊙ Center</button>
+      <div style="position:relative">
+        <button class="gc-btn" onclick="toggleCodeFilterPanel()">☰ Módulos ▾</button>
+        <div id="code-filter-panel" style="display:none;position:absolute;bottom:100%;left:0;background:rgba(17,21,32,.97);border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:4px;max-height:240px;overflow-y:auto;min-width:170px;z-index:30">
+          <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:6px">
+            <span onclick="setAllCodeModules(true)" style="font-size:10px;color:var(--pl);cursor:pointer">Todos</span>
+            <span onclick="setAllCodeModules(false)" style="font-size:10px;color:var(--pl);cursor:pointer">Ninguno</span>
+          </div>
+          ${modulesPresent.map(m => `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);padding:3px 0;cursor:pointer"><input type="checkbox" checked data-mod="${m}" onchange="toggleCodeModuleFilter('${m}',this.checked)"><span style="width:8px;height:8px;border-radius:50%;background:${MOD_COLORS_SERVER[m]};display:inline-block;flex-shrink:0"></span><span>${m}</span></label>`).join('')}
+        </div>
+      </div>
     </div>
     <div class="detail-panel" id="code-detail-panel">
       <div class="dp-header">
@@ -1735,8 +1801,9 @@ const TERMS_GLOSSARY={
     {term:'⚡ Divine (nodo divino)',explain:'Un apodo cariñoso para los nodos con MUCHAS conexiones — son los que más importan en el mapa.'},
   ]},
   code:{title:'❓ Code Structure — términos generales',items:[
-    {term:'archivo',explain:'Es un archivo real de tu código — como una hoja de un cuaderno donde está escrita una parte del programa.'},
-    {term:'clase',explain:'Un archivo que define una "plantilla" de código reutilizable (en programación se le llama "clase").'},
+    {term:'archivo / nodo',explain:'Cada punto del grafo es un archivo real de tu código — como una hoja de un cuaderno donde está escrita una parte del programa. No se muestra función por función (serían miles), se agrupa a nivel de archivo para que el grafo sea legible.'},
+    {term:'Color del nodo',explain:'El color indica el módulo/carpeta del archivo (ej. src/app, src/lib, scripts, supabase) — así diferencias de un vistazo qué partes del proyecto son frontend, backend, utilidades, etc., incluso si todo está en el mismo lenguaje.'},
+    {term:'Tamaño del nodo',explain:'Los archivos que definen al menos una "clase" (una plantilla de código reutilizable) se ven un poco más grandes que los que solo tienen funciones sueltas.'},
     {term:'Funciones / Símbolos',explain:'Cuántas "acciones" (funciones) y piezas de código distintas hay guardadas adentro de este archivo.'},
     {term:'PageRank',explain:'Un número que dice qué tan "importante" es este archivo dentro del proyecto — mientras más alto, más cosas dependen de él. Es el mismo tipo de cálculo que usa Google para ordenar páginas web, aplicado a tu código.'},
     {term:'Importa / llama a',explain:'Los archivos que ESTE necesita para funcionar — como los ingredientes que usa en su receta.'},
@@ -1814,16 +1881,83 @@ function explainKddNode(node){
   return {title:'¡NO ENTIENDO! — '+String(node.titulo||'').slice(0,60), bodyHTML:glossaryItemsHTML(items)};
 }
 
+// ─── Traductor de nombres técnicos a lenguaje simple ──────────────────────────
+// No lee el CUERPO del código (no hay forma de "entender" qué hace sin eso) —
+// traduce el NOMBRE de la función/clase usando patrones comunes de convención
+// de nombres (camelCase + verbos típicos en inglés). Es una inferencia honesta,
+// no una lectura real del código: si el nombre no sigue un patrón reconocido,
+// se avisa explícitamente en vez de inventar una explicación.
+const HUMANIZE_VERBS={
+  get:'obtiene',fetch:'trae',set:'asigna',create:'crea',update:'actualiza',delete:'elimina',
+  remove:'elimina',save:'guarda',load:'carga',parse:'interpreta',validate:'valida',
+  handle:'maneja / responde a',render:'muestra en pantalla',ensure:'se asegura de que exista',
+  read:'lee',write:'escribe',build:'arma',init:'inicializa',initialize:'inicializa',
+  check:'verifica',is:'verifica si',has:'verifica si tiene',format:'da formato a',
+  generate:'genera',send:'envía',find:'busca',list:'lista',toggle:'activa o desactiva',
+  open:'abre',close:'cierra',login:'inicia sesión de',logout:'cierra sesión de',
+  normalize:'normaliza',sync:'sincroniza',merge:'combina',filter:'filtra',sort:'ordena',
+  calculate:'calcula',compute:'calcula',register:'registra',upsert:'guarda o actualiza',
+  add:'agrega',clear:'limpia',reset:'reinicia',refresh:'refresca',apply:'aplica',
+};
+const HUMANIZE_NOUNS={
+  row:'una fila de datos',rows:'filas de datos',object:'un objeto',obj:'un objeto',
+  json:'datos JSON',val:'un valor',value:'un valor',user:'el usuario',users:'los usuarios',
+  product:'el producto',products:'los productos',form:'el formulario',session:'la sesión',
+  config:'la configuración',file:'el archivo',dir:'la carpeta',path:'la ruta',
+  data:'los datos',id:'el identificador',name:'el nombre',date:'la fecha',
+  order:'el pedido',orders:'los pedidos',cart:'el carrito',auth:'la autenticación',
+  token:'el token',key:'la llave',db:'la base de datos',query:'la consulta',
+  request:'la solicitud',response:'la respuesta',error:'el error',status:'el estado',
+};
+function splitWords(s){
+  return String(s).replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_\-]+/g,' ').toLowerCase().trim();
+}
+function humanizeWordList(str){
+  return str.split(' ').filter(Boolean).map(w=>HUMANIZE_NOUNS[w]||w).join(' ');
+}
+function humanizeSymbolName(name){
+  const toMatch=name.match(/^([a-zA-Z0-9]+)To([A-Z][a-zA-Z0-9]*)$/);
+  if(toMatch){
+    return {ok:true,text:'convierte '+humanizeWordList(splitWords(toMatch[1]))+' en '+humanizeWordList(splitWords(toMatch[2]))};
+  }
+  const words=splitWords(name).split(' ').filter(Boolean);
+  if(!words.length)return {ok:false,text:name};
+  const verb=HUMANIZE_VERBS[words[0]];
+  if(!verb)return {ok:false,text:name};
+  const rest=humanizeWordList(words.slice(1).join(' '));
+  return {ok:true,text:verb+(rest?' '+rest:'')};
+}
+
 function explainCodeNode(node){
   const outEdges=CODE_EDGES.filter(e=>edgeEndId(e.source)===node.id);
   const inEdges=CODE_EDGES.filter(e=>edgeEndId(e.target)===node.id);
   const rankNote=node.pagerank>0.01?'uno de los archivos más importantes/centrales del proyecto':node.pagerank>0.002?'un archivo con conectividad media':'un archivo bastante periférico — pocas cosas dependen de él';
   const usedByNames=inEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
   const needsNames=outEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
-  let summary=\`Este archivo tiene \${node.functions} función(es) adentro. Es \${rankNote}. \`;
+  let summary=\`Módulo: \${node.modulo||'—'} · Lenguaje: \${node.language||'—'}. Este archivo tiene \${node.functions} función(es) adentro. Es \${rankNote}. \`;
   summary+=usedByNames.length?\`\${usedByNames.length} otro(s) archivo(s) DEPENDEN de este, así que si lo cambias hay que revisar: \${usedByNames.slice(0,6).join(', ')}\${usedByNames.length>6?'…':''}. \`:'Ningún otro archivo indexado depende de este todavía. ';
   summary+=needsNames.length?\`A su vez, este archivo necesita: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:'No depende de ningún otro archivo indexado.';
-  return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\/]/).pop(), bodyHTML:glossaryItemsHTML([{label:'📝 En resumen',text:summary}])};
+  const items=[{label:'📝 En resumen',text:summary}];
+  const syms=node.symbols||[];
+  if(syms.length){
+    const exported=syms.filter(s=>s.exported);
+    const list=(exported.length?exported:syms).slice(0,10);
+    const scope=s=>s.exported?'se usa en otras partes del sistema':'solo se usa dentro de este mismo archivo';
+    const lines=list.map(s=>{
+      const h=humanizeSymbolName(s.name);
+      if(h.ok){
+        const capitalized=h.text.charAt(0).toUpperCase()+h.text.slice(1);
+        return \`\${capitalized} (\${scope(s)}).\`;
+      }
+      return \`Hace algo relacionado con "\${splitWords(s.name)}" — el nombre no sigue un patrón reconocible para traducirlo automáticamente (\${scope(s)}).\`;
+    });
+    items.push({label:'🧩 Qué hace este archivo, en palabras simples',
+      text:lines.join(' ') + (syms.length>list.length?\` …y \${syms.length-list.length} cosa(s) más.\`:'')
+        + ' (Nota: esto se infiere del nombre de cada función, no de leer el código real — puede no ser 100% exacto si el nombre no describe bien lo que hace.)'});
+  } else {
+    items.push({label:'ℹ️ Nota',text:'No se detectaron funciones ni clases nombradas en este archivo (puede ser solo configuración, tipos, o código sin símbolos exportados reconocidos por el indexador).'});
+  }
+  return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\/]/).pop(), bodyHTML:glossaryItemsHTML(items)};
 }
 
 function explainCombinedNode(node){
@@ -1862,6 +1996,18 @@ const NODES = ${JSON.stringify(nodes)};
 const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
 const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
+// Color por tipo de archivo (lenguaje detectado por el AST indexer) — antes todos los
+// archivos se veían del mismo color salvo que tuvieran una clase adentro; ahora cada
+// lenguaje tiene su propio color, igual que Code Structure lo pide.
+const LANG_COLORS = {
+  javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
+  rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
+  csharp:'#9b4f96', php:'#8993be', ruby:'#cc342d', swift:'#f05138', scala:'#dc322f',
+  elixir:'#a37eba', other:'#00e5ff',
+};
+const MOD_COLORS = ${JSON.stringify(MOD_COLORS_SERVER)};
+function codeNodeColor(d){ return MOD_COLORS[d.modulo] || LANG_COLORS[d.language] || CODE_COLORS[d.tipo] || '#00e5ff'; }
+const LANGS_PRESENT = [...new Set(CODE_NODES.map(n=>n.language).filter(Boolean))].sort();
 const codeNodeMap={};
 CODE_NODES.forEach(n=>codeNodeMap[n.id]=n);
 const EDGES = ${JSON.stringify(edges)};
@@ -2743,6 +2889,25 @@ function renderGraph(){
 
 // ─── D3 Code Structure Graph (nativo) ─────────────────────────────────────────
 let codeSelectedId=null;
+// Filtro de módulos — el select que muestra/oculta nodos por carpeta. Se guarda
+// como set de OCULTOS (no de visibles) para que "todos visibles" sea el estado
+// inicial sin necesitar poblar el set con todos los módulos de antemano.
+let codeHiddenModules=new Set();
+function toggleCodeFilterPanel(){
+  const p=document.getElementById('code-filter-panel');
+  if(p) p.style.display = p.style.display==='none' ? 'block' : 'none';
+}
+function toggleCodeModuleFilter(mod,checked){
+  if(checked) codeHiddenModules.delete(mod); else codeHiddenModules.add(mod);
+  refreshCodeColors();
+}
+function setAllCodeModules(visible){
+  document.querySelectorAll('#code-filter-panel input[type="checkbox"]').forEach(cb=>{
+    cb.checked=visible;
+    if(visible) codeHiddenModules.delete(cb.dataset.mod); else codeHiddenModules.add(cb.dataset.mod);
+  });
+  refreshCodeColors();
+}
 
 function getCodeNodeRadius(d){
   const base=d.tipo==='clase'?11:7;
@@ -2775,12 +2940,19 @@ function refreshCodeColors(){
 function renderCodeGraph(){
   if(!CODE_NODES.length)return;
   const links=CODE_EDGES.filter(e=>codeNodeMap[e.source]&&codeNodeMap[e.target]);
+  const codeLinkHiddenByFilter=e=>{
+    const s=edgeEndId(e.source), t=edgeEndId(e.target);
+    const sn=codeNodeMap[s], tn=codeNodeMap[t];
+    return (sn&&codeHiddenModules.has(sn.modulo)) || (tn&&codeHiddenModules.has(tn.modulo));
+  };
   const getCodeLinkColor=e=>{
+    if(codeLinkHiddenByFilter(e))return 'rgba(60,60,70,0.02)';
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return '#facc15';
     return codeSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
   };
   const getCodeLinkWidth=e=>{
+    if(codeLinkHiddenByFilter(e))return 0;
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     return codeSelectedId&&(s===codeSelectedId||t===codeSelectedId)?1.2:0.4;
   };
@@ -2789,7 +2961,8 @@ function renderCodeGraph(){
     nodes:CODE_NODES,
     links,
     nodeColor:d=>{
-      const base=CODE_COLORS[d.tipo]||'#00e5ff';
+      if(codeHiddenModules.has(d.modulo))return 'rgba(60,60,70,0.05)';
+      const base=codeNodeColor(d);
       if(d.id===codeSelectedId)return '#ffffff';
       if(codeSelectedId){
         return codeNeighborIds(codeSelectedId).has(d.id) ? base : blendTowards(base,'#0a0d14',0.75);
@@ -2845,7 +3018,7 @@ function showCodeDetail(node){
     const other=codeNodeMap[otherId];
     if(!other)return'';
     const name=other.file.split(/[\\/]/).pop();
-    return \`<div class="rel-item" onclick="focusCodeNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${CODE_COLORS[other.tipo]||'#00e5ff'};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${e.tipo}</span></div>\`;
+    return \`<div class="rel-item" onclick="focusCodeNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${codeNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${e.tipo}</span></div>\`;
   }).filter(Boolean).join('');
   const rankNote=node.pagerank>0.01?'archivo central — muchas cosas dependen de él':node.pagerank>0.002?'conectividad media':'archivo periférico';
   document.getElementById('code-dp-body').innerHTML=\`
@@ -2969,7 +3142,7 @@ function renderCombinedGraph(){
     links:combinedLinksArr,
     nodeId:'mergedId', // los links usan mergedId (namespaced kdd-N / code-N), no el id crudo
     nodeColor:d=>{
-      const base=d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):(CODE_COLORS[d.tipo]||'#00e5ff');
+      const base=d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):codeNodeColor(d);
       if(d.mergedId===combinedSelectedId)return '#ffffff';
       if(combinedSelectedId){
         return combinedNeighborIds(combinedSelectedId).has(d.mergedId) ? base : blendTowards(base,'#0a0d14',0.75);
