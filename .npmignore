@@ -12,3 +12,8 @@ _CORRECCIONES-claude.md
 scripts/
 .github/
 vscode-extension/
+
+# Archivos de trabajo internos — nunca deben publicarse
+repomix-output.xml
+life-logbook-dashboard-agentix-10072026.md
+RECUPERADO-DE-LUMO-14-07-2026/
