@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { inferirAreaDesdeTexto } = require('./area-detector.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');
 const ERRORES_PATH = path.join(ROOT, '.agentic', 'memoria', 'errores.md');
@@ -63,16 +64,12 @@ const ERROR_PATTERNS = [
 ];
 
 // ─── Detectar área del proyecto basada en el error ────────────────────────────
+// Delega al detector compartido (area-detector.cjs) para no desalinearse con
+// el fallback que usa grafo.cjs al parsear errores.md/decisiones.md ya
+// escritos — antes había dos listas de palabras clave distintas y una de
+// ellas (esta) no cubría nada de frontend/UI salvo 'component'/.tsx/.jsx.
 function detectarArea(linea) {
-  const lower = linea.toLowerCase();
-  if (lower.includes('auth') || lower.includes('login') || lower.includes('session')) return 'auth';
-  if (lower.includes('api') || lower.includes('route') || lower.includes('endpoint')) return 'api';
-  if (lower.includes('database') || lower.includes('sql') || lower.includes('prisma') || lower.includes('supabase')) return 'database';
-  if (lower.includes('component') || lower.includes('.tsx') || lower.includes('.jsx')) return 'frontend';
-  if (lower.includes('middleware')) return 'middleware';
-  if (lower.includes('payment') || lower.includes('pago') || lower.includes('stripe')) return 'payments';
-  if (lower.includes('user') || lower.includes('usuario')) return 'users';
-  return 'global';
+  return inferirAreaDesdeTexto(linea);
 }
 
 // ─── Extraer archivo y línea del error ────────────────────────────────────────

@@ -490,14 +490,33 @@ function indexFile(db, filePath, projectRoot) {
       toFile = relPath; // llamada local — mismo archivo, por construcción
     } else if (edge.to_symbol?.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filePath), edge.to_symbol);
+
+      // Bug real encontrado el 14/07/2026 mirando por qué el back (TypeScript
+      // + ESM) no mostraba NINGUNA conexión interna en el grafo, mientras el
+      // front (JS plano) sí: en TS+ESM el código fuente escribe
+      // "./archetypes.js" aunque el archivo real en disco es "archetypes.ts"
+      // (convención real de TypeScript moderno con módulos ESM). El código
+      // viejo solo probaba AGREGAR una extensión al final (dejando
+      // "archetypes.js.ts", que nunca existe) — nunca intentaba REEMPLAZAR
+      // el .js/.jsx del propio specifier por .ts/.tsx. Resultado real medido:
+      // 1334 de 1389 imports del proyecto (96%, casi todo el back) quedaban
+      // sin resolver. candidates prueba primero la ruta tal cual (cubre el
+      // caso del front, que sí es .js -> .js real, sin desajuste), después
+      // el reemplazo de extensión (cubre el caso TS+ESM), y por último el
+      // agregado de extensión de siempre (cubre imports sin extensión, ej.
+      // "./utils").
+      const candidates = [resolved];
+      const extMatch = resolved.match(/\.(js|jsx|mjs|cjs)$/i);
+      if (extMatch) {
+        const base = resolved.slice(0, -extMatch[0].length);
+        candidates.push(base + '.ts', base + '.tsx');
+      }
       const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
-      for (const ext of extensions) {
-        if (fs.existsSync(resolved + ext)) {
-          toFile = path.relative(projectRoot, resolved + ext);
-          break;
-        }
-        if (fs.existsSync(resolved)) {
-          toFile = path.relative(projectRoot, resolved);
+      for (const ext of extensions) candidates.push(resolved + ext);
+
+      for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+          toFile = path.relative(projectRoot, candidate);
           break;
         }
       }

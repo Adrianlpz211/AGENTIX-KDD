@@ -15,7 +15,7 @@ const grafoPath = fs.existsSync(path.join(projectPath, '.agentic', 'grafo', 'gra
 const configPath = path.join(projectPath, '.agentic', 'config.md');
 const memoriaPath = path.join(projectPath, '.agentic', 'memoria');
 
-if (!fs.existsSync(configPath)) { console.log('\n  Agentic KDD not installed.\n'); process.exit(1); }
+if (!fs.existsSync(configPath)) { console.log('\n  Agentix KDD not installed.\n'); process.exit(1); }
 if (fs.existsSync(grafoPath)) { try { process.stdout.write('  Syncing... '); execSync(`node "${grafoPath}" sync`, { stdio: 'pipe', cwd: projectPath }); console.log('✓'); } catch {} }
 
 function escHtml(str) {
@@ -540,6 +540,49 @@ function getCreativeData() {
   } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
 }
 
+// ─── Feature 5 (14/07/2026): MEMORIA UI/FRONTEND ─────────────────────────────
+// Misma memoria de siempre (patrones.md/decisiones.md/errores.md), filtrada
+// por área — no es un sistema paralelo, es una vista distinta de los mismos
+// datos que ya usa Contract Guard/Creative Engine, más el resultado del
+// UI Native Gate (Feature 4, chequeo mecánico de confirm/alert/prompt nativos).
+function getUiMemoryData() {
+  const empty = { patronesAlta: 0, decisionesConArchivo: 0, erroresFrontend: 0, nativeGateViolations: 0, nativeGateSample: [] };
+  if (!fs.existsSync(dbPath)) return empty;
+  let _db;
+  try {
+    const BS3 = require('better-sqlite3');
+    _db = new BS3(dbPath, { readonly: true });
+    const safe = (fn) => { try { return fn(); } catch { return null; } };
+    const data = {
+      // area = 'frontend' exacto solo cubre lo que pasó por el detector nuevo
+      // (Feature 2) — patrones.md tiene áreas escritas a mano (ej.
+      // "panel/frontend") desde antes, así que hace falta LIKE, no igualdad.
+      patronesAlta:         safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='patron' AND area LIKE '%frontend%' AND confianza='ALTA'").get()?.n) || 0,
+      decisionesConArchivo: safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='decision' AND area LIKE '%frontend%' AND archivos_aplica != '[]'").get()?.n) || 0,
+      erroresFrontend:      safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='error' AND area LIKE '%frontend%'").get()?.n) || 0,
+      nativeGateViolations: 0,
+      nativeGateSample:     [],
+    };
+    try {
+      const { runUiNativeGate } = require('./.agentic/grafo/ui-native-gate.cjs');
+      const jsDir = path.join(projectPath, 'public', 'panel', 'js');
+      const archivos = [];
+      const recorrer = (dir) => {
+        for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, f.name);
+          if (f.isDirectory()) recorrer(full);
+          else if (f.name.endsWith('.js')) archivos.push(full);
+        }
+      };
+      if (fs.existsSync(jsDir)) recorrer(jsDir);
+      const gate = runUiNativeGate(archivos, projectPath);
+      data.nativeGateViolations = gate.findings ? gate.findings.length : 0;
+      data.nativeGateSample = (gate.findings || []).slice(0, 3).map(f => `${path.basename(f.file)}:${f.line} — ${f.id}`);
+    } catch {}
+    return data;
+  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
+}
+
 function getCuratorData() {
   try {
     const logPath = path.join(projectPath, '.agentic', 'curator.log');
@@ -568,8 +611,99 @@ function getEffectivenessData() {
 }
 
 
+// ─── Feature "endpoint≈" (14/07/2026): heurística front↔back por ruta de API ─
+// El grafo solo puede ver texto estático (imports, llamadas dentro del mismo
+// archivo) — nunca una petición HTTP en tiempo real. Esto NO es "arreglar" esa
+// limitación (no se puede), es una heurística nueva, aditiva, igual de
+// aproximada que "área≈": busca en el front cada `api('/ruta/...')` (el
+// wrapper real de fetch en core.js) y en el back cada `router.METODO('/ruta')`
+// montado con `app.use('/prefijo', createXRouter(...))`, y si el patrón de
+// ruta calza, los conecta. Si el front arma la URL de forma dinámica sin usar
+// el wrapper `api()`, o el back no sigue el patrón Express `router.METODO` +
+// `app.use`, esos casos no se detectan — mismo tipo de límite que área≈, no
+// es un vínculo exacto guardado en la base de datos.
+function getEndpointHeuristicEdges(codeNodes, root) {
+  const safe = (fn, fb) => { try { return fn(); } catch { return fb; } };
+  const readFile = (relFile) => safe(() => fs.readFileSync(path.join(root, relFile), 'utf8'), null);
+
+  // 1. Prefijo de montaje de cada router: app.use('/api/x', createXRouter(...))
+  const mountPrefixByCreator = {};
+  const serverLikeFiles = codeNodes.filter(n => /(^|[\\/])(server|app|index)\.tsx?$/i.test(n.file));
+  for (const sf of serverLikeFiles) {
+    const content = readFile(sf.file);
+    if (!content) continue;
+    const useRe = /\.use\(\s*['"`]([^'"`]+)['"`]\s*,\s*(create\w*Router)\s*\(/g;
+    let m;
+    while ((m = useRe.exec(content))) mountPrefixByCreator[m[2]] = m[1];
+  }
+  if (Object.keys(mountPrefixByCreator).length === 0) return []; // proyecto no usa este patrón — no forzar nada
+
+  // 2. Rutas reales del back: router.METODO('/ruta', ...) + su prefijo de montaje
+  const backendRoutes = [];
+  const routeFiles = codeNodes.filter(n => /routes[\\/]/i.test(n.file) && /\.tsx?$/i.test(n.file));
+  for (const rf of routeFiles) {
+    const content = readFile(rf.file);
+    if (!content) continue;
+    const creatorMatch = content.match(/export\s+function\s+(create\w*Router)/);
+    const prefix = creatorMatch && mountPrefixByCreator[creatorMatch[1]];
+    if (!prefix) continue;
+    const routeRe = /router\.(get|post|put|patch|delete)\(\s*['"`]([^'"`]*)['"`]/g;
+    let rm;
+    while ((rm = routeRe.exec(content))) {
+      const fullPath = (prefix + rm[2]).replace(/\/+/g, '/');
+      backendRoutes.push({ file: rf.file, path: fullPath });
+    }
+  }
+  if (backendRoutes.length === 0) return [];
+
+  // 3. Llamadas del front: api(`/ruta/${dinamico}/mas-ruta`) — el wrapper real de core.js
+  const frontFiles = codeNodes.filter(n => n.file.replace(/\\/g, '/').startsWith('public/'));
+  const frontCalls = [];
+  for (const ff of frontFiles) {
+    const content = readFile(ff.file);
+    if (!content) continue;
+    const callRe = /\bapi\(\s*(`[^`]*`|'[^']*'|"[^"]*")/g;
+    let cm;
+    while ((cm = callRe.exec(content))) {
+      const inner = cm[1].slice(1, -1).replace(/\$\{[^}]*\}/g, ' ');
+      frontCalls.push({ file: ff.file, raw: inner });
+    }
+  }
+  if (frontCalls.length === 0) return [];
+
+  // 4. Match segmento a segmento — ':param' del back calza cualquier segmento
+  // del front; ' ' (donde el front tenía un ${...} dinámico) calza
+  // cualquier segmento fijo del back.
+  function segMatch(frontSegs, backSegs) {
+    if (frontSegs.length !== backSegs.length) return false;
+    for (let i = 0; i < frontSegs.length; i++) {
+      const f = frontSegs[i], b = backSegs[i];
+      if (b.startsWith(':')) continue;
+      if (f === ' ') continue;
+      if (f !== b) return false;
+    }
+    return true;
+  }
+
+  const seen = new Set();
+  const result = [];
+  for (const fc of frontCalls) {
+    const fSegs = fc.raw.split('?')[0].split('/').filter(Boolean);
+    for (const br of backendRoutes) {
+      const bSegs = br.path.split('/').filter(Boolean);
+      if (!segMatch(fSegs, bSegs)) continue;
+      const key = fc.file + '|' + br.file;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ frontFile: fc.file, backFile: br.file });
+    }
+  }
+  return result;
+}
+
 const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
 const codeStructure = getCodeStructureGraph();
+const endpointHeuristicEdges = getEndpointHeuristicEdges(codeStructure.nodes, projectPath);
 
 // Mismo mapa que LANG_COLORS del cliente (script inline) — duplicado acá porque el
 // legend del Code Structure se arma server-side, antes de que el <script> exista.
@@ -586,14 +720,35 @@ const LANG_LABELS_SERVER = {
 };
 const langsPresent = [...new Set(codeStructure.nodes.map(n => n.language).filter(Boolean))].sort();
 
-// Paleta por módulo (carpeta) — se calcula en runtime porque los módulos varían por
-// proyecto (no hay un mapa fijo posible como con lenguajes). Hue distribuido parejo
-// en la rueda de color, orden alfabético para que sea estable entre recargas.
+// Paleta cósmica (14/07/2026) — reemplaza el arcoíris de un hue distinto por
+// módulo (se sentía "carnaval", pedido explícito del dueño). Agrupa por lo
+// que el cliente ve (front, azul eléctrico) vs. lo que no ve (back, violeta
+// intenso) — mismo criterio que esNodoFrontend() del lado cliente (la coraza,
+// Feature 6), pero repetido acá server-side porque el legend se arma antes
+// de que el <script> del cliente exista. Todos los tonos quedan brillantes
+// a propósito (nunca se apagan a gris) — un intento anterior con tonos bajos
+// hacía que algunos nodos casi no se notaran.
+const FRONT_TONES = ['#2979ff', '#4c8dff', '#6fa6ff'];
+const BACK_TONES = ['#b537ff', '#c454ff', '#a940f0', '#d066ff', '#9d2fee', '#e082ff'];
+
+function esModuloFrontendServer(m) {
+  return m === 'public' || m.startsWith('public/') || m.startsWith('public\\');
+}
+
 const modulesPresent = [...new Set(codeStructure.nodes.map(n => n.modulo).filter(Boolean))].sort();
 const MOD_COLORS_SERVER = {};
-modulesPresent.forEach((m, i) => {
-  MOD_COLORS_SERVER[m] = `hsl(${Math.round((i * 360) / Math.max(modulesPresent.length, 1))},70%,60%)`;
-});
+{
+  let frontIdx = 0, backIdx = 0;
+  modulesPresent.forEach((m) => {
+    if (esModuloFrontendServer(m)) {
+      MOD_COLORS_SERVER[m] = FRONT_TONES[frontIdx % FRONT_TONES.length];
+      frontIdx++;
+    } else {
+      MOD_COLORS_SERVER[m] = BACK_TONES[backIdx % BACK_TONES.length];
+      backIdx++;
+    }
+  });
+}
 
 // Calcular grado de conexiones por nodo (como Graphify — nodos divinos)
 const degreeMap = {};
@@ -648,6 +803,7 @@ const structuralData = getStructuralLearningData();
 const effectData     = getEffectivenessData();
 const creativeData   = getCreativeData();
 const curatorData    = getCuratorData();
+const uiMemoryData   = getUiMemoryData();
 const modulosImpl = parseModulos(config.implementados);
 const specsData = readSpecs();
 const logsData = readLogs();
@@ -755,7 +911,7 @@ const HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Agentic KDD — ${escHtml(config.nombre)}</title>
+<title>Agentix KDD — ${escHtml(config.nombre)}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script src="https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"></script>
 <!-- three-spritetext necesita un THREE global — 3d-force-graph trae su PROPIA copia
@@ -1015,7 +1171,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <header class="hdr">
   <div style="display:flex;align-items:center;min-width:0">
-    <div class="logo">🤖 Agentic KDD</div>
+    <div class="logo">🤖 Agentix KDD</div>
     <div class="proj">${config.nombre}</div>
     <div class="dot"></div>
   </div>
@@ -1027,7 +1183,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <option value="en">🇺🇸 EN</option>
       <option value="es">🇪🇸 ES</option>
     </select>
-    <button class="btn" onclick="toggleTheme()" id="tbtn">🌙 Dark</button>
   </div>
 </header>
 
@@ -1216,24 +1371,15 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <button class="help-fab" onclick="showTermsGlossary('code')" title="¿Qué significan los términos de este grafo?">?</button>
     <div id="code-gc"></div>
     <div class="gtt" id="code-gtt"></div>
-    <div class="graph-legend" style="max-width:220px;flex-wrap:wrap">
-      ${modulesPresent.length ? modulesPresent.map(m => `<div class="lg-item"><div class="lg-dot" style="background:${MOD_COLORS_SERVER[m]}"></div><span>${m}</span></div>`).join('') : `
+    <div class="graph-legend" style="max-width:280px;flex-wrap:wrap;gap:5px">
+      <div class="fpill active code-mod-chip-all" onclick="setCodeModulesAll()">Todos</div>
+      ${modulesPresent.length ? modulesPresent.map(m => `<div class="fpill code-mod-chip" data-mod="${escHtml(m)}" onclick="toggleCodeModuleChip('${escHtml(m)}')" style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${MOD_COLORS_SERVER[m]};display:inline-block;flex-shrink:0"></span><span>${escHtml(m)}</span></div>`).join('') : `
       <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
       <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>`}
     </div>
     <div class="graph-controls">
       <button class="gc-btn" onclick="resetCodeGraph()">⟳ Reset</button>
       <button class="gc-btn" onclick="centerCodeGraph()">⊙ Center</button>
-      <div style="position:relative">
-        <button class="gc-btn" onclick="toggleCodeFilterPanel()">☰ Módulos ▾</button>
-        <div id="code-filter-panel" style="display:none;position:absolute;bottom:100%;left:0;background:rgba(17,21,32,.97);border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:4px;max-height:240px;overflow-y:auto;min-width:170px;z-index:30">
-          <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:6px">
-            <span onclick="setAllCodeModules(true)" style="font-size:10px;color:var(--pl);cursor:pointer">Todos</span>
-            <span onclick="setAllCodeModules(false)" style="font-size:10px;color:var(--pl);cursor:pointer">Ninguno</span>
-          </div>
-          ${modulesPresent.map(m => `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);padding:3px 0;cursor:pointer"><input type="checkbox" checked data-mod="${m}" onchange="toggleCodeModuleFilter('${m}',this.checked)"><span style="width:8px;height:8px;border-radius:50%;background:${MOD_COLORS_SERVER[m]};display:inline-block;flex-shrink:0"></span><span>${m}</span></label>`).join('')}
-        </div>
-      </div>
     </div>
     <div class="detail-panel" id="code-detail-panel">
       <div class="dp-header">
@@ -1267,9 +1413,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>
       <div class="dp-help-row"><button class="dp-help-btn" onclick="showGlossary('combined')" title="Explicación en lenguaje simple">¡NO ENTIENDO!</button></div>
       <div class="dp-body" id="combined-dp-body"></div>
-    </div>
-    <div style="position:absolute;bottom:12px;right:12px;max-width:280px;font-size:10px;color:rgba(255,255,255,.35);background:rgba(17,21,32,.85);border-radius:8px;padding:8px 10px">
-      Las líneas verdes conectan por coincidencia de área/ruta — es una aproximación, no un vínculo exacto guardado en la base de datos.
     </div>
   </div>
 
@@ -1398,8 +1541,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           <div style="width:220px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);overflow-y:auto;padding:10px">
             <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:8px">✅ Implemented (${modulosImpl.length})</div>
             ${modulosImpl.length ? modulosImpl.map(m => {
-              const clean = m.replace(/\*\*/g,'').replace(/✅/g,'').trim();
-              const area = clean.toLowerCase().split(/[\s\-\/]/)[0];
+              const clean = m.replace(/\\*\\*/g,'').replace(/✅/g,'').trim();
+              const area = clean.toLowerCase().split(/[\\s\\-\\/]/)[0];
               const nc = nodes.filter(n => n.area === area);
               const errs = nc.filter(n => n.tipo === 'error').length;
               const pats = nc.filter(n => n.tipo === 'patron').length;
@@ -1407,7 +1550,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
             }).join('') : '<div style="font-size:11px;color:var(--text3);padding:8px">No modules</div>'}
             <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin:12px 0 8px">⏳ Pending (${modulosPend.length})</div>
             ${modulosPend.length ? modulosPend.map(m => {
-              const clean = m.replace(/\*\*/g,'').replace(/\[.\]\s*/g,'').trim();
+              const clean = m.replace(/\\*\\*/g,'').replace(/\\[.\\]\\s*/g,'').trim();
               return `<div style="padding:7px 10px;border-radius:6px;margin-bottom:4px;border:1px solid rgba(245,158,11,.2);background:rgba(245,158,11,.04)"><div style="font-size:11px;color:#fbbf24">${clean.length>24?clean.slice(0,24)+'…':clean}</div></div>`;
             }).join('') : ''}
           </div>
@@ -1619,7 +1762,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <!-- ONBOARDING -->
       <div class="docs-section" id="doc-onboarding">
         <div class="docs-h1">🚀 Project Setup</div>
-        <div class="docs-sub">How configured is this project with Agentic KDD. Complete all steps for the full system to work.</div>
+        <div class="docs-sub">How configured is this project with Agentix KDD. Complete all steps for the full system to work.</div>
 
         <!-- Progress bar -->
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
@@ -1660,7 +1803,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:12px;padding:20px;text-align:center">
           <div style="font-size:32px;margin-bottom:8px">🎉</div>
           <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:6px">Fully configured</div>
-          <div style="font-size:12px;color:var(--text2)">This project has Agentic KDD fully set up. The system will keep improving automatically.</div>
+          <div style="font-size:12px;color:var(--text2)">This project has Agentix KDD fully set up. The system will keep improving automatically.</div>
         </div>`}
       </div>
 
@@ -1756,6 +1899,41 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     </div>
   </div>
 
+  <p class="il-title" style="margin-top:24px">🎨 Memoria UI/Frontend</p>
+  <div class="il-grid">
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-a">🎨</div>
+        <div><div class="il-card-name">Memoria de diseño</div><div class="il-card-sub">Misma memoria de siempre, filtrada por área frontend</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val ${uiMemoryData.patronesAlta > 0 ? 'vg' : 'vx'}">${uiMemoryData.patronesAlta}</div><div class="il-stat-lbl">Patrones ALTA</div></div>
+        <div class="il-stat"><div class="il-stat-val vp">${uiMemoryData.decisionesConArchivo}</div><div class="il-stat-lbl">Decisiones c/archivo</div></div>
+        <div class="il-stat"><div class="il-stat-val va">${uiMemoryData.erroresFrontend}</div><div class="il-stat-lbl">Errores UI</div></div>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--text3)">
+        Ver reglas: pestaña <b>KDD Memory</b>, buscar por área "frontend"
+      </div>
+    </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon ${uiMemoryData.nativeGateViolations > 0 ? 'icon-a' : 'icon-g'}">${uiMemoryData.nativeGateViolations > 0 ? '⚠️' : '✅'}</div>
+        <div><div class="il-card-name">UI Native Gate</div><div class="il-card-sub">confirm/alert/prompt nativos — chequeo mecánico</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val ${uiMemoryData.nativeGateViolations > 0 ? 'vr' : 'vg'}">${uiMemoryData.nativeGateViolations}</div><div class="il-stat-lbl">Violaciones activas</div></div>
+      </div>
+      ${uiMemoryData.nativeGateSample.length > 0 ? `
+      <div class="il-list">
+        ${uiMemoryData.nativeGateSample.map(s => `<div class="il-row"><span class="il-badge bi">NATIVO</span><span class="il-row-name" title="${escHtml(s)}">${escHtml(s)}</span></div>`).join('')}
+      </div>` : `<div class="empty-state">Sin elementos nativos sin estilizar en public/panel/js</div>`}
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        Verificar tú mismo: <code style="color:#a5b4fc">node .agentic/grafo/ui-native-gate.cjs &lt;archivos&gt;</code>
+      </div>
+    </div>
+  </div>
+
 </div>
 </div>
 
@@ -1809,12 +1987,17 @@ const TERMS_GLOSSARY={
     {term:'Importa / llama a',explain:'Los archivos que ESTE necesita para funcionar — como los ingredientes que usa en su receta.'},
     {term:'Usado por',explain:'Los archivos que dependen de este — si algo se rompe aquí, estos otros se ven afectados también.'},
     {term:'IMPORTS',explain:'Una etiqueta que dice: "este archivo trae/usa código de aquel otro".'},
+    {term:'Chips de módulo (filtro)',explain:'Cada chip es una carpeta/módulo del proyecto — hacé clic para prenderlo o apagarlo. A diferencia de los filtros de KDD Memory, acá podés apagar VARIOS a la vez (no es uno solo excluyente). "Todos"/"Ninguno" prenden o apagan todos de un golpe.'},
+    {term:'Coraza (posición del nodo)',explain:'Los archivos de frontend (todo lo que el usuario final ve, ej. carpeta public/) se acomodan en un anillo exterior; el código de atrás (backend, lógica de negocio) se acomoda hacia el centro. Es una forma de ver de un vistazo qué tan "cerca de la superficie" está cada archivo.'},
+    {term:'endpoint≈ (línea cian)',explain:'Une un archivo de frontend con un archivo de backend cuando el primero llama a una ruta de API (ej. /api/embudo/...) que el segundo registra. Es una coincidencia de texto de ruta, no un vínculo exacto guardado en la base de datos — si el front arma la URL de forma dinámica sin el wrapper de siempre, esa conexión no se detecta.'},
   ]},
   combined:{title:'❓ Combined — términos generales',items:[
     {term:'¿Qué es esta pestaña?',explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
     {term:'área≈ (relación por área)',explain:'Una corazonada, no una certeza: si un error/patrón/decisión dice que pasó en el área "auth", y hay archivos cuya ruta también dice "auth", los conectamos con una línea verde como sugerencia — no es un vínculo 100% exacto guardado en la base de datos.'},
     {term:'nodo rojo/verde/azul (KDD)',explain:'Son los mismos error/patrón/decisión de la pestaña KDD Memory.'},
     {term:'nodo celeste (código)',explain:'Es un archivo real de tu código, igual que en Code Structure.'},
+    {term:'Coraza (posición del nodo)',explain:'Igual que en Code Structure: lo de frontend se acomoda hacia afuera, lo de backend hacia el centro — acá se ve mezclado con los nodos de memoria (errores/patrones/decisiones) también clasificados por área.'},
+    {term:'endpoint≈ (línea ámbar)',explain:'Une un archivo de frontend con un archivo de backend cuando el primero llama a una ruta de API (ej. /api/embudo/...) que el segundo registra. Es una coincidencia de texto de ruta, igual de aproximada que área≈ — si el front arma la URL de forma dinámica sin el wrapper de siempre, esa conexión no se detecta.'},
   ]},
   intel:{title:'❓ Preservation Intel — términos generales',items:[
     {term:'🛡️ Contract Guard',explain:'Vigila que el código que ya funciona no se rompa por accidente. Cada prueba que pasa varias veces seguidas se vuelve un "contrato" — mientras más veces pasa, más protegido queda.'},
@@ -1825,6 +2008,9 @@ const TERMS_GLOSSARY={
     {term:'Pendientes / Aplicadas',explain:'Cuántas sugerencias del Creative Engine están esperando tu confirmación, y cuántas ya confirmaste.'},
     {term:'🔬 MemCurator',explain:'El "bibliotecario" de la memoria del proyecto — su trabajo sería limpiar recuerdos viejos o duplicados para que la memoria no se llene de basura. Hoy todavía no se ha usado nunca en este proyecto.'},
     {term:'🧬 Aprendizaje Estructural',explain:'Analiza cómo se conecta tu código de verdad (qué archivo llama a cuál) para detectar cuando el MISMO tipo de fallo se repite varias veces por la misma cadena de archivos — si pasa 3 veces o más, lo sube automáticamente a "patrón confirmado" sin que nadie tenga que hacerlo a mano.'},
+    {term:'🎨 Memoria de diseño',explain:'Lo mismo que Contract Guard/Creative Engine pero mirando solo la parte de UI/diseño: cuántas reglas de estilo de alta confianza hay, cuántas decisiones de layout ya quedaron ligadas a un archivo concreto, y cuántos errores conocidos son de interfaz (responsive, PWA, etc.).'},
+    {term:'UI Native Gate',explain:'Un chequeo automático que busca confirm()/alert()/prompt() nativos del navegador en tu código — cosas que ya decidiste reemplazar por tu propio diseño una vez, pero que se pueden colar de nuevo la próxima vez que alguien construye algo parecido sin acordarse de la regla. No bloquea nada, solo avisa.'},
+    {term:'🔀 Parallel Guard ("romper el silencio")',explain:'Cuando una tarea se supone que se hace con 2 partes en paralelo (front y back a la vez), este chequeo revisa la conversación real y confirma si de verdad pasó en paralelo o si terminó haciéndose una cosa después de la otra sin que nadie se diera cuenta. Se ve en un reporte aparte (_output/parallel-guard-*.md), no tiene tarjeta propia todavía.'},
   ]},
 };
 
@@ -1845,7 +2031,7 @@ function parseContenido(contenido){
   for(const raw of lines){
     const line=raw.trim();
     if(!line||line.startsWith('##'))continue;
-    const m=line.match(/^([A-ZÁÉÍÓÚÑ][a-záéíóúñ ]{2,25}):\s*(.*)$/);
+    const m=line.match(/^([A-ZÁÉÍÓÚÑ][a-záéíóúñ ]{2,25}):\\s*(.*)$/);
     if(m){
       const key=m[1].toLowerCase().trim();
       if(SKIP_FIELD_LABELS.has(key)){currentLabel=null;continue;}
@@ -1910,7 +2096,7 @@ const HUMANIZE_NOUNS={
   request:'la solicitud',response:'la respuesta',error:'el error',status:'el estado',
 };
 function splitWords(s){
-  return String(s).replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_\-]+/g,' ').toLowerCase().trim();
+  return String(s).replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_\\-]+/g,' ').toLowerCase().trim();
 }
 function humanizeWordList(str){
   return str.split(' ').filter(Boolean).map(w=>HUMANIZE_NOUNS[w]||w).join(' ');
@@ -1995,6 +2181,7 @@ function closeGlossary(){
 const NODES = ${JSON.stringify(nodes)};
 const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
 const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
+const ENDPOINT_HEURISTIC_EDGES = ${JSON.stringify(endpointHeuristicEdges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
 // Color por tipo de archivo (lenguaje detectado por el AST indexer) — antes todos los
 // archivos se veían del mismo color salvo que tuvieran una clase adentro; ahora cada
@@ -2097,14 +2284,7 @@ function showSbTab(tab,el){
 function setLang(l){
   lang=l;
   document.querySelectorAll('[data-i]').forEach(el=>{const k=el.getAttribute('data-i');if(T[l][k])el.textContent=T[l][k];});
-  document.getElementById('tbtn').textContent=(isDark?'🌙 ':'☀️ ')+T[l][isDark?'dark':'light'];
   renderNodeList();
-}
-
-function toggleTheme(){
-  isDark=!isDark;
-  document.getElementById('app').className=isDark?'':'light';
-  document.getElementById('tbtn').textContent=(isDark?'🌙 ':'☀️ ')+T[lang][isDark?'dark':'light'];
 }
 
 function toggleLabels(){
@@ -2136,7 +2316,7 @@ function askQuestion(q){
   const nTab=document.querySelector('.sb-tab[onclick*="nodes"]');
   if(nTab) showSbTab('nodes',nTab);
   const STOP=new Set(['what','how','why','does','do','is','are','the','a','an','to','for','in','of','on','i','should','this','was','were','decided','permanent','rules','add','feature']);
-  const term=q.toLowerCase().replace(/[?¿]/g,'').split(/\s+/).filter(w=>w.length>2&&!STOP.has(w)).slice(0,4).join(' ');
+  const term=q.toLowerCase().replace(/[?¿]/g,'').split(/\\s+/).filter(w=>w.length>2&&!STOP.has(w)).slice(0,4).join(' ');
   const box=document.getElementById('srch');
   if(box){ box.value=term; filterSearch(term); box.focus(); }
 }
@@ -2146,7 +2326,13 @@ function getFiltered(){
   if(currentFilter==='ALTA')r=NODES.filter(n=>n.confianza==='ALTA');
   else if(currentFilter==='god')r=NODES.filter(n=>(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0);
   else if(currentFilter!=='all')r=NODES.filter(n=>n.tipo===currentFilter);
-  if(searchVal)r=r.filter(n=>n.titulo.toLowerCase().includes(searchVal)||n.area.toLowerCase().includes(searchVal));
+  if(searchVal){
+    const terms=searchVal.split(/\\s+/).filter(Boolean);
+    r=r.filter(n=>{
+      const hay=(n.titulo+' '+n.area).toLowerCase();
+      return terms.some(t=>hay.includes(t));
+    });
+  }
   return r;
 }
 
@@ -2384,6 +2570,21 @@ const LINK_BASE_COLOR='#8b5cf6';
 const LINK_BASE_RGBA='rgba(139,92,246,0.35)';
 const LINK_DIMMED_RGBA='rgba(139,92,246,0.08)';
 
+// Paleta cósmica (14/07/2026) — SOLO para Code Structure, pedido explícito:
+// "implementale eso al code estructure solo a ese". KDD Memory y las líneas
+// de Combined NO se tocan — siguen con LINK_BASE_RGBA de arriba. Combined sí
+// hereda los colores de NODO nuevos (ver MOD_COLORS_SERVER) porque reusa
+// codeNodeColor() para sus nodos de código — eso es "aplicarle los colores
+// de cada grafo", no un esquema aparte.
+// v4→v5: 0.28 seguía leyéndose gris contra el fondo negro — una línea de 1px
+// semitransparente casi nunca se ve "blanco brillante" salvo que la opacidad
+// sea bastante más alta (es cómo funciona la mezcla de color, no un bug).
+// Subido a 0.5 + un poco más de grosor (ver getCodeLinkWidth) para que de
+// verdad se perciba incandescente, no solo gris claro.
+const CODE_LINK_BASE_RGBA='rgba(255,255,255,0.5)';
+const CODE_LINK_DIMMED_RGBA='rgba(255,255,255,0.18)';
+const CODE_PARTICLE_COLOR='#fff200';
+
 // Velocidad de partícula "escalonada" — pedido del dueño: con la misma
 // velocidad fija para todos los links, todas las partículas salían y
 // llegaban sincronizadas (se veía como si todo el grafo se moviera de golpe,
@@ -2431,6 +2632,46 @@ function forceRecenter(strength){
   }
   force.initialize=ns=>{nodes=ns;};
   return force;
+}
+
+// ─── Feature 6 (14/07/2026): "coraza" — UI por fuera, código de atrás adentro ─
+// Pedido tal cual lo describió el dueño: front es lo que ve el usuario final
+// (la parte de "encima"), back es el código detrás (lo de "adentro") — un
+// nodo de UI/frontend se empuja hacia un radio grande (cáscara exterior), el
+// resto se empuja hacia un radio chico (núcleo). No reemplaza forceRecenter
+// (que sigue atrayendo todo hacia el origen) — se suma como una fuerza extra
+// que además separa por capas según a qué radio target quiere llegar cada nodo.
+function forceRadialShell(strength,getTargetRadius){
+  let nodes;
+  function force(alpha){
+    for(const n of nodes){
+      const x=n.x||0,y=n.y||0,z=n.z||0;
+      const r=Math.sqrt(x*x+y*y+z*z)||0.0001;
+      const targetR=getTargetRadius(n);
+      const factor=(targetR-r)/r*strength*alpha;
+      n.vx=(n.vx||0)+x*factor;
+      n.vy=(n.vy||0)+y*factor;
+      n.vz=(n.vz||0)+z*factor;
+    }
+  }
+  force.initialize=ns=>{nodes=ns;};
+  return force;
+}
+
+// Clasifica un nodo (KDD o de código) como "frontend" para la coraza — misma
+// idea que area-detector.cjs pero aplicada a nodos ya cargados en el navegador,
+// no a texto de memoria. Nodo KDD: usa el área ya calculada (Feature 2, área
+// exacta 'frontend' o compuesta como 'panel/frontend'). Nodo de código: usa
+// la ruta del archivo — todo lo que vive bajo public/ (la carpeta real del
+// panel de este proyecto) o termina en .jsx/.tsx (convención de otros stacks).
+function esNodoFrontend(d){
+  // Nodo de código: siempre tiene .file (KDD nunca lo tiene) — se clasifica
+  // por ruta. Nodo KDD: se clasifica por el área ya calculada (Feature 2).
+  if(d.file!==undefined){
+    const f=d.file.replace(/\\\\/g,'/');
+    return f.startsWith('public/')||/\\.(jsx|tsx)$/i.test(f);
+  }
+  return !!(d.area&&/frontend/i.test(d.area));
 }
 function create3DGraph(containerId, opts){
   const container=document.getElementById(containerId);
@@ -2488,6 +2729,7 @@ function create3DGraph(containerId, opts){
   if(opts.chargeStrength) graph.d3Force('charge').strength(opts.chargeStrength);
   if(opts.linkDistance) graph.d3Force('link').distance(opts.linkDistance);
   if(opts.centerStrength) graph.d3Force('recenter', forceRecenter(opts.centerStrength));
+  if(opts.radialShellGetRadius) graph.d3Force('radialShell', forceRadialShell(opts.radialShellStrength||0.12, opts.radialShellGetRadius));
   // Bug real encontrado probando: los controles de cámara (TrackballControls)
   // cachean el tamaño de pantalla en el momento en que se crean — si en ese
   // instante el <canvas> todavía tenía su tamaño por defecto (300x150), orbitar
@@ -2610,7 +2852,7 @@ function forceRefreshLinkMaterials(graph){
       const c=colorFn(obj.__data);
       if(typeof c!=='string')return;
       obj.material.color.set(c); // THREE ya parsea bien hex y rgba() — se comprobó con datos reales
-      const alphaMatch=c.match(/rgba\([\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)\)/i);
+      const alphaMatch=c.match(/rgba\\([\\d.]+,\\s*[\\d.]+,\\s*[\\d.]+,\\s*([\\d.]+)\\)/i);
       obj.material.opacity=alphaMatch?parseFloat(alphaMatch[1]):1;
       obj.material.transparent=true;
       obj.material.needsUpdate=true;
@@ -2630,7 +2872,7 @@ function forceRefreshLinkMaterials(graph){
         const c=colorFn(obj.__data);
         if(typeof c!=='string')return;
         obj.material.color.set(c);
-        const alphaMatch=c.match(/rgba\([\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)\)/i);
+        const alphaMatch=c.match(/rgba\\([\\d.]+,\\s*[\\d.]+,\\s*[\\d.]+,\\s*([\\d.]+)\\)/i);
         obj.material.opacity=alphaMatch?parseFloat(alphaMatch[1]):1;
         obj.material.transparent=true;
         obj.material.needsUpdate=true;
@@ -2889,23 +3131,42 @@ function renderGraph(){
 
 // ─── D3 Code Structure Graph (nativo) ─────────────────────────────────────────
 let codeSelectedId=null;
-// Filtro de módulos — el select que muestra/oculta nodos por carpeta. Se guarda
-// como set de OCULTOS (no de visibles) para que "todos visibles" sea el estado
-// inicial sin necesitar poblar el set con todos los módulos de antemano.
-let codeHiddenModules=new Set();
-function toggleCodeFilterPanel(){
-  const p=document.getElementById('code-filter-panel');
-  if(p) p.style.display = p.style.display==='none' ? 'block' : 'none';
+// Filtro de módulos por chips — mismo comportamiento que los chips de KDD
+// Memory (empieza en "Todos", tocar un módulo deja SOLO ese activo) con una
+// variante pedida explícitamente: una vez que tocaste un módulo específico,
+// podés sumar otros sin apagar los ya activos (en KDD, tocar otro chip
+// apaga el anterior — acá no). null = modo "Todos" (se ve todo); un Set =
+// modo específico (solo se ven los módulos del set).
+let codeActiveModules=null;
+
+function codeModuleVisible(mod){
+  return codeActiveModules===null || codeActiveModules.has(mod);
 }
-function toggleCodeModuleFilter(mod,checked){
-  if(checked) codeHiddenModules.delete(mod); else codeHiddenModules.add(mod);
+function renderCodeModuleChips(){
+  const allChip=document.querySelector('.code-mod-chip-all');
+  if(allChip) allChip.classList.toggle('active',codeActiveModules===null);
+  document.querySelectorAll('.code-mod-chip').forEach(chip=>{
+    chip.classList.toggle('active',codeActiveModules!==null && codeActiveModules.has(chip.dataset.mod));
+  });
+}
+function toggleCodeModuleChip(mod){
+  if(codeActiveModules===null){
+    // Primer clic en un módulo específico rompe "Todos" — igual que KDD,
+    // deja SOLO ese módulo activo.
+    codeActiveModules=new Set([mod]);
+  } else if(codeActiveModules.has(mod)){
+    codeActiveModules.delete(mod);
+    if(codeActiveModules.size===0) codeActiveModules=null; // sin nada activo → vuelve a "Todos"
+  } else {
+    // La variante sobre KDD: sumar otro módulo sin apagar el que ya estaba activo.
+    codeActiveModules.add(mod);
+  }
+  renderCodeModuleChips();
   refreshCodeColors();
 }
-function setAllCodeModules(visible){
-  document.querySelectorAll('#code-filter-panel input[type="checkbox"]').forEach(cb=>{
-    cb.checked=visible;
-    if(visible) codeHiddenModules.delete(cb.dataset.mod); else codeHiddenModules.add(cb.dataset.mod);
-  });
+function setCodeModulesAll(){
+  codeActiveModules=null;
+  renderCodeModuleChips();
   refreshCodeColors();
 }
 
@@ -2939,29 +3200,38 @@ function refreshCodeColors(){
 
 function renderCodeGraph(){
   if(!CODE_NODES.length)return;
-  const links=CODE_EDGES.filter(e=>codeNodeMap[e.source]&&codeNodeMap[e.target]);
+  // endpoint≈ (front llama a una ruta que el back registra) también aplica
+  // acá — no hace falta ningún nodo KDD, front y back son los dos "código".
+  // buildEndpointHeuristicLinks() ya devuelve {source,target} como ids
+  // crudos de CODE_NODES, iguales a los de CODE_EDGES — se puede mezclar
+  // directo, sin remapear nada.
+  const links=[...CODE_EDGES,...buildEndpointHeuristicLinks()].filter(e=>codeNodeMap[e.source]&&codeNodeMap[e.target]);
   const codeLinkHiddenByFilter=e=>{
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     const sn=codeNodeMap[s], tn=codeNodeMap[t];
-    return (sn&&codeHiddenModules.has(sn.modulo)) || (tn&&codeHiddenModules.has(tn.modulo));
+    return (sn&&!codeModuleVisible(sn.modulo)) || (tn&&!codeModuleVisible(tn.modulo));
   };
+  const CODE_ENDPOINT_MATCH_COLOR='#22d3ee';
   const getCodeLinkColor=e=>{
     if(codeLinkHiddenByFilter(e))return 'rgba(60,60,70,0.02)';
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return '#facc15';
-    return codeSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
+    if(e.tipo==='endpoint_match')return CODE_ENDPOINT_MATCH_COLOR;
+    return codeSelectedId ? CODE_LINK_DIMMED_RGBA : CODE_LINK_BASE_RGBA;
   };
   const getCodeLinkWidth=e=>{
     if(codeLinkHiddenByFilter(e))return 0;
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
-    return codeSelectedId&&(s===codeSelectedId||t===codeSelectedId)?1.2:0.4;
+    if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return 1.2;
+    if(e.tipo==='endpoint_match')return 0.9;
+    return 0.6;
   };
 
   const graph=create3DGraph('code-gc',{
     nodes:CODE_NODES,
     links,
     nodeColor:d=>{
-      if(codeHiddenModules.has(d.modulo))return 'rgba(60,60,70,0.05)';
+      if(!codeModuleVisible(d.modulo))return 'rgba(60,60,70,0.05)';
       const base=codeNodeColor(d);
       if(d.id===codeSelectedId)return '#ffffff';
       if(codeSelectedId){
@@ -2981,12 +3251,14 @@ function renderCodeGraph(){
     linkDirectionalParticles:1,
     linkDirectionalParticleSpeed:getStaggeredParticleSpeed,
     linkDirectionalParticleWidth:e=>getCodeLinkWidth(e)+0.1,
-    linkDirectionalParticleColor:getCodeLinkColor,
+    linkDirectionalParticleColor:e=>codeLinkHiddenByFilter(e)?'rgba(60,60,70,0.02)':(e.tipo==='endpoint_match'?CODE_ENDPOINT_MATCH_COLOR:CODE_PARTICLE_COLOR),
     // Mismos valores ya probados en KDD Memory (charge/distance/centro) —
     // 287 nodos, densidad similar, arranca del mismo punto ya calibrado.
     chargeStrength:()=>-140,
     linkDistance:()=>45,
-    centerStrength:0.3,
+    // Ver nota igual en renderCombinedGraph: 0.3 ahogaba la fuerza de coraza.
+    centerStrength:0.08,
+    radialShellGetRadius:d=>esNodoFrontend(d)?220:60,
     onNodeClick:(node)=>{
       showCodeDetail(node);
       const g=active3DGraphs['code-gc'];
@@ -3104,6 +3376,21 @@ function buildHeuristicLinks(){
   return links;
 }
 
+// "endpoint≈" — front llama api('/ruta') que calza con una router.METODO('/ruta')
+// del back (ver getEndpointHeuristicEdges en el servidor, dashboard.cjs). Igual
+// de heurística que área≈: no es un vínculo exacto guardado en la base de datos,
+// es una coincidencia de texto de ruta.
+function buildEndpointHeuristicLinks(){
+  const links=[];
+  const codeNodeByFile={};
+  CODE_NODES.forEach(n=>{codeNodeByFile[n.file]=n;});
+  ENDPOINT_HEURISTIC_EDGES.forEach(e=>{
+    const front=codeNodeByFile[e.frontFile], back=codeNodeByFile[e.backFile];
+    if(front&&back) links.push({source:front.id,target:back.id,tipo:'endpoint_match',weight:0.6});
+  });
+  return links;
+}
+
 let combinedMergedNodesArr=[];
 
 function renderCombinedGraph(){
@@ -3126,15 +3413,40 @@ function renderCombinedGraph(){
     .map(e=>({source:e.source,target:e.target,tipo:e.tipo}));
   const heuristicEdges=buildHeuristicLinks().filter(e=>combinedNodeMap[e.source]&&combinedNodeMap[e.target]);
 
-  combinedLinksArr=[...kddEdges,...codeEdges,...heuristicEdges];
+  const endpointEdges=buildEndpointHeuristicLinks().filter(e=>combinedNodeMap[e.source]&&combinedNodeMap[e.target]);
+  combinedLinksArr=[...kddEdges,...codeEdges,...heuristicEdges,...endpointEdges];
+  // "El combined es solo aplicarle los colores de cada grafo" (pedido explícito)
+  // — esto valía para nodos (ya lo hacía, ver nodeColor abajo) pero no para
+  // LÍNEAS: antes TODAS las líneas de Combined (kdd-kdd, code-code, heurística)
+  // pintaban del mismo púrpura genérico, así que las conexiones reales de
+  // código (arregladas en ast-indexer.cjs) quedaban invisibles, perdidas en la
+  // maraña — existían en los datos, pero no se distinguían a simple vista.
+  // Code-code ahora usa el blanco de Code Structure. endpoint≈ (front↔back por
+  // ruta de API) usa ámbar, para distinguirse de área≈ (que se queda púrpura,
+  // igual que kdd-kdd).
+  const ENDPOINT_MATCH_COLOR='#22d3ee';
+  const isCombinedCodeCodeEdge=(s,t)=>{
+    const sn=combinedNodeMap[s], tn=combinedNodeMap[t];
+    return !!(sn&&tn&&sn.group==='code'&&tn.group==='code');
+  };
   const getCombinedLinkColor=e=>{
     const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
     if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return '#facc15';
+    if(e.tipo==='endpoint_match') return ENDPOINT_MATCH_COLOR;
+    if(isCombinedCodeCodeEdge(s,t)) return combinedSelectedId ? CODE_LINK_DIMMED_RGBA : CODE_LINK_BASE_RGBA;
     return combinedSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
+  };
+  const getCombinedParticleColor=e=>{
+    const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
+    if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return '#facc15';
+    if(e.tipo==='endpoint_match') return ENDPOINT_MATCH_COLOR;
+    return isCombinedCodeCodeEdge(s,t) ? CODE_PARTICLE_COLOR : getCombinedLinkColor(e);
   };
   const getCombinedLinkWidth=e=>{
     const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
-    return combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId)?1.2:0.4;
+    if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return 1.2;
+    if(e.tipo==='endpoint_match')return 0.9;
+    return 0.4;
   };
 
   create3DGraph('combined-gc',{
@@ -3162,10 +3474,16 @@ function renderCombinedGraph(){
     linkDirectionalParticles:1,
     linkDirectionalParticleSpeed:getStaggeredParticleSpeed,
     linkDirectionalParticleWidth:e=>getCombinedLinkWidth(e)+0.1,
-    linkDirectionalParticleColor:getCombinedLinkColor,
+    linkDirectionalParticleColor:getCombinedParticleColor,
     chargeStrength:()=>-140,
     linkDistance:()=>45,
-    centerStrength:0.3,
+    // centerStrength bajó de 0.3 a 0.08: con 0.3, forceRecenter jala TODO
+    // hacia el origen (r=0) con la misma fuerza que la coraza empuja hacia
+    // afuera — las dos fuerzas se anulaban y no había separación visible.
+    // 0.08 alcanza para que nada se vaya a la deriva lateral, sin ahogar la
+    // fuerza radial que sí separa UI (afuera) de código de atrás (adentro).
+    centerStrength:0.08,
+    radialShellGetRadius:d=>esNodoFrontend(d)?220:60,
     onNodeClick:(node)=>{
       showCombinedDetail(node);
       const g=active3DGraphs['combined-gc'];
@@ -3275,7 +3593,7 @@ function renderModuleGraph(){
     .attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
     .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#4b5570');
 
-  const cleanLabel=function(s){var r=s;while(r.indexOf('**')>=0)r=r.split('**').join('');while(r.indexOf('*')>=0)r=r.split('*').join('');r=r.replace(/^\[.\]\s*/,'');return r.trim();};
+  const cleanLabel=function(s){var r=s;while(r.indexOf('**')>=0)r=r.split('**').join('');while(r.indexOf('*')>=0)r=r.split('*').join('');r=r.replace(/^\\[.\\]\\s*/,'');return r.trim();};
   const implNodes=M_NODES.filter(function(n){return n.tipo==='impl';}).map(function(n){return Object.assign({},n,{label:cleanLabel(n.label)});});
   const pendNodes=M_NODES.filter(function(n){return n.tipo==='pend';}).map(function(n){return Object.assign({},n,{label:cleanLabel(n.label)});});
 
@@ -3425,7 +3743,7 @@ function centerModGraph(){
 }
 
 function copyMarkdown(){
-  const t='# '+('${config.nombre}')+'\\n\\nGenerated by Agentic KDD Dashboard\\n';
+  const t='# '+('${config.nombre}')+'\\n\\nGenerated by Agentix KDD Dashboard\\n';
   navigator.clipboard?.writeText(t).then(()=>alert('Copied!')).catch(()=>alert('Copy manually'));
 }
 
@@ -3444,7 +3762,7 @@ const server = require('http').createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
-  console.log(`\n  Agentic KDD Dashboard v4`);
+  console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}\n`);
   // Open browser
   const { exec } = require('child_process');

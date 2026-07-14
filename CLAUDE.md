@@ -307,6 +307,18 @@ falsos positivos (placeholders, `process.env`, emails de ejemplo).
 El Security Gate NO reemplaza el audit: seguridad completo.
 Es una verificación rápida antes del Build para los patrones más comunes.
 
+### UI Native Gate — corre sobre archivos .js/.jsx/.ts/.tsx/.html del changeset
+Chequeo mecánico (no depende de que el LLM se acuerde de leer patrones.md):
+detecta uso de `confirm()`/`alert()`/`prompt()` nativos del navegador en vez
+de los wrappers estilizados ya construidos en `core.js`
+(`confirmAction`/`promptAction`/`showToast`) — la regla ya existe en
+`patrones.md` con confianza ALTA, esto es su verificación determinística.
+Comando: `node .agentic/grafo/ui-native-gate.cjs <archivos del changeset>`.
+Solo WARN, nunca STOP — no bloquea el pipeline, pero deja el hallazgo
+visible en vez de que pase desapercibido. Agregar una regla nueva (otro
+elemento nativo con reemplazo real ya construido) es una entrada más en
+`NATIVE_RULES` dentro del archivo, nada más.
+
 ## MODO LEGIÓN — sub-agentes en paralelo (v3.9)
 
 La "Iron Legion" de Agentix: en los pasos de **OJOS** (leer/analizar/revisar) el

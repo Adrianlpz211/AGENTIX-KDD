@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { inferirAreaDesdeTexto } = require('./area-detector.cjs');
 
 // ─── DB ADAPTER — better-sqlite3 nativo o sql.js puro JS ─────────────────────
 // Intenta better-sqlite3 (rápido, nativo). Si falla, usa sql.js (puro JS, sin compilar).
@@ -292,6 +293,39 @@ function snapshotMemoria(db) {
   } catch(e) { return null; }
 }
 
+// ─── EXTRAER ARCHIVOS EXPLÍCITOS DE UNA ENTRADA ──────────────────────────────
+// decisiones.md/errores.md ya citan archivos reales entre backticks en sus
+// campos "Impacto:"/"Contexto:"/"Evidencia:" (convención ya usada en todo el
+// proyecto, ej. "Impacto: `public/panel/index.html` (fusión de...)"). Antes
+// de esto, archivos_aplica en la BD se llenaba con una aproximación genérica
+// (los archivos del ÚLTIMO commit, iguales para TODOS los nodos de ese sync,
+// no específicos a cada decisión) — sin forma de saber qué archivo afecta
+// una decisión de layout en particular. Esto extrae los archivos REALES que
+// la propia entrada menciona, filtrando selectores CSS (`.dialog-form`) y
+// llamadas a función (`openContactoPanel()`) que también usan backticks.
+function pareceRutaDeArchivo(token) {
+  if (token.includes(' ')) return false;                // snippet de código o comando, no archivo suelto
+  if (token.startsWith('@')) return false;               // paquete npm con scope (@supabase/supabase-js)
+  if (token.endsWith('()')) return false;                // función, no archivo
+  if (/^(GET|POST|PUT|PATCH|DELETE)\s+\//i.test(token)) return false; // ruta de API, no archivo
+  if (token.startsWith('.') && !/^\.\.?\//.test(token)) return false; // selector CSS (.dialog-form, .a/-b)
+  if (token.includes('/')) return PREFIJOS_CARPETA.some(p => token.startsWith(p)) || EXTENSIONES.test(token);
+  return EXTENSIONES.test(token);
+}
+
+// Prefijos de carpeta real conocidos en este tipo de proyecto — un token con
+// "/" que NO empieza por ninguno de estos y no tiene extensión reconocible es
+// casi siempre otra cosa (nombres de variable "a/b", fragmento de ruta suelto
+// "/activar", paquete npm "@scope/pkg"), no un archivo real del repo.
+const PREFIJOS_CARPETA = ['src/', 'public/', 'tests/', 'scripts/', 'docs/', '_output/', 'data/', 'prisma/', '.agentic/', 'node_modules/', './', '../'];
+const EXTENSIONES = /\.(ts|tsx|js|jsx|md|json|css|scss|html|py|php|sql|cjs|mjs|ya?ml|prisma)$/i;
+
+function extraerArchivosExplicitos(texto) {
+  const tokens = [...texto.matchAll(/`([^`]+)`/g)].map(m => m[1].trim());
+  const archivos = tokens.filter(pareceRutaDeArchivo);
+  return [...new Set(archivos)];
+}
+
 // ─── PARSEAR ENTRADAS ─────────────────────────────────────────────────────────
 function parsearEntradas(contenido, tipo) {
   const entradas = [];
@@ -313,11 +347,11 @@ function parsearEntradas(contenido, tipo) {
     const lineas = sec.split('\n');
     const titulo = lineas[0].trim().replace(/^\[.*?\]\s*/, '').trim();
     if (!titulo || titulo.length < 5) continue;
-    const e = { tipo, titulo, contenido: sec, area: 'global', confianza: 'BAJA',
+    const e = { tipo, titulo, contenido: sec, area: null, confianza: 'BAJA',
       aplicado: 0, util: 0, estado: 'ACTIVO', ultima_validacion: new Date().toISOString() };
     for (const l of lineas) {
       if (l.startsWith('Área:') || l.startsWith('Area:'))
-        e.area = l.split(':')[1]?.trim() || 'global';
+        e.area = l.split(':')[1]?.trim() || null;
       if (l.startsWith('Confianza:'))
         e.confianza = l.split(':')[1]?.trim() || 'BAJA';
       if (l.startsWith('Aplicado:'))
@@ -329,6 +363,12 @@ function parsearEntradas(contenido, tipo) {
       if (l.startsWith('Última validación:') || l.startsWith('Ultima validacion:'))
         e.ultima_validacion = l.split(':').slice(1).join(':').trim();
     }
+    // Muchas entradas (errores.md y decisiones.md, a diferencia de patrones.md)
+    // nunca tuvieron un campo "Área:" en su formato — antes de este fix caían
+    // TODAS en 'global' sin importar su contenido real. Como fallback, se
+    // infiere del título+contenido antes de resignarse a 'global'.
+    if (!e.area) e.area = inferirAreaDesdeTexto(titulo, sec);
+    e.archivosExplicitos = extraerArchivosExplicitos(sec);
     entradas.push(e);
   }
   return entradas;
@@ -417,15 +457,28 @@ function sincronizar() {
     if (!fs.existsSync(fp)) continue;
     const entradas = parsearEntradas(fs.readFileSync(fp, 'utf8'), tipo);
     for (const e of entradas) {
+      // Si la propia entrada cita archivos reales (Impacto:/Contexto:/Evidencia:
+      // entre backticks), eso es MÁS preciso que "los archivos del último commit"
+      // — permite que 02-analista.md relacione una decisión de layout con el
+      // archivo exacto que toca, no solo con lo que cambió en el commit más
+      // reciente (que puede no tener nada que ver con esta entrada en particular).
+      const archivosNodo = e.archivosExplicitos && e.archivosExplicitos.length
+        ? JSON.stringify(e.archivosExplicitos)
+        : archivosJSON;
+      const hashNodo = e.archivosExplicitos && e.archivosExplicitos.length
+        ? (() => { try { return require('./knowledge-validator.cjs').computeContextHash(e.archivosExplicitos, process.cwd()); } catch { return hashContexto; } })()
+        : hashContexto;
+
       const ex = db.get('SELECT id FROM nodos WHERE tipo=? AND titulo=?', e.tipo, e.titulo);
       if (ex) {
-        db.run('UPDATE nodos SET contenido=?,area=?,confianza=?,aplicado=?,util=?,estado=?,ultima_validacion=?,fecha_update=datetime(\'now\') WHERE tipo=? AND titulo=?',
-          e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, e.tipo, e.titulo);
+        db.run(`UPDATE nodos SET contenido=?,area=?,confianza=?,aplicado=?,util=?,estado=?,ultima_validacion=?,
+                fecha_update=datetime('now'),archivos_aplica=?,hash_contexto=? WHERE tipo=? AND titulo=?`,
+          e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, archivosNodo, hashNodo, e.tipo, e.titulo);
         actualizados++;
       } else {
         db.run(`INSERT INTO nodos (tipo,titulo,contenido,area,confianza,aplicado,util,estado,ultima_validacion,fecha_update,archivos_aplica,hash_contexto)
                 VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),?,?)`,
-          e.tipo, e.titulo, e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, archivosJSON, hashContexto);
+          e.tipo, e.titulo, e.contenido, e.area, e.confianza, e.aplicado, e.util, e.estado, e.ultima_validacion, archivosNodo, hashNodo);
         nuevos++;
       }
       total++;

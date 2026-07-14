@@ -31,6 +31,11 @@ En patrones.md → leer solo entradas con:
   + todos los de Confianza: ALTA sin importar área
 
 En decisiones.md → leer solo decisiones que afecten este módulo
+  Cómo saber si una decisión "afecta este módulo": si algún archivo de la
+  tarea actual aparece en el campo archivos_aplica del nodo (columna real en
+  memoria.db, extraída automáticamente de los archivos citados entre
+  backticks en Impacto:/Contexto:/Evidencia: — no hace falta leer el texto
+  completo para decidir esto, es un match directo de archivo).
 ```
 
 Si el módulo es nuevo (sin entradas previas):

@@ -26,6 +26,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { checkParallelDispatch, formatearVeredicto } = require('./parallel-guard.cjs');
 
 const ROOT        = process.cwd();
 const AGENTIC_DIR = path.join(ROOT, '.agentic');
@@ -603,7 +604,7 @@ function safeRead(f) { try { return fs.readFileSync(f, 'utf8'); } catch { return
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-function main() {
+async function main() {
   if (!fs.existsSync(AGENTIC_DIR)) {
     if (hookMode) process.exit(0);
     console.error('❌ Agentic KDD not installed. Run: akdd init');
@@ -760,17 +761,49 @@ function main() {
   results.ast = indexarAst();
   if (!silent) console.log(results.ast ? '✅' : '⚠️  (omitido)');
 
+  // Step 11: Parallel Guard ("romper el silencio") — solo corre si el
+  // orquestador pasó --expected-parallel, es decir, si MODO LEGIÓN decidió
+  // que esta tarea calificaba para Front+Back simultáneo. No previene el
+  // salto (eso solo lo puede evitar el propio modelo, dentro de su turno) —
+  // lo hace VISIBLE en vez de silencioso, escribiendo el veredicto a
+  // _output/ en vez de dejarlo pasar como si el ciclo hubiera cumplido.
+  results.parallelGuard = null;
+  if (opts['expected-parallel']) {
+    if (!silent) process.stdout.write('  10. Parallel Guard... ');
+    try {
+      const windowMinutes = parseInt(opts['window-minutes']) || 30;
+      const veredicto = await checkParallelDispatch(ROOT, { windowMinutes });
+      results.parallelGuard = veredicto;
+      if (!silent) {
+        const icono = { CONFIRMADO: '✅', NO_CONFIRMADO: '⚠️ ', SIN_EVIDENCIA: '❔' }[veredicto.verdicto] || '?';
+        console.log(`${icono} ${veredicto.verdicto}`);
+      }
+
+      if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+      const fecha = new Date().toISOString().slice(0, 10);
+      const reportPath = path.join(LOG_DIR, `parallel-guard-${fecha}.md`);
+      const entrada = `## ${new Date().toISOString()} — ${taskName}\n\n${formatearVeredicto(veredicto)}\n\n---\n\n`;
+      fs.appendFileSync(reportPath, entrada, 'utf8');
+    } catch (e) {
+      if (!silent) console.log(`⚠️  error verificando: ${e.message.slice(0, 80)}`);
+    }
+  }
+
   if (!silent) {
     console.log('\n══════════════════════════════════════════════════');
     console.log('  ✅ Post-Cycle completado');
     console.log(`  Ciclo: ${results.ciclo ? String(results.ciclo).slice(0,8) : '—'} | Contratos: ${results.contratos?.success ? '✅' : '⚠️'}`);
     console.log(`  Módulos: ${results.modulos.length} | Patrones: ${results.patrones.length} nuevos | Specs: ${results.specs.length}`);
+    if (results.parallelGuard) {
+      const icono = { CONFIRMADO: '✅', NO_CONFIRMADO: '⚠️ ', SIN_EVIDENCIA: '❔' }[results.parallelGuard.verdicto] || '?';
+      console.log(`  Parallel Guard: ${icono} ${results.parallelGuard.verdicto} — ${results.parallelGuard.razon}`);
+    }
     console.log('══════════════════════════════════════════════════\n');
   }
 }
 
 if (require.main === module) {
-  main();
+  main().catch(e => { console.error('❌ post-cycle falló:', e.message); process.exit(1); });
 }
 
 module.exports = { main, detectPatterns, registrarModulos, generarSpec };
