@@ -17,7 +17,16 @@ async function downloadFromGitHub(spinner) {
   try {
     execSync(`curl -sL "https://github.com/${GITHUB_REPO}/archive/refs/heads/main.tar.gz" -o "${tmpFile}"`, { stdio: 'pipe' });
     fs.ensureDirSync(TEMP_DIR);
-    execSync(`tar -xzf "${tmpFile}" -C "${TEMP_DIR}" --strip-components=1`, { stdio: 'pipe' });
+    // El tar de Git Bash (MSYS) en Windows rompe de 2 formas con rutas tipo
+    // "C:\Users\...": (1) sin --force-local interpreta los dos puntos tras la letra
+    // de unidad como un host remoto ("Cannot connect to C: resolve failed"); (2) aun
+    // CON --force-local, sigue rompiendo si el path usa backslashes (corrompe la ruta
+    // al parsearla internamente). Confirmado probando ambos casos por separado: con
+    // slashes normales (/) en vez de \ funciona sin problema. Se convierten ambos
+    // paths antes de pasarlos a tar — Windows acepta "/" en rutas igual que "\".
+    const tmpFileForTar = tmpFile.replace(/\\/g, '/');
+    const tempDirForTar = TEMP_DIR.replace(/\\/g, '/');
+    execSync(`tar --force-local -xzf "${tmpFileForTar}" -C "${tempDirForTar}" --strip-components=1`, { stdio: 'pipe' });
     fs.removeSync(tmpFile);
     return TEMP_DIR;
   } catch (err) {
