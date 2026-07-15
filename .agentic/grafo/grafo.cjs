@@ -326,6 +326,29 @@ function extraerArchivosExplicitos(texto) {
   return [...new Set(archivos)];
 }
 
+// ─── CRUCE MEMORIA ↔ SÍMBOLOS DE CÓDIGO (sesión 15/07/2026) ──────────────────
+// Hasta ahora una decisión/error se conectaba con código solo por coincidencia
+// de RUTA de archivo (archivosExplicitos arriba, o área≈ en el dashboard) —
+// nunca por lo que la propia entrada dice. Si "arreglamos el `POST /login`" y
+// ast_symbols ya tiene un endpoint real con ese nombre exacto (Bloque B),
+// ahora se crea un vínculo de verdad en vez de una aproximación por carpeta.
+//
+// Bug real encontrado probando contra decisiones.md/errores.md reales: la
+// primera versión comparaba el símbolo contra TODO el texto (texto.includes),
+// y eso generaba decenas de falsos positivos — constantes como NEGOCIO,
+// EMBUDO, HTML, BASE también son palabras normales del español/código que
+// aparecen en cualquier párrafo sin relación real con el símbolo (ej.
+// "segundo NEGOCIO bajo cuenta" no está hablando de la constante NEGOCIO).
+// Fix: igual que ya hace extraerArchivosExplicitos arriba, solo cuenta si el
+// símbolo aparece envuelto en backticks — es la convención que el propio
+// proyecto ya usa para citar código real, no prosa. Comparación EXACTA de
+// token (no substring), así "GET /" tampoco matchea dentro de "GET /:id".
+function extraerSimbolosMencionados(texto, simbolosDisponibles) {
+  const tokens = new Set([...texto.matchAll(/`([^`]+)`/g)].map(m => m[1].trim()));
+  if (!tokens.size) return [];
+  return simbolosDisponibles.filter(s => tokens.has(s.symbol_name));
+}
+
 // ─── PARSEAR ENTRADAS ─────────────────────────────────────────────────────────
 function parsearEntradas(contenido, tipo) {
   const entradas = [];
@@ -452,6 +475,15 @@ function sincronizar() {
   }
   const archivosJSON = JSON.stringify(archivosRecientes);
 
+  // Símbolos indexados una sola vez (no por-entrada) — evita cientos de
+  // queries repetidas cuando hay muchas entradas en decisiones/errores/patrones.
+  let simbolosIndexados = [];
+  try {
+    simbolosIndexados = db.all(
+      "SELECT file, kind, symbol_name FROM ast_symbols WHERE kind IN ('endpoint','constant','sql_table','sql_index')"
+    );
+  } catch { /* ast_symbols puede no existir si nunca se corrió ast-indexer.cjs */ }
+
   for (const { file, tipo } of archivos) {
     const fp = path.join(MEMORIA_PATH, file);
     if (!fs.existsSync(fp)) continue;
@@ -482,6 +514,17 @@ function sincronizar() {
         nuevos++;
       }
       total++;
+
+      if (simbolosIndexados.length) {
+        const mencionados = extraerSimbolosMencionados(e.contenido, simbolosIndexados);
+        for (const s of mencionados) {
+          try {
+            db.run(`INSERT OR IGNORE INTO relaciones_semanticas
+                    (desde_entidad, tipo, hacia_entidad, peso, descripcion) VALUES (?,?,?,?,?)`,
+              `nodo:${e.tipo}:${e.titulo}`, 'menciona_simbolo', `${s.kind}:${s.symbol_name}`, 1.0, s.file);
+          } catch {}
+        }
+      }
     }
   }
   if (db.type === 'sqljs' && db.save) db.save();

@@ -6,7 +6,7 @@ const path = require('path');
 const http = require('http');
 const { execSync } = require('child_process');
 
-const PORT = 3847;
+const PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || 3847; // override: AKDD_DASH_PORT (permite correr dos versiones lado a lado)
 const projectPath = process.cwd();
 const dbPath = path.join(projectPath, '.agentic', 'memoria.db');
 const grafoPath = fs.existsSync(path.join(projectPath, '.agentic', 'grafo', 'grafo.cjs'))
@@ -316,6 +316,23 @@ const patrones = parseEntries(readMemoria('patrones.md')).filter(p => p.estado =
 const decisiones = parseEntries(readMemoria('decisiones.md'));
 const errores = parseEntries(readMemoria('errores.md'));
 
+// Adjunta a cada nodo de memoria los símbolos de código que menciona de verdad
+// (Bloque B + cruce del 15/07/2026) — relaciones_semanticas usa nombres de
+// entidad en texto (desde_entidad/hacia_entidad), no ids como la tabla
+// `relaciones` que ya usa el resto del grafo KDD, así que se resuelve aparte.
+function attachSymbolMentions(nodes, mencionesRaw) {
+  const porNodo = {};
+  (mencionesRaw || []).forEach(m => {
+    (porNodo[m.desde_entidad] = porNodo[m.desde_entidad] || []).push({
+      simbolo: m.hacia_entidad, archivo: m.descripcion,
+    });
+  });
+  nodes.forEach(n => {
+    n.simbolosMencionados = porNodo[`nodo:${n.tipo}:${n.titulo}`] || [];
+  });
+  return nodes;
+}
+
 function getGraphData() {
   try {
     if (!fs.existsSync(dbPath)) return { nodes: [], edges: [], ciclos: [], fases: [] };
@@ -327,11 +344,12 @@ function getGraphData() {
       const _db = new BS3(dbPath, { readonly: true });
       const nodes = _db.prepare('SELECT * FROM nodos ORDER BY fecha_creacion DESC').all();
       const edges = _db.prepare('SELECT * FROM relaciones').all();
-      let ciclos = [], fases = [];
+      let ciclos = [], fases = [], menciones = [];
       try { ciclos = _db.prepare('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30').all(); } catch(e) {}
       try { fases  = _db.prepare('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100').all(); } catch(e) {}
+      try { menciones = _db.prepare("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'").all(); } catch(e) {}
       _db.close();
-      return { nodes, edges, ciclos, fases };
+      return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases };
     } catch(e) {
       // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
       try {
@@ -344,8 +362,9 @@ function getGraphData() {
         const edges  = allSQL('SELECT * FROM relaciones');
         const ciclos = allSQL('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30');
         const fases  = allSQL('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100');
+        const menciones = allSQL("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'");
         try { _db.close(); } catch {}
-        return { nodes, edges, ciclos, fases };
+        return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases };
       } catch(e2) {
         return { nodes: [], edges: [], ciclos: [], fases: [] };
       }
@@ -385,7 +404,7 @@ function getCodeStructureGraph() {
   const EDGES_SQL = `
     SELECT DISTINCT from_file, to_file, kind, COUNT(*) as weight
     FROM ast_edges
-    WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS')
+    WHERE to_file IS NOT NULL AND kind IN ('IMPORTS','CALLS','EXTENDS','USES_CLASS')
     GROUP BY from_file, to_file, kind
   `;
   // Nombres reales de lo que cada archivo define — para "¡NO ENTIENDO!": listar
@@ -397,11 +416,26 @@ function getCodeStructureGraph() {
     WHERE kind IN ('function','class')
     ORDER BY exported DESC, symbol_name ASC
   `;
+  // Símbolos "nuevos" (Bloque B — comentarios/constantes/endpoints/SQL, sesión
+  // del 15/07/2026): se guardan aparte de SYMBOLS_SQL en vez de mezclarlos ahí
+  // porque explainCodeNode() ya humaniza function/class con lógica propia
+  // (camelCase → verbo en español) que no aplica a estos — un endpoint o una
+  // nota ya son texto legible, no hay nada que "traducir".
+  const EXTRA_SYMBOLS_SQL = `
+    SELECT file, symbol_name, kind, signature
+    FROM ast_symbols
+    WHERE kind IN ('endpoint','constant','enum','note','why','hack','fixme','sql_table','sql_index','form','select','field','css_class','css_id')
+    ORDER BY line_start ASC
+  `;
 
-  function buildGraph(files, rawEdges, rawSymbols) {
+  function buildGraph(files, rawEdges, rawSymbols, rawExtra) {
     const symbolsByFile = {};
     (rawSymbols || []).forEach(s => {
       (symbolsByFile[s.file] = symbolsByFile[s.file] || []).push({ name: s.symbol_name, kind: s.kind, exported: !!s.exported });
+    });
+    const extraByFile = {};
+    (rawExtra || []).forEach(s => {
+      (extraByFile[s.file] = extraByFile[s.file] || []).push({ name: s.symbol_name, kind: s.kind, signature: s.signature });
     });
     const nodes = files.map((f, i) => ({
       id: `code-${i}`,
@@ -414,6 +448,7 @@ function getCodeStructureGraph() {
       functions: f.functions,
       pagerank: f.pagerank || 0,
       symbols: symbolsByFile[f.file] || [],
+      extraSymbols: extraByFile[f.file] || [],
     }));
     const fileToId = {};
     nodes.forEach(n => { fileToId[n.file] = n.id; });
@@ -433,7 +468,8 @@ function getCodeStructureGraph() {
       const files = _db.prepare(FILES_SQL).all();
       const rawEdges = _db.prepare(EDGES_SQL).all();
       const rawSymbols = _db.prepare(SYMBOLS_SQL).all();
-      return buildGraph(files, rawEdges, rawSymbols);
+      const rawExtra = _db.prepare(EXTRA_SYMBOLS_SQL).all();
+      return buildGraph(files, rawEdges, rawSymbols, rawExtra);
     } finally {
       try { _db.close(); } catch {}
     }
@@ -448,8 +484,9 @@ function getCodeStructureGraph() {
       const files = allSQL(FILES_SQL);
       const rawEdges = allSQL(EDGES_SQL);
       const rawSymbols = allSQL(SYMBOLS_SQL);
+      const rawExtra = allSQL(EXTRA_SYMBOLS_SQL);
       try { _db.close(); } catch {}
-      return buildGraph(files, rawEdges, rawSymbols);
+      return buildGraph(files, rawEdges, rawSymbols, rawExtra);
     } catch(e2) {
       return empty;
     }
@@ -546,7 +583,7 @@ function getCreativeData() {
 // datos que ya usa Contract Guard/Creative Engine, más el resultado del
 // UI Native Gate (Feature 4, chequeo mecánico de confirm/alert/prompt nativos).
 function getUiMemoryData() {
-  const empty = { patronesAlta: 0, decisionesConArchivo: 0, erroresFrontend: 0, nativeGateViolations: 0, nativeGateSample: [] };
+  const empty = { patronesAlta: 0, decisionesConArchivo: 0, erroresFrontend: 0, nativeGateViolations: 0, nativeGateSample: [], uiForms: 0, uiSelects: 0, uiFields: 0, uiCssClasses: 0, uiFlujosProtegidos: 0, browserGateConfig: false };
   if (!fs.existsSync(dbPath)) return empty;
   let _db;
   try {
@@ -562,6 +599,15 @@ function getUiMemoryData() {
       erroresFrontend:      safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='error' AND area LIKE '%frontend%'").get()?.n) || 0,
       nativeGateViolations: 0,
       nativeGateSample:     [],
+      // Plan 2 (Ojos UI, v3.13): la materia de interfaz que el indexador ya ve,
+      // los flujos UI que el Regression Guard protege, y si el browser-gate
+      // tiene config para verificar por comportamiento.
+      uiForms:      safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='form'").get()?.n) || 0,
+      uiSelects:    safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='select'").get()?.n) || 0,
+      uiFields:     safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='field'").get()?.n) || 0,
+      uiCssClasses: safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='css_class'").get()?.n) || 0,
+      uiFlujosProtegidos: safe(() => _db.prepare(`SELECT COUNT(*) as n FROM protected_behaviors WHERE status='active' AND (critical_flows LIKE '%"FORM %' OR critical_flows LIKE '%"SELECT %' OR critical_flows LIKE '%"REQUIRED %')`).get()?.n) || 0,
+      browserGateConfig: fs.existsSync(path.join(projectPath, '.agentic', 'browser-gate.json')),
     };
     try {
       const { runUiNativeGate } = require('./.agentic/grafo/ui-native-gate.cjs');
@@ -622,7 +668,23 @@ function getEffectivenessData() {
 // el wrapper `api()`, o el back no sigue el patrón Express `router.METODO` +
 // `app.use`, esos casos no se detectan — mismo tipo de límite que área≈, no
 // es un vínculo exacto guardado en la base de datos.
+// v2 (Plan 4, 15/07/2026): la lógica generalizada vive en
+// .agentic/grafo/endpoint-heuristic.cjs — lee los endpoints del ÍNDICE (todos
+// los frameworks del catálogo del indexador, no solo Express+TS), entiende
+// montajes app.use('/p', X) con ident/require además de create*Router, y el
+// front sale del perfil del proyecto (stack-profile) con fetch/axios/wrappers.
+// Si ese módulo no existe (Agentix viejo) o falla → cae al legacy de abajo,
+// que queda INTACTO — fail-soft: nunca peor que hoy.
 function getEndpointHeuristicEdges(codeNodes, root) {
+  try {
+    const { computeEndpointEdges } = require(path.join(__dirname, '.agentic', 'grafo', 'endpoint-heuristic.cjs'));
+    return computeEndpointEdges(codeNodes, root) || [];
+  } catch {
+    return getEndpointHeuristicEdgesLegacy(codeNodes, root);
+  }
+}
+
+function getEndpointHeuristicEdgesLegacy(codeNodes, root) {
   const safe = (fn, fb) => { try { return fn(); } catch { return fb; } };
   const readFile = (relFile) => safe(() => fs.readFileSync(path.join(root, relFile), 'utf8'), null);
 
@@ -711,12 +773,13 @@ const LANG_COLORS_SERVER = {
   javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
   rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
   csharp:'#9b4f96', php:'#8993be', ruby:'#cc342d', swift:'#f05138', scala:'#dc322f',
-  elixir:'#a37eba', other:'#00e5ff',
+  elixir:'#a37eba', html:'#e34c26', css:'#2979ff', other:'#00e5ff',
 };
 const LANG_LABELS_SERVER = {
   javascript:'JavaScript', typescript:'TypeScript', python:'Python', go:'Go',
   rust:'Rust', java:'Java', kotlin:'Kotlin', cpp:'C++', c:'C', csharp:'C#',
-  php:'PHP', ruby:'Ruby', swift:'Swift', scala:'Scala', elixir:'Elixir', other:'otro',
+  php:'PHP', ruby:'Ruby', swift:'Swift', scala:'Scala', elixir:'Elixir',
+  html:'HTML', css:'CSS', other:'otro',
 };
 const langsPresent = [...new Set(codeStructure.nodes.map(n => n.language).filter(Boolean))].sort();
 
@@ -731,7 +794,20 @@ const langsPresent = [...new Set(codeStructure.nodes.map(n => n.language).filter
 const FRONT_TONES = ['#2979ff', '#4c8dff', '#6fa6ff'];
 const BACK_TONES = ['#b537ff', '#c454ff', '#a940f0', '#d066ff', '#9d2fee', '#e082ff'];
 
+// Perfil de convenciones (Plan 4): si el proyecto declaró sus carpetas front
+// (stack-profile.cjs, key stack_profile en project_settings), la clasificación
+// las usa; sin perfil → la heurística de siempre (public/). Fail-soft: si el
+// módulo no existe o falla, comportamiento de hoy, sin excepción visible.
+let __stackProfile = null;
+try {
+  __stackProfile = require(path.join(__dirname, '.agentic', 'grafo', 'stack-profile.cjs')).loadProfile(projectPath);
+} catch {}
+
 function esModuloFrontendServer(m) {
+  if (__stackProfile && Array.isArray(__stackProfile.front_dirs) && __stackProfile.front_dirs.length) {
+    const mn = String(m).replace(/\\/g, '/');
+    return __stackProfile.front_dirs.some(d => mn === d || mn.startsWith(d + '/'));
+  }
   return m === 'public' || m.startsWith('public/') || m.startsWith('public\\');
 }
 
@@ -1932,6 +2008,25 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         Verificar tú mismo: <code style="color:#a5b4fc">node .agentic/grafo/ui-native-gate.cjs &lt;archivos&gt;</code>
       </div>
     </div>
+
+    <div class="il-card">
+      <div class="il-card-head">
+        <div class="il-card-icon icon-g">👁</div>
+        <div><div class="il-card-name">Ojos UI</div><div class="il-card-sub">v3.13 — forms/selects/required y CSS como nodos del grafo</div></div>
+      </div>
+      <div class="il-stat-row">
+        <div class="il-stat"><div class="il-stat-val vg">${uiMemoryData.uiForms}</div><div class="il-stat-lbl">Forms</div></div>
+        <div class="il-stat"><div class="il-stat-val vg">${uiMemoryData.uiSelects}</div><div class="il-stat-lbl">Selects</div></div>
+        <div class="il-stat"><div class="il-stat-val vp">${uiMemoryData.uiFields}</div><div class="il-stat-lbl">Campos</div></div>
+        <div class="il-stat"><div class="il-stat-val va">${uiMemoryData.uiCssClasses}</div><div class="il-stat-lbl">Clases CSS</div></div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3)">
+        Flujos UI protegidos por el Regression Guard: <b style="color:${uiMemoryData.uiFlujosProtegidos > 0 ? '#4ade80' : 'var(--text3)'}">${uiMemoryData.uiFlujosProtegidos}</b>
+        &nbsp;·&nbsp; Browser Gate por vista: ${uiMemoryData.browserGateConfig
+          ? '<b style="color:#4ade80">config lista ✓</b>'
+          : '<span title="Crear .agentic/browser-gate.json con {port, routes} para activar los checks por comportamiento">config faltante — <code style="color:#a5b4fc">.agentic/browser-gate.json</code></span>'}
+      </div>
+    </div>
   </div>
 
 </div>
@@ -2064,6 +2159,11 @@ function explainKddNode(node){
   summary+=\`Está conectado con \${deg} otra(s) cosa(s) de la memoria del proyecto.\`;
   const items=[{label:'📝 En resumen',text:summary},...fields];
   if(!fields.length)items.push({label:'ℹ️ Nota',text:'Este nodo todavía no tiene más detalle guardado aparte del título — probablemente se detectó automáticamente y nadie lo ha revisado a mano todavía (con "aa: aprende").'});
+  const menciones=node.simbolosMencionados||[];
+  if(menciones.length){
+    items.push({label:'🔗 Menciona en código (vínculo real, no aproximado)',
+      text:menciones.map(m=>"'"+m.simbolo+"' en "+m.archivo).join(' — ')});
+  }
   return {title:'¡NO ENTIENDO! — '+String(node.titulo||'').slice(0,60), bodyHTML:glossaryItemsHTML(items)};
 }
 
@@ -2143,6 +2243,41 @@ function explainCodeNode(node){
   } else {
     items.push({label:'ℹ️ Nota',text:'No se detectaron funciones ni clases nombradas en este archivo (puede ser solo configuración, tipos, o código sin símbolos exportados reconocidos por el indexador).'});
   }
+  const extra=node.extraSymbols||[];
+  const endpoints=extra.filter(s=>s.kind==='endpoint');
+  if(endpoints.length){
+    items.push({label:'🛣️ Rutas de API que expone',
+      text:endpoints.map(s=>s.name).join(' · ')});
+  }
+  const constants=extra.filter(s=>s.kind==='constant'||s.kind==='enum');
+  if(constants.length){
+    items.push({label:'🏷️ Constantes/enums definidos',
+      text:constants.map(s=>s.name).join(', ')});
+  }
+  const sqlDefs=extra.filter(s=>s.kind==='sql_table'||s.kind==='sql_index');
+  if(sqlDefs.length){
+    items.push({label:'🗄️ Esquema SQL definido aquí',
+      text:sqlDefs.map(s=>(s.kind==='sql_table'?'tabla ':'índice ')+s.name).join(', ')});
+  }
+  const notes=extra.filter(s=>['note','why','hack','fixme'].includes(s.kind));
+  if(notes.length){
+    const etiqueta={note:'Nota',why:'Por qué',hack:'Parche temporal',fixme:'Pendiente de arreglar'};
+    items.push({label:'🗒️ Lo que el propio código dice de sí mismo',
+      text:notes.map(s=>'['+(etiqueta[s.kind]||s.kind)+'] '+s.signature).join(' — ')});
+  }
+  // Plan 2 (Ojos UI): la materia de interfaz que este archivo define
+  const uiMatter=extra.filter(s=>['form','select','field'].includes(s.kind));
+  if(uiMatter.length){
+    const conReq=s=>(String(s.signature||'').startsWith('[required]')?' (required)':'');
+    items.push({label:'🖼️ Materia de UI (forms/selects/campos)',
+      text:uiMatter.map(s=>s.name+conReq(s)).join(' · ')});
+  }
+  const cssDefs=extra.filter(s=>s.kind==='css_class'||s.kind==='css_id');
+  if(cssDefs.length){
+    const lista=cssDefs.slice(0,25).map(s=>(s.kind==='css_id'?'#':'.')+s.name).join(', ');
+    items.push({label:'🎨 Clases/ids CSS definidos aquí',
+      text:lista+(cssDefs.length>25?\` …y \${cssDefs.length-25} más.\`:'')});
+  }
   return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\/]/).pop(), bodyHTML:glossaryItemsHTML(items)};
 }
 
@@ -2190,7 +2325,7 @@ const LANG_COLORS = {
   javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
   rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
   csharp:'#9b4f96', php:'#8993be', ruby:'#cc342d', swift:'#f05138', scala:'#dc322f',
-  elixir:'#a37eba', other:'#00e5ff',
+  elixir:'#a37eba', html:'#e34c26', css:'#2979ff', other:'#00e5ff',
 };
 const MOD_COLORS = ${JSON.stringify(MOD_COLORS_SERVER)};
 function codeNodeColor(d){ return MOD_COLORS[d.modulo] || LANG_COLORS[d.language] || CODE_COLORS[d.tipo] || '#00e5ff'; }
@@ -2662,13 +2797,16 @@ function forceRadialShell(strength,getTargetRadius){
 // idea que area-detector.cjs pero aplicada a nodos ya cargados en el navegador,
 // no a texto de memoria. Nodo KDD: usa el área ya calculada (Feature 2, área
 // exacta 'frontend' o compuesta como 'panel/frontend'). Nodo de código: usa
-// la ruta del archivo — todo lo que vive bajo public/ (la carpeta real del
-// panel de este proyecto) o termina en .jsx/.tsx (convención de otros stacks).
+// la ruta del archivo — con perfil del proyecto (Plan 4: FRONT_DIRS inyectado
+// server-side desde stack-profile) o, sin perfil, la heurística de siempre:
+// public/ (la carpeta real del panel de este proyecto) o .jsx/.tsx.
+const FRONT_DIRS=${JSON.stringify((__stackProfile && Array.isArray(__stackProfile.front_dirs)) ? __stackProfile.front_dirs : [])};
 function esNodoFrontend(d){
   // Nodo de código: siempre tiene .file (KDD nunca lo tiene) — se clasifica
   // por ruta. Nodo KDD: se clasifica por el área ya calculada (Feature 2).
   if(d.file!==undefined){
     const f=d.file.replace(/\\\\/g,'/');
+    if(FRONT_DIRS.length)return FRONT_DIRS.some(dir=>f===dir||f.startsWith(dir+'/'));
     return f.startsWith('public/')||/\\.(jsx|tsx)$/i.test(f);
   }
   return !!(d.area&&/frontend/i.test(d.area));
@@ -3212,11 +3350,15 @@ function renderCodeGraph(){
     return (sn&&!codeModuleVisible(sn.modulo)) || (tn&&!codeModuleVisible(tn.modulo));
   };
   const CODE_ENDPOINT_MATCH_COLOR='#22d3ee';
+  // USES_CLASS (Plan 2): vista→CSS por clase usada — rosa, para distinguir la
+  // capa de estilos de los imports/calls (blanco) y del endpoint≈ (cyan).
+  const CODE_USES_CLASS_COLOR='rgba(236,72,153,0.55)';
   const getCodeLinkColor=e=>{
     if(codeLinkHiddenByFilter(e))return 'rgba(60,60,70,0.02)';
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return '#facc15';
     if(e.tipo==='endpoint_match')return CODE_ENDPOINT_MATCH_COLOR;
+    if(e.tipo==='USES_CLASS')return codeSelectedId ? 'rgba(236,72,153,0.08)' : CODE_USES_CLASS_COLOR;
     return codeSelectedId ? CODE_LINK_DIMMED_RGBA : CODE_LINK_BASE_RGBA;
   };
   const getCodeLinkWidth=e=>{
@@ -3224,6 +3366,7 @@ function renderCodeGraph(){
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     if(codeSelectedId&&(s===codeSelectedId||t===codeSelectedId))return 1.2;
     if(e.tipo==='endpoint_match')return 0.9;
+    if(e.tipo==='USES_CLASS')return 0.4;
     return 0.6;
   };
 
@@ -3425,6 +3568,7 @@ function renderCombinedGraph(){
   // ruta de API) usa ámbar, para distinguirse de área≈ (que se queda púrpura,
   // igual que kdd-kdd).
   const ENDPOINT_MATCH_COLOR='#22d3ee';
+  const USES_CLASS_COLOR='rgba(236,72,153,0.55)'; // Plan 2: capa CSS→vista en rosa
   const isCombinedCodeCodeEdge=(s,t)=>{
     const sn=combinedNodeMap[s], tn=combinedNodeMap[t];
     return !!(sn&&tn&&sn.group==='code'&&tn.group==='code');
@@ -3433,6 +3577,7 @@ function renderCombinedGraph(){
     const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
     if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return '#facc15';
     if(e.tipo==='endpoint_match') return ENDPOINT_MATCH_COLOR;
+    if(e.tipo==='USES_CLASS') return combinedSelectedId ? 'rgba(236,72,153,0.08)' : USES_CLASS_COLOR;
     if(isCombinedCodeCodeEdge(s,t)) return combinedSelectedId ? CODE_LINK_DIMMED_RGBA : CODE_LINK_BASE_RGBA;
     return combinedSelectedId ? LINK_DIMMED_RGBA : LINK_BASE_RGBA;
   };

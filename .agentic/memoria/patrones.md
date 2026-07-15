@@ -55,3 +55,14 @@ _Sin patrones registrados aún._
 **útil**: 1
 **estado**: ACTIVO
 **última validación**: 2026-07-11
+
+### Frontera por siguiente símbolo en vez de brace-matching (ownerAt)
+**confianza**: BAJA
+**módulo**: grafo
+**regla**: Para saber a qué símbolo pertenece una línea, o dónde termina un símbolo, NO contar llaves/comillas/comentarios (brace-matching frágil) — usar la frontera del siguiente símbolo indexado: un símbolo "termina" donde empieza el siguiente (line_start del próximo − 1, o fin de archivo). La imprecisión resultante (líneas en blanco entre símbolos) cae hacia el lado seguro: sobra rango, nunca falta.
+**razón**: comparar números de línea es matemática simple e inmune a los bugs de reconocimiento de texto (comillas, CONCURRENTLY, NEGOCIO/HTML — 3 bugs reales del 2026-07-15). Verificado contra datos reales: readConfig en dashboard.cjs da rango 32→145 con el truco; su cierre real está en la 144.
+**detectado por**: aa:aprende (2026-07-15) — el patrón ya vivía en extractCallsWithinFile/ownerAt, .agentic/grafo/ast-indexer.cjs:237
+**aplicado**: 0
+**útil**: 0
+**estado**: ACTIVO
+**última validación**: 2026-07-15

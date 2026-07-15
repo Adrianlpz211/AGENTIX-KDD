@@ -225,6 +225,19 @@ async function init() {
       console.log(chalk.gray('  Para máximo rendimiento instala las build tools:'));
       console.log(chalk.gray('  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n'));
     }
+
+    // Instalar playwright-core para el Browser Gate (usa Chrome/Edge ya
+    // instalados vía channel — no descarga ningún navegador propio)
+    spinner.text = 'Instalando Browser Gate...';
+    try {
+      require('child_process').execSync('npm install playwright-core --save-dev', {
+        stdio: 'pipe', cwd: projectPath
+      });
+      spinner.succeed(chalk.green('Browser Gate instalado (usa tu Chrome/Edge)'));
+    } catch (e) {
+      spinner.warn(chalk.yellow('Browser Gate no disponible (sin playwright-core)'));
+      console.log(chalk.gray('  Instálalo manualmente: npm install playwright-core --save-dev\n'));
+    }
   } catch (err) {
     spinner.fail(chalk.red('Error en la instalación'));
     console.error(chalk.red('\n  ' + err.message + '\n'));

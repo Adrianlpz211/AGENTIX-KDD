@@ -52,6 +52,10 @@ function ensureSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_pb_status ON protected_behaviors(status);
     CREATE INDEX IF NOT EXISTS idx_iv_behavior ON invariant_violations(behavior_id);
   `);
+
+  // v3.13 — anclas de símbolos por behavior (contención por líneas, fase 2 semilla).
+  // ALTER falla si la columna ya existe — silenciado a propósito (patrón del proyecto).
+  try { db.exec(`ALTER TABLE protected_behaviors ADD COLUMN protected_symbols TEXT DEFAULT '[]'`); } catch {}
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -72,25 +76,53 @@ function inferModule(filePaths) {
   return sorted[0]?.[0] || 'global';
 }
 
-function extractFlows(filePaths, projectRoot) {
+function extractFlows(filePaths, projectRoot, db) {
   const flows = [];
-  const methods = ['get', 'post', 'put', 'patch', 'delete'];
-  
+  // v3.13 — MISMO patrón que el endpointPattern de ast-indexer.cjs, carácter a
+  // carácter: el veredicto de contención busca estos flows como symbol_name por
+  // IGUALDAD EXACTA — si el formato difiere en un espacio, nunca se encuentran.
+  // Además arregla un bug real: el patrón viejo solo veía `app.get(...)` — se
+  // perdían TODOS los endpoints declarados con `router.get(...)` (Router()).
+  const endpointRe = /\b(?:router|app)\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g;
+
   filePaths.forEach(fp => {
     const full = path.isAbsolute(fp) ? fp : path.join(projectRoot, fp);
     if (!fs.existsSync(full)) return;
     const content = safe(() => fs.readFileSync(full, 'utf8'), '');
-    
-    methods.forEach(method => {
-      const regex = new RegExp(`app\\.${method}\\(['"\`]([^'"\`]+)`, 'gi');
-      const matches = content.matchAll(regex);
-      for (const m of matches) {
-        flows.push(`${method.toUpperCase()} ${m[1]}`);
+    endpointRe.lastIndex = 0;
+    let m;
+    while ((m = endpointRe.exec(content)) !== null) {
+      flows.push(`${m[1].toUpperCase()} ${m[2]}`);
+    }
+  });
+
+  // Flujos UI (Plan 2, Fase B) — DESDE EL ÍNDICE, jamás con regex propio: una
+  // sola fuente de verdad de nombres (si extractFlows generara los nombres con
+  // su propio regex, cualquier divergencia de un carácter contra el indexador
+  // rompería el JOIN por igualdad — la lección del Plan 1). Formatos estables:
+  //   FORM form#login · SELECT select[name=linea] · REQUIRED input[name=email]
+  if (db) {
+    filePaths.forEach(fp => {
+      const relNorm = String(fp).replace(/\\/g, '/');
+      if (!/\.(html|htm|js|jsx|ts|tsx|vue|svelte)$/i.test(relNorm)) return;
+      for (const k of [relNorm, relNorm.replace(/\//g, '\\')]) {
+        const rows = safe(() => db.prepare(
+          "SELECT symbol_name, kind, signature FROM ast_symbols WHERE file = ? AND kind IN ('form','select','field')"
+        ).all(k)) || [];
+        if (!rows.length) continue;
+        rows.forEach(r => {
+          if (r.kind === 'form') flows.push(`FORM ${r.symbol_name}`);
+          else if (r.kind === 'select') flows.push(`SELECT ${r.symbol_name}`);
+          if ((r.kind === 'field' || r.kind === 'select') && String(r.signature || '').startsWith('[required]')) {
+            flows.push(`REQUIRED ${r.symbol_name}`);
+          }
+        });
+        break;
       }
     });
-  });
-  
-  return [...new Set(flows)].slice(0, 20);
+  }
+
+  return [...new Set(flows)].slice(0, 30);
 }
 
 function inferTestPatterns(filePaths) {
@@ -165,6 +197,170 @@ function runTestFile(testPattern, projectRoot) {
   }
 }
 
+// ─── CONTENCIÓN POR LÍNEAS (v3.13 — números, no palabras) ─────────────────────
+// Responde: "¿las líneas que cambiaste caen DENTRO del rango de algún flow o
+// ancla protegida de este behavior?" — comparación de enteros contra el índice
+// AST, con frescura verificada por hash SHA-256 del contenido en disco.
+//
+// Regla de oro (fail-closed): ante CUALQUIER duda devuelve DOUBT y el caller se
+// comporta EXACTAMENTE como siempre (nivel archivo). Ninguna falla de esta
+// maquinaria puede dejar pasar lo que hoy se detecta — un fallo solo cuesta que
+// la alarma suene como sonaba antes. La degradación (MISS) exige evidencia
+// positiva COMPLETA: hash fresco + todos los anclajes localizados con line_end
+// calculado + diff real presente en TODOS los archivos relacionados tocados
+// (diff vacío = el cambio aún no está aplicado, ej. Step 4 pre-build → DOUBT).
+function lineContainmentVerdict(db, behavior, filesToChange, projectRoot) {
+  const DOUBT = (why) => ({ mode: 'DOUBT', why });
+  try {
+    const norm = f => String(f).replace(/\\/g, '/');
+    const flows   = parseJ(behavior.critical_flows, []);
+    const anchors = parseJ(behavior.protected_symbols, []);
+    if (!flows.length && !anchors.length) return DOUBT('behavior sin flows ni anclas');
+
+    let gitCtx, indexer;
+    try {
+      gitCtx  = require(path.join(__dirname, 'git-context.cjs'));
+      indexer = require(path.join(__dirname, 'ast-indexer.cjs'));
+    } catch { return DOUBT('módulos de soporte no disponibles'); }
+    if (typeof gitCtx.getChangedLines !== 'function') return DOUBT('getChangedLines no disponible');
+
+    const bFiles = parseJ(behavior.related_files, []).map(f => norm(f).toLowerCase());
+    const changedRelated = (filesToChange || [])
+      .map(norm)
+      .filter(fp => bFiles.some(bf => fp.toLowerCase().includes(bf) || bf.includes(fp.toLowerCase())));
+    if (!changedRelated.length) return DOUBT('sin archivos del behavior en el changeset');
+
+    // 1. FRESCURA — el índice debe describir EXACTAMENTE el contenido en disco
+    //    (hash igual). Si difiere, re-indexar (barato, idempotente); si aún
+    //    difiere → DOUBT. La BD puede guardar la ruta con / o \ — probar ambas.
+    for (const rel of changedRelated) {
+      const full = path.isAbsolute(rel) ? rel : path.join(projectRoot, rel);
+      if (!fs.existsSync(full)) return DOUBT(`archivo no existe en disco: ${rel}`);
+      const hashDisco = crypto.createHash('sha256').update(fs.readFileSync(full, 'utf8')).digest('hex');
+      const candidates = [rel, rel.replace(/\//g, '\\')];
+      const lookup = () => {
+        for (const k of candidates) {
+          const r = safe(() => db.prepare('SELECT content_hash FROM ast_symbols WHERE file = ? LIMIT 1').get(k));
+          if (r) return r.content_hash;
+        }
+        return null;
+      };
+      let indexado = lookup();
+      if (indexado !== hashDisco) {
+        safe(() => indexer.indexFile(db, full, projectRoot));
+        indexado = lookup();
+        if (indexado !== hashDisco) return DOUBT(`índice desactualizado para ${rel}`);
+      }
+    }
+
+    // 2. LOCALIZAR cada flow y cada ancla en el índice — igualdad EXACTA de
+    //    symbol_name (nada de LIKE/substring: esa clase de matching de texto ya
+    //    produjo 3 bugs reales el 2026-07-15). Anclaje no localizable → DOUBT.
+    const ubicaciones = [];
+    const dentroDelBehavior = (file) => {
+      const rf = norm(file).toLowerCase();
+      return bFiles.some(bf => rf.includes(bf) || bf.includes(rf));
+    };
+    // Mapeo prefijo→kind (Plan 2, Fase B): los flujos de endpoint usan el flow
+    // COMPLETO como symbol_name ('GET /x'); los flujos UI usan el nombre SIN el
+    // prefijo ('FORM form#login' → símbolo 'form#login' de kind 'form').
+    const FLOW_KINDS = {
+      GET: ['endpoint'], POST: ['endpoint'], PUT: ['endpoint'], DELETE: ['endpoint'],
+      PATCH: ['endpoint'], ANY: ['endpoint'],
+      FORM: ['form'], SELECT: ['select'], REQUIRED: ['field', 'select'],
+    };
+    for (const flow of flows) {
+      const espacio = String(flow).indexOf(' ');
+      const prefijo = espacio > 0 ? String(flow).slice(0, espacio) : '';
+      const kinds = FLOW_KINDS[prefijo];
+      if (!kinds) return DOUBT(`flow con prefijo desconocido: "${flow}"`);
+      const nombre = kinds[0] === 'endpoint' ? String(flow) : String(flow).slice(espacio + 1);
+      const filas = safe(() => db.prepare(
+        `SELECT file, line_start, line_end FROM ast_symbols WHERE kind IN (${kinds.map(() => '?').join(',')}) AND symbol_name = ?`
+      ).all(...kinds, nombre)) || [];
+      const propias = filas.filter(r => dentroDelBehavior(r.file));
+      if (!propias.length) return DOUBT(`flow "${flow}" no localizado en el índice`);
+      for (const r of propias) {
+        if (!r.line_end || r.line_end <= 0) return DOUBT(`line_end sin calcular para "${flow}"`);
+        ubicaciones.push({ etiqueta: flow, fileNorm: norm(r.file).toLowerCase(), start: r.line_start, end: r.line_end });
+      }
+    }
+    for (const a of anchors) {
+      if (!a || !a.symbol_name || !a.kind) continue;
+      const filas = safe(() => db.prepare(
+        'SELECT file, line_start, line_end FROM ast_symbols WHERE kind = ? AND symbol_name = ?'
+      ).all(a.kind, a.symbol_name)) || [];
+      const propias = filas.filter(r =>
+        norm(r.file).toLowerCase() === norm(a.file || '').toLowerCase() || dentroDelBehavior(r.file));
+      if (!propias.length) return DOUBT(`ancla "${a.symbol_name}" no localizada`);
+      for (const r of propias) {
+        if (!r.line_end || r.line_end <= 0) return DOUBT(`line_end sin calcular para ancla "${a.symbol_name}"`);
+        ubicaciones.push({ etiqueta: `${a.kind} ${a.symbol_name}`, fileNorm: norm(r.file).toLowerCase(), start: r.line_start, end: r.line_end });
+      }
+    }
+
+    // 3. LÍNEAS CAMBIADAS (lado NUEVO del diff — la misma "foto" del archivo
+    //    que el índice recién verificado por hash).
+    const hits = [];
+    for (const rel of changedRelated) {
+      const changed = gitCtx.getChangedLines(projectRoot, rel);
+      if (changed === null) return DOUBT(`diff no disponible para ${rel}`);
+      if (!changed.length) return DOUBT(`sin diff en ${rel} — cambio aún no aplicado`);
+      for (const u of ubicaciones) {
+        if (u.fileNorm !== rel.toLowerCase()) continue;
+        const tocadas = changed.filter(l => l >= u.start && l <= u.end);
+        if (tocadas.length) {
+          hits.push({ etiqueta: u.etiqueta, file: rel, start: u.start, end: u.end, lineas: tocadas.slice(0, 10) });
+        }
+      }
+    }
+
+    if (hits.length) return { mode: 'HIT', hits };
+    return { mode: 'MISS', zonas: [...new Set(ubicaciones.map(u => u.etiqueta))].slice(0, 8) };
+  } catch (e) {
+    return { mode: 'DOUBT', why: 'error inesperado: ' + (e && e.message ? e.message : String(e)) };
+  }
+}
+
+// Anclas de símbolos tocados por un ciclo (v3.13 — fase 2 semilla). Guarda
+// NOMBRES estables (file + symbol_name + kind), NUNCA números de línea: las
+// líneas se pudren con cada edición del archivo; se resuelven frescas contra
+// el índice en el momento del check (lineContainmentVerdict).
+function computeTouchedSymbols(db, changedFiles, projectRoot) {
+  const out = [];
+  let gitCtx, indexer;
+  try {
+    gitCtx  = require(path.join(__dirname, 'git-context.cjs'));
+    indexer = require(path.join(__dirname, 'ast-indexer.cjs'));
+  } catch { return out; }
+  if (typeof gitCtx.getChangedLines !== 'function') return out;
+
+  for (const rel of (changedFiles || []).slice(0, 10)) {
+    try {
+      const relNorm = String(rel).replace(/\\/g, '/');
+      const full = path.isAbsolute(rel) ? rel : path.join(projectRoot, rel);
+      if (!fs.existsSync(full)) continue;
+      safe(() => indexer.indexFile(db, full, projectRoot)); // refresca solo si el hash cambió
+      let rows = [];
+      for (const k of [relNorm, relNorm.replace(/\//g, '\\')]) {
+        rows = safe(() => db.prepare(
+          "SELECT file, symbol_name, kind, line_start, line_end FROM ast_symbols WHERE file = ? AND line_end > 0 AND kind IN ('function','class','endpoint','form','select','field')"
+        ).all(k)) || [];
+        if (rows.length) break;
+      }
+      if (!rows.length) continue;
+      const changed = gitCtx.getChangedLines(projectRoot, relNorm);
+      if (!changed || !changed.length) continue;
+      rows.forEach(r => {
+        if (changed.some(l => l >= r.line_start && l <= r.line_end)) {
+          out.push({ file: r.file, symbol_name: r.symbol_name, kind: r.kind });
+        }
+      });
+    } catch {}
+  }
+  return out.slice(0, 30);
+}
+
 // ─── CORE FUNCTIONS ───────────────────────────────────────────────────────────
 
 /**
@@ -185,9 +381,27 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   const mediaConfidence = related.filter(b => b.confidence === 'MEDIA');
   const violations = [];
   const warnings   = [];
+  const notices    = []; // v3.13 — behaviors compartidos cuyas zonas protegidas NO se tocan
 
-  // HIGH confidence → run tests, block if any fail
+  // HIGH confidence → contención por líneas primero (v3.13):
+  //   MISS (evidencia completa: líneas cambiadas fuera de toda zona protegida)
+  //     → no correr tests aquí; NOTICE informativo. verifyAfterTDD (Step 9)
+  //       sigue verificando TODO después del cambio — esto solo degrada el
+  //       pre-check de "terreno verde", que era la fuente de falsas alarmas.
+  //   HIT o DOUBT → exactamente el comportamiento de siempre (correr tests,
+  //       STOP si fallan), con la zona exacta en el mensaje cuando es HIT.
   highConfidence.forEach(behavior => {
+    const verdict = lineContainmentVerdict(db, behavior, filesToChange, projectRoot);
+    if (verdict.mode === 'MISS') {
+      notices.push({
+        behavior: behavior.description, module: behavior.module, confidence: 'HIGH',
+        detalle: `líneas cambiadas fuera de las zonas protegidas [${(verdict.zonas || []).join(', ')}]`,
+      });
+      return;
+    }
+    const zona = verdict.mode === 'HIT'
+      ? verdict.hits.map(h => `${h.etiqueta} (líneas ${h.start}-${h.end})`).join(', ')
+      : null;
     const patterns = parseJ(behavior.test_patterns, []);
     patterns.forEach(pattern => {
       const result = runTestFile(pattern, projectRoot);
@@ -199,17 +413,29 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
           test_pattern: pattern,
           failed:       result.failed,
           confidence:   'HIGH',
+          zona,
         });
       }
     });
   });
 
-  // MEDIA confidence → warn but don't block
+  // MEDIA confidence → warn but don't block (misma contención por líneas)
   mediaConfidence.forEach(behavior => {
+    const verdict = lineContainmentVerdict(db, behavior, filesToChange, projectRoot);
+    if (verdict.mode === 'MISS') {
+      notices.push({
+        behavior: behavior.description, module: behavior.module, confidence: 'MEDIA',
+        detalle: `líneas cambiadas fuera de las zonas protegidas [${(verdict.zonas || []).join(', ')}]`,
+      });
+      return;
+    }
     warnings.push({
       behavior:   behavior.description,
       module:     behavior.module,
       confidence: 'MEDIA',
+      ...(verdict.mode === 'HIT'
+        ? { zona: verdict.hits.map(h => `${h.etiqueta} (líneas ${h.start}-${h.end})`).join(', ') }
+        : {}),
     });
   });
 
@@ -218,10 +444,11 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
       passed:     false,
       violations,
       warnings,
+      notices,
       message:    [
         `🛑 REGRESSION GUARD STOP: ${violations.length} protected behavior(s) at risk:`,
         ...violations.map(v =>
-          `  [HIGH] "${v.behavior}" (${v.module}) — test "${v.test_pattern}" currently failing`
+          `  [HIGH] "${v.behavior}" (${v.module}) — test "${v.test_pattern}" currently failing${v.zona ? ` — tocas ${v.zona}` : ''}`
         ),
         '',
         'Fix the failing tests before modifying these files.',
@@ -233,7 +460,14 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   const result = { passed: true };
   if (warnings.length > 0) {
     result.warnings = warnings;
-    result.message = `⚠️  REGRESSION GUARD WARN: ${warnings.length} MEDIA behavior(s) in changeset path — proceed carefully.`;
+    result.message = `⚠️  REGRESSION GUARD WARN: ${warnings.length} MEDIA behavior(s) in changeset path — proceed carefully.` +
+      warnings.filter(w => w.zona).map(w => `\n  ⚠️  [${w.module}] tocas ${w.zona}`).join('');
+  }
+  if (notices.length > 0) {
+    result.notices = notices;
+    const nl = notices.map(n => `  ℹ️  [${n.confidence}] "${n.behavior}" — ${n.detalle}`).join('\n');
+    result.message = (result.message ? result.message + '\n' : '') +
+      `ℹ️  CONTENCIÓN POR LÍNEAS: ${notices.length} behavior(s) compartido(s) sin tocar sus zonas protegidas:\n${nl}`;
   }
   return result;
 }
@@ -256,7 +490,10 @@ function registerBehavior(db, params) {
 
   const root    = projectRoot || process.cwd();
   const module_ = moduleName || inferModule(changedFiles);
-  const flows   = extractFlows(changedFiles, root);
+  // Plan 2: anchors PRIMERO — computeTouchedSymbols re-indexa los archivos
+  // cambiados (hash-gated), y extractFlows lee los flujos UI de ese índice fresco.
+  const anchors = computeTouchedSymbols(db, changedFiles, root); // v3.13 — nombres estables, nunca líneas
+  const flows   = extractFlows(changedFiles, root, db);
   const tests   = testPassed.length > 0 ? testPassed : inferTestPatterns(changedFiles);
 
   if (module_ === 'global' && changedFiles.length === 0) return null;
@@ -278,6 +515,17 @@ function registerBehavior(db, params) {
     const newCount     = existing.pass_count + 1;
     const newConfidence = newCount >= 5 ? 'HIGH' : 'MEDIA';
 
+    // v3.13 — unir anclas nuevas con las previas (sin duplicar): las
+    // protecciones se acumulan ciclo a ciclo, no se reemplazan.
+    const prev = safe(() => db.prepare('SELECT protected_symbols FROM protected_behaviors WHERE id = ?').get(existing.id));
+    const seenAnchor = new Set();
+    const mergedAnchors = [];
+    [...parseJ(prev && prev.protected_symbols, []), ...anchors].forEach(a => {
+      if (!a || !a.symbol_name) return;
+      const k = `${a.file}|${a.symbol_name}|${a.kind}`.toLowerCase();
+      if (!seenAnchor.has(k)) { seenAnchor.add(k); mergedAnchors.push(a); }
+    });
+
     safe(() =>
       db.prepare(`
         UPDATE protected_behaviors SET
@@ -287,6 +535,7 @@ function registerBehavior(db, params) {
           critical_flows   = ?,
           test_patterns    = ?,
           related_files    = ?,
+          protected_symbols = ?,
           last_verified_at = datetime('now')
         WHERE id = ?
       `).run(
@@ -296,6 +545,7 @@ function registerBehavior(db, params) {
         JSON.stringify(flows),
         JSON.stringify(tests),
         JSON.stringify(changedFiles.slice(0, 10)),
+        JSON.stringify(mergedAnchors.slice(0, 50)),
         existing.id
       )
     );
@@ -308,13 +558,14 @@ function registerBehavior(db, params) {
   safe(() =>
     db.prepare(`
       INSERT OR IGNORE INTO protected_behaviors
-        (id, module, description, critical_flows, test_patterns, related_files, pass_count, confidence)
-      VALUES (?, ?, ?, ?, ?, ?, 1, 'MEDIA')
+        (id, module, description, critical_flows, test_patterns, related_files, protected_symbols, pass_count, confidence)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'MEDIA')
     `).run(
       id, module_, description,
       JSON.stringify(flows),
       JSON.stringify(tests),
-      JSON.stringify(changedFiles.slice(0, 10))
+      JSON.stringify(changedFiles.slice(0, 10)),
+      JSON.stringify(anchors.slice(0, 50))
     )
   );
 
@@ -530,4 +781,6 @@ module.exports = {
   regressionStatus,
   deprecateBehavior,
   fixViolation,
+  lineContainmentVerdict,
+  computeTouchedSymbols,
 };

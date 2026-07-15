@@ -105,6 +105,17 @@ async function update() {
       execSync('npm rebuild better-sqlite3', { stdio: 'pipe', cwd: projectPath });
     } catch(e) {}
 
+    // ── PASO 3b: Instalar playwright-core si falta (Browser Gate) ─────────
+    // Proyectos con Agentix de antes del Browser Gate no lo tienen — se
+    // instala en el update, no bloquea si falla (el gate ya avisa solo).
+    try {
+      require.resolve('playwright-core', { paths: [projectPath] });
+    } catch (e) {
+      try {
+        execSync('npm install playwright-core --save-dev', { stdio: 'pipe', cwd: projectPath });
+      } catch (e2) { /* Browser Gate queda sin usar hasta instalar a mano */ }
+    }
+
     // ── PASO 4: Auto-sync para que el dashboard lea los datos actualizados ──
     spinner.text = 'Syncing knowledge graph...';
     try {

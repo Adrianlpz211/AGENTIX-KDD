@@ -319,6 +319,28 @@ visible en vez de que pase desapercibido. Agregar una regla nueva (otro
 elemento nativo con reemplazo real ya construido) es una entrada más en
 `NATIVE_RULES` dentro del archivo, nada más.
 
+### Browser Gate — verificación mecánica en navegador real
+Hasta ahora "el QA navega y revisa visualmente" era solo una instrucción
+manual (`.cursor/rules/browser-qa.mdc`) que depende de que el agente se
+acuerde de abrir el navegador. Este gate lo hace determinístico: abre el
+dev server en un navegador real, navega, y captura errores de consola +
+errores de página + una captura de pantalla como evidencia.
+
+Comando: `node .agentic/grafo/browser-gate.cjs <url-del-dev-server>`.
+
+Usa `playwright-core` (no `playwright` completo) — por defecto lanza el
+Chrome o Edge YA instalados en la máquina (`channel: 'chrome'`/`'msedge'`),
+sin descargar ningún binario adicional. Si el dev prefiere una copia
+aislada de Playwright (cross-browser real, o no usar su navegador de uso
+diario), corre con `--own` — requiere haber hecho antes
+`npx playwright install chromium` una sola vez; si no está instalada, el
+gate NO la instala solo (evita una descarga de 100-300MB sin que se pida)
+y devuelve el comando exacto a correr.
+
+Solo WARN, nunca STOP — mismo criterio que UI Native Gate: no bloquea el
+pipeline, pero deja el hallazgo (y la captura) visible en el reporte en
+vez de que pase desapercibido.
+
 ## MODO LEGIÓN — sub-agentes en paralelo (v3.9)
 
 La "Iron Legion" de Agentix: en los pasos de **OJOS** (leer/analizar/revisar) el

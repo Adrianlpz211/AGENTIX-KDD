@@ -64,6 +64,54 @@ async function enrich(task) {
   if (!db) return brief;
 
   try {
+    // 1.5. Símbolos de código realmente mencionados (Bloque B + cruce del
+    //    15/07/2026) — hasta ahora el brief decía "ya existe un error resuelto
+    //    sobre login" pero nunca decía EXACTAMENTE qué endpoint/archivo. Dos
+    //    fuentes, ambas precisas (nunca por coincidencia de texto suelto):
+    //    (a) lo que el contexto YA encontrado por recall() menciona de verdad
+    //        (relaciones_semanticas, ya filtrado por backticks en grafo.cjs);
+    //    (b) si la TAREA ACTUAL cita algo entre backticks, match exacto contra
+    //        ast_symbols — misma convención, evita falsos positivos con
+    //        palabras comunes (NEGOCIO/EMBUDO/HTML también son texto normal).
+    try {
+      const titulosContexto = brief.contexto.map(c => `nodo:${c.tipo}:${c.titulo}`);
+      if (titulosContexto.length) {
+        const ph = titulosContexto.map(() => '?').join(',');
+        const menciones = db.prepare(
+          `SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas
+           WHERE tipo='menciona_simbolo' AND desde_entidad IN (${ph})`
+        ).all(...titulosContexto);
+        menciones.forEach(m => {
+          brief.avisos.push(`🔗 El contexto encontrado también menciona ${m.hacia_entidad} (${m.descripcion}).`);
+        });
+      }
+      const tokensTarea = new Set([...task.matchAll(/`([^`]+)`/g)].map(m => m[1].trim()));
+      if (tokensTarea.size) {
+        const simbolos = db.prepare(
+          "SELECT file, kind, symbol_name FROM ast_symbols WHERE kind IN ('endpoint','constant','sql_table','sql_index')"
+        ).all();
+        const encontrados = simbolos.filter(s => tokensTarea.has(s.symbol_name));
+        encontrados.forEach(s => {
+          brief.avisos.push(`🎯 La tarea menciona directamente ${s.kind}:${s.symbol_name} — definido en ${s.file}.`);
+          // Búsqueda INVERSA: qué otras decisiones/errores/patrones ya mencionaron
+          // este MISMO símbolo antes — esto es lo que recall() (búsqueda semántica
+          // por texto) puede no encontrar si la tarea nueva usa palabras distintas
+          // a la entrada vieja, pero el símbolo exacto es la misma prueba dura.
+          try {
+            const haciaEntidad = `${s.kind}:${s.symbol_name}`;
+            const previos = db.prepare(
+              `SELECT DISTINCT desde_entidad FROM relaciones_semanticas
+               WHERE tipo='menciona_simbolo' AND hacia_entidad=?`
+            ).all(haciaEntidad);
+            previos.forEach(p => {
+              const titulo = p.desde_entidad.replace(/^nodo:(error|decision|patron):/, '');
+              brief.avisos.push(`📜 Historial: ${haciaEntidad} ya fue mencionado antes en "${titulo.slice(0,80)}" — revisa si sigue vigente.`);
+            });
+          } catch {}
+        });
+      }
+    } catch { /* cruce de símbolos es un plus, nunca un requisito */ }
+
     // 2. Áreas/módulos relacionados: las que ya aparecieron en el contexto
     //    encontrado, más match directo de palabras de la tarea contra áreas reales.
     const areasEnContexto = [...new Set(brief.contexto.map(c => c.area).filter(Boolean))];

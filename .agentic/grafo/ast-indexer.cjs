@@ -120,6 +120,9 @@ const LANGUAGE_MAP = {
   '.swift': 'swift',
   '.scala': 'scala',
   '.ex': 'elixir', '.exs': 'elixir',
+  '.sql': 'sql',
+  '.html': 'html', '.htm': 'html',
+  '.css': 'css',
 };
 
 function detectLanguage(filePath) {
@@ -149,7 +152,162 @@ const EXTRACTORS = {
   kotlin:     extractJavaKotlin,
   php:        extractPHP,
   ruby:       extractRuby,
+  sql:        extractSQL,
+  html:       extractHTML,
+  css:        extractCSS,
 };
+
+// ─── MINERÍA DE COMENTARIOS SEMÁNTICOS (inspirado en Graphify) ────────────────
+// // NOTE: / WHY: / HACK: / FIXME: (o su equivalente con #) ya son la forma en
+// que un dev deja el "por qué" de una decisión mientras codea. Hoy esa
+// intención se pierde si nadie la copia a mano a decisiones.md — esto la
+// convierte en nodo del grafo automáticamente, sin depender del LLM.
+// Genérico por diseño: aplica igual a cualquier lenguaje ya soportado arriba,
+// no requiere un extractor propio por lenguaje (// y # cubren JS/TS/Go/Rust/
+// Java/Kotlin/PHP/Ruby y Python/Ruby respectivamente).
+const COMMENT_MARKER_PATTERN = /(?:\/\/|#)\s*(NOTE|WHY|HACK|FIXME)\s*:\s*(.+)/i;
+
+function extractCommentMarkers(content) {
+  const symbols = [];
+  const lineas = content.split('\n');
+  lineas.forEach((linea, i) => {
+    const m = COMMENT_MARKER_PATTERN.exec(linea);
+    if (!m) return;
+    const marker = m[1].toLowerCase();
+    const texto = m[2].trim().slice(0, 200);
+    // symbol_name lleva la línea para no colisionar con otro marcador del
+    // mismo tipo en el mismo archivo (la unique index es file+symbol_name+kind)
+    const slug = texto.slice(0, 40).replace(/\s+/g, ' ');
+    symbols.push({
+      symbol_name: `L${i + 1}: ${slug}`,
+      kind: marker, // note | why | hack | fixme
+      line_start: i + 1,
+      exported: 0,
+      signature: texto,
+    });
+  });
+  return symbols;
+}
+
+// ─── HTML — la materia del UI como nodos reales (Plan 2, Fase A: Ojos) ────────
+// Los dos bugs de Salud360 (combobox que rompió selects existentes; CSS que
+// rompió validaciones required) se colaron porque forms/selects/required eran
+// INVISIBLES para el grafo. Estos extractores les dan existencia como símbolos:
+//   form   → kind 'form'   (line_end = primer </form> posterior — válido SOLO
+//            para form porque HTML prohíbe forms anidados; NO generalizar)
+//   select → kind 'select' (kind propio: es exactamente el caso del bug #1)
+//   input/textarea → kind 'field'
+// required se detecta EXACTO (/\srequired(?=[\s=>/])/i — un class="required"
+// NO es un campo required) y viaja como marcador [required] en el signature.
+function extractHTML(content, _filePath) {
+  const symbols = [], edges = [];
+  let m;
+
+  const formPat = /<form\b[^>]*>/gi;
+  while ((m = formPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    const tag = m[0];
+    const id = tag.match(/\bid\s*=\s*["']([^"']+)["']/i);
+    const name = tag.match(/\bname\s*=\s*["']([^"']+)["']/i);
+    const symbol_name = id ? `form#${id[1]}` : (name ? `form[name=${name[1]}]` : `form@L${line}`);
+    const closeIdx = content.indexOf('</form>', m.index);
+    const line_end = closeIdx >= 0 ? content.substring(0, closeIdx).split('\n').length : line;
+    symbols.push({ symbol_name, kind: 'form', line_start: line, line_end, exported: 1, signature: tag.slice(0, 150) });
+  }
+
+  const fieldPat = /<(input|select|textarea)\b[^>]*>/gi;
+  while ((m = fieldPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    const tag = m[0];
+    const base = m[1].toLowerCase();
+    const kind = base === 'select' ? 'select' : 'field';
+    const name = tag.match(/\bname\s*=\s*["']([^"']+)["']/i);
+    const id = tag.match(/\bid\s*=\s*["']([^"']+)["']/i);
+    const symbol_name = name ? `${base}[name=${name[1]}]` : (id ? `${base}#${id[1]}` : `${base}@L${line}`);
+    const line_end = content.substring(0, m.index + tag.length).split('\n').length;
+    const esRequired = /\srequired(?=[\s=>/])/i.test(tag);
+    symbols.push({
+      symbol_name, kind, line_start: line, line_end, exported: 0,
+      signature: (esRequired ? '[required] ' : '') + tag.slice(0, 140),
+    });
+  }
+
+  extractUsesClass(content, edges);
+  return { symbols, edges };
+}
+
+// ─── CSS — clases e ids definidos como nodos (Plan 2, Fase A) ─────────────────
+// Solo CABEZAS de selector (lo que precede a '{') — jamás propiedades: indexar
+// color/margin/etc. es ruido puro que infla la tabla sin anclar nada.
+function extractCSS(content, _filePath) {
+  const symbols = [], edges = [];
+  const selPat = /(^|\})([^{}]+)\{/g;
+  const seen = new Set();
+  let m;
+  while ((m = selPat.exec(content)) !== null) {
+    const head = m[2];
+    const headOffset = m.index + m[1].length;
+    let cm;
+    const clsPat = /\.(-?[A-Za-z_][\w-]*)/g;
+    while ((cm = clsPat.exec(head)) !== null) {
+      if (seen.has('c|' + cm[1])) continue;
+      seen.add('c|' + cm[1]);
+      const line = content.substring(0, headOffset + cm.index).split('\n').length;
+      symbols.push({ symbol_name: cm[1], kind: 'css_class', line_start: line, exported: 1 });
+    }
+    const idPat = /#(-?[A-Za-z_][\w-]*)/g;
+    while ((cm = idPat.exec(head)) !== null) {
+      if (seen.has('i|' + cm[1])) continue;
+      seen.add('i|' + cm[1]);
+      const line = content.substring(0, headOffset + cm.index).split('\n').length;
+      symbols.push({ symbol_name: cm[1], kind: 'css_id', line_start: line, exported: 1 });
+    }
+  }
+  return { symbols, edges };
+}
+
+// Clases CSS usadas por un archivo (class="..." / className="...") → edges
+// USES_CLASS con to_file NULL; la pasada de enlace post-index (linkCssEdges)
+// resuelve a qué archivo CSS apunta cada una. Esto es el blast radius del CSS:
+// "este .css lo usan estas vistas" — el bug #2 de Salud360 era invisible sin esto.
+function extractUsesClass(content, edges) {
+  const classAttrPat = /\bclass(?:Name)?\s*=\s*["'`]([^"'`]+)["'`]/gi;
+  const vistos = new Set();
+  let m;
+  while ((m = classAttrPat.exec(content)) !== null) {
+    m[1].split(/\s+/).filter(Boolean).slice(0, 50).forEach(cls => {
+      if (!/^-?[A-Za-z_][\w-]*$/.test(cls) || vistos.has(cls)) return;
+      vistos.add(cls);
+      edges.push({ kind: 'USES_CLASS', to_symbol: cls, from_symbol: null, weight: 0.5 });
+    });
+  }
+}
+
+// ─── SQL — esquemas como nodos reales (antes solo vivían como texto plano) ────
+function extractSQL(content, _filePath) {
+  const symbols = [], edges = [];
+  let m;
+
+  const tablePat = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"[]?\w+[`"\]]?)/gi;
+  while ((m = tablePat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    const nombre = m[1].replace(/[`"[\]]/g, '');
+    symbols.push({ symbol_name: nombre, kind: 'sql_table', line_start: line, exported: 1 });
+  }
+
+  // Bug real encontrado el 15/07/2026 probando contra SQL real de Lumo: los
+  // nombres suelen venir entre comillas ("NegocioLinea_negocioId_idx") y a
+  // veces con CONCURRENTLY entre INDEX e IF NOT EXISTS (Postgres). \w+ no
+  // puede empezar en una comilla, así que el regex retrocedía y capturaba
+  // "IF" o "CONCURRENTLY" como si fueran el nombre del índice.
+  const indexPat = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"[]?(\w+)[`"\]]?/gi;
+  while ((m = indexPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: m[1], kind: 'sql_index', line_start: line, exported: 0 });
+  }
+
+  return { symbols, edges };
+}
 
 // ─── EDGES CALLS (función-a-función, DENTRO del mismo archivo) ────────────────
 // Heurística por regex + ventana de líneas — NO es un parser real. Solo
@@ -200,9 +358,141 @@ function extractCallsWithinFile(content, knownSymbols) {
   return edges;
 }
 
+// ─── BLANQUEO DE TEMPLATE LITERALS (Plan 3 — hallazgo de la medición) ─────────
+// La comparación contra tree-sitter (2026-07-15, 2181 símbolos de lumoV2)
+// encontró que los ÚNICOS 4 casos donde el rango regex se queda CORTO
+// (dirección peligrosa) eran template literals gigantes con código incrustado
+// (const HTML = `...<script>function x(){}...`): las líneas del código
+// embebido matcheaban los patrones ^-anclados y creaban símbolos FANTASMA que
+// recortaban el rango del símbolo real. Solución en la capa regex — sin
+// tree-sitter: reemplazar el interior de los template literals por espacios
+// ANTES de extraer símbolos, preservando saltos de línea (los números de
+// línea no se mueven: misma longitud, mismos \n).
+// Nota honesta: un backtick suelto dentro de un string normal o comentario
+// puede abrir el estado hasta el próximo backtick — el peor caso es perder un
+// símbolo del índice (igual que si el regex no lo viera hoy) y el guardia
+// cierra el portón por DOUBT. Nunca peor que hoy.
+function blankTemplateLiterals(content) {
+  const out = Array.from(content);
+  const stack = []; // -1 = cuerpo de template; n>=1 = profundidad de llaves dentro de ${ }
+  // Fuera de los templates hay un lexer-lite: strings ('/") y comentarios
+  // (// y /* */) se RECORREN sin blanquear pero sus backticks NO abren
+  // template — la primera versión de esta función no los entendía y un
+  // backtick suelto en un comentario invertía la fase: se tragó 292 símbolos
+  // reales de lumoV2 (medido contra tree-sitter el 2026-07-15). La ambigüedad
+  // restante (backtick dentro de un regex literal) es rarísima y su peor caso
+  // es perder un símbolo del índice — el guardia cierra por DOUBT, nunca peor
+  // que hoy.
+  let mode = 'code'; // code | sq | dq | line | block — solo aplica FUERA de templates
+  let prev = '';     // último char significativo en modo code (para regex vs división)
+  let i = 0;
+  const n = content.length;
+  while (i < n) {
+    const c = content[i];
+    const d = i + 1 < n ? content[i + 1] : '';
+    const top = stack.length ? stack[stack.length - 1] : null;
+
+    if (top === null) {                 // fuera de template: lexer-lite
+      if (mode === 'code') {
+        if (c === '`') { stack.push(-1); i++; continue; }
+        if (c === "'") { mode = 'sq'; i++; continue; }
+        if (c === '"') { mode = 'dq'; i++; continue; }
+        if (c === '/' && d === '/') { mode = 'line'; i += 2; continue; }
+        if (c === '/' && d === '*') { mode = 'block'; i += 2; continue; }
+        if (c === '/' && d !== ' ' && d !== '=' && /[(,=:[!&|?{;+\-*%<>~^]/.test(prev || '(')) {
+          // d !== ' ': una división formateada (`= ancho / 2`) tiene espacio
+          // tras el slash y NO es regex — sin esta regla, cada división tras
+          // `=` desincronizaba el lexer (medido: flow-builder.js perdía 149
+          // símbolos por sus cálculos de UI). Nadie escribe regexes /  .../
+          // con espacio inicial; d !== '=' descarta el operador /=.
+          // LITERAL DE REGEX (el / está en posición de operando). Cazado en
+          // vivo: `.replace(/\`/g, '&#96;')` de escHtml — el backtick dentro
+          // del regex abría un template fantasma y se tragaba el resto del
+          // archivo (readConfig y 291 símbolos más, medido contra
+          // tree-sitter). Consumir hasta el / de cierre respetando escapes y
+          // clases de caracteres; \n = rescate (regex roto, seguir normal).
+          i++;
+          let inClass = false;
+          while (i < n) {
+            const rc = content[i];
+            if (rc === '\\') { i += 2; continue; }
+            if (rc === '\n') break;
+            if (rc === '[') inClass = true;
+            else if (rc === ']') inClass = false;
+            else if (rc === '/' && !inClass) { i++; break; }
+            i++;
+          }
+          prev = '/';
+          continue;
+        }
+        if (!/\s/.test(c)) prev = c;
+        i++; continue;
+      }
+      if (mode === 'sq') {
+        if (c === '\\') { i += 2; continue; }
+        if (c === "'" || c === '\n') mode = 'code';
+        i++; continue;
+      }
+      if (mode === 'dq') {
+        if (c === '\\') { i += 2; continue; }
+        if (c === '"' || c === '\n') mode = 'code';
+        i++; continue;
+      }
+      if (mode === 'line') {
+        if (c === '\n') mode = 'code';
+        i++; continue;
+      }
+      // block comment
+      if (c === '*' && d === '/') { mode = 'code'; i += 2; continue; }
+      i++; continue;
+    }
+
+    if (top === -1) {                   // cuerpo del template
+      if (c === '\\') {
+        out[i] = ' ';
+        if (i + 1 < n && content[i + 1] !== '\n') out[i + 1] = ' ';
+        i += 2;
+        continue;
+      }
+      if (c === '`') {
+        stack.pop();
+        if (stack.length) out[i] = ' '; // backtick de template ANIDADO: también se blanquea
+        i++;
+        continue;
+      }
+      if (c === '$' && content[i + 1] === '{') {
+        out[i] = ' '; out[i + 1] = ' ';
+        stack.push(1);
+        i += 2;
+        continue;
+      }
+      if (c !== '\n') out[i] = ' ';
+      i++;
+      continue;
+    }
+    // top >= 1 → dentro de ${ ... } (también es código embebido, se blanquea)
+    if (c === '`') { stack.push(-1); out[i] = ' '; i++; continue; }
+    if (c === '{') stack[stack.length - 1]++;
+    else if (c === '}') {
+      stack[stack.length - 1]--;
+      if (stack[stack.length - 1] === 0) { stack.pop(); out[i] = ' '; i++; continue; }
+    }
+    if (c !== '\n') out[i] = ' ';
+    i++;
+  }
+  return out.join('');
+}
+
 function extractJS(content, filePath) {
   const symbols = [];
   const edges   = [];
+
+  // Vista "solo código" para los patrones de símbolos/endpoints/calls — el
+  // contenido de los template literals queda en blanco (mismas líneas, sin
+  // texto). extractUsesClass usa el contenido CRUDO más abajo: las clases CSS
+  // de las vistas viven justamente DENTRO de esos templates.
+  const rawContent = content;
+  content = blankTemplateLiterals(content);
 
   // Imports/requires
   const importPatterns = [
@@ -260,9 +550,58 @@ function extractJS(content, filePath) {
     symbols.push({ symbol_name: m[1], kind: 'type', line_start: line, exported: 1 });
   }
 
+  // Enum (TypeScript) — símbolo granular que antes no se distinguía de 'class'
+  const enumPattern = /^(?:export\s+)?(?:const\s+)?enum\s+(\w+)/gm;
+  while ((m = enumPattern.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: m[1], kind: 'enum', line_start: line, exported: /^export/.test(m[0]) ? 1 : 0 });
+  }
+
+  // Constantes reales (convención SCREAMING_SNAKE_CASE) — deliberadamente NO
+  // se intenta capturar toda declaración `const`, porque ya colisionaría con
+  // los arrow functions que fnPatterns extrae como 'function'. Este patrón
+  // solo dispara con nombres en mayúsculas, que por convención nunca son
+  // funciones — cero riesgo de duplicar el mismo símbolo con dos 'kind'.
+  // (?:\s*:[^=\n]*)? — anotación de tipo TS opcional (Plan 3, hallazgo de la
+  // medición): `export const PLAN_LIMITS: Record<...> =` no matcheaba porque
+  // el patrón exigía el `=` inmediatamente después del nombre.
+  const constPattern = /^(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)(?:\s*:[^=\n]*)?\s*=/gm;
+  while ((m = constPattern.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: m[1], kind: 'constant', line_start: line, exported: /^export/.test(m[0]) ? 1 : 0 });
+  }
+
+  // Endpoints de API (Express-style) como nodos reales del grafo — antes solo
+  // vivían como heurística recalculada en vivo por el dashboard (endpoint≈),
+  // nunca como símbolo persistido. Mismo patrón que ya usa dashboard.cjs.
+  // v3.13 (Plan 4): + fastify (mismo estilo de registro que router/app).
+  const endpointPattern = /\b(?:router|app|fastify)\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g;
+  while ((m = endpointPattern.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `${m[1].toUpperCase()} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
+  }
+
+  // NestJS (Plan 4): @Controller('prefix') + @Get('sub') → 'GET /prefix/sub'.
+  // Gate: solo si el archivo tiene @Controller — un @Get suelto sin controller
+  // puede ser otro decorador y produciría endpoints fantasma.
+  const ctrlMatch = content.match(/@Controller\s*\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/);
+  if (ctrlMatch) {
+    const ctrlPrefix = ('/' + (ctrlMatch[1] || '')).replace(/\/+/g, '/');
+    const nestPattern = /@(Get|Post|Put|Delete|Patch)\s*\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/g;
+    while ((m = nestPattern.exec(content)) !== null) {
+      const line = content.substring(0, m.index).split('\n').length;
+      const ruta = ((ctrlPrefix + (m[2] ? '/' + m[2] : '')) || '/').replace(/\/+/g, '/');
+      symbols.push({ symbol_name: `${m[1].toUpperCase()} ${ruta}`, kind: 'endpoint', line_start: line, exported: 1 });
+    }
+  }
+
   const callableSymbols = symbols.filter(s => s.kind === 'function' || s.kind === 'class');
   const callEdges = extractCallsWithinFile(content, callableSymbols);
   edges.push(...callEdges);
+
+  // Plan 2 (Fase A): clases CSS usadas en JSX/templates de este archivo JS —
+  // sobre el contenido CRUDO (las class= de los templates son justo lo que buscamos)
+  extractUsesClass(rawContent, edges);
 
   return { symbols, edges };
 }
@@ -280,6 +619,32 @@ function extractPython(content, _filePath) {
   while ((m = defPat.exec(content)) !== null) {
     const line = content.substring(0, m.index).split('\n').length;
     symbols.push({ symbol_name: m[2], kind: m[1] === 'class' ? 'class' : 'function', line_start: line, exported: 0, signature: m[0].trim() });
+  }
+
+  // Endpoints Python (Plan 4) — mismo símbolo normalizado 'METHOD /ruta':
+  // Flask: @app.route('/x', methods=['GET','POST']) → un endpoint por método (ANY sin methods)
+  const flaskPat = /@\w+\.route\s*\(\s*['"]([^'"]+)['"]\s*(?:,[^)]*methods\s*=\s*\[([^\]]*)\])?/g;
+  while ((m = flaskPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    const methods = m[2]
+      ? m[2].split(',').map(s => s.replace(/['"\s]/g, '').toUpperCase()).filter(Boolean)
+      : ['ANY'];
+    methods.forEach(met => symbols.push({ symbol_name: `${met} ${m[1]}`, kind: 'endpoint', line_start: line, exported: 1 }));
+  }
+  // FastAPI: @app.get('/x') / @router.post('/x')
+  const fastapiPat = /@\w+\.(get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]/g;
+  while ((m = fastapiPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `${m[1].toUpperCase()} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
+  }
+  // Django: path('x/', view) — solo en urls.py (path() es nombre común; fuera
+  // de urls.py produciría endpoints fantasma)
+  if (/urls\.py$/i.test(String(_filePath || ''))) {
+    const djangoPat = /\bpath\s*\(\s*['"]([^'"]+)['"]/g;
+    while ((m = djangoPat.exec(content)) !== null) {
+      const line = content.substring(0, m.index).split('\n').length;
+      symbols.push({ symbol_name: ('ANY /' + m[1]).replace(/\/+/g, '/'), kind: 'endpoint', line_start: line, exported: 1 });
+    }
   }
 
   return { symbols, edges };
@@ -305,6 +670,18 @@ function extractGo(content, _filePath) {
   while ((m = typePat.exec(content)) !== null) {
     const line = content.substring(0, m.index).split('\n').length;
     symbols.push({ symbol_name: m[1], kind: m[2], line_start: line, exported: /^[A-Z]/.test(m[1]) ? 1 : 0 });
+  }
+
+  // Endpoints Go (Plan 4): gin/echo r.GET("/x", ...) + net/http HandleFunc("/x", ...)
+  const ginPat = /\.\s*(GET|POST|PUT|DELETE|PATCH)\s*\(\s*"([^"]+)"/g;
+  while ((m = ginPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `${m[1]} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
+  }
+  const handleFuncPat = /\bHandleFunc\s*\(\s*"([^"]+)"/g;
+  while ((m = handleFuncPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `ANY ${m[1]}`, kind: 'endpoint', line_start: line, exported: 1 });
   }
 
   return { symbols, edges };
@@ -360,6 +737,13 @@ function extractJavaKotlin(content, filePath) {
     symbols.push({ symbol_name: m[1], kind: 'function', line_start: line, exported: 0 });
   }
 
+  // Endpoints Spring (Plan 4): @GetMapping("/x") / @PostMapping(value = "/x")
+  const springPat = /@(Get|Post|Put|Delete|Patch)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]/g;
+  while ((m = springPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `${m[1].toUpperCase()} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
+  }
+
   return { symbols, edges };
 }
 
@@ -382,6 +766,13 @@ function extractPHP(content, _filePath) {
   while ((m = fnPat.exec(content)) !== null) {
     const line = content.substring(0, m.index).split('\n').length;
     symbols.push({ symbol_name: m[1], kind: 'function', line_start: line, exported: 0 });
+  }
+
+  // Endpoints Laravel (Plan 4): Route::get('/x', ...)
+  const laravelPat = /Route::(get|post|put|patch|delete)\s*\(\s*['"]([^'"]+)['"]/g;
+  while ((m = laravelPat.exec(content)) !== null) {
+    const line = content.substring(0, m.index).split('\n').length;
+    symbols.push({ symbol_name: `${m[1].toUpperCase()} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
   }
 
   return { symbols, edges };
@@ -409,6 +800,16 @@ function extractRuby(content, _filePath) {
     symbols.push({ symbol_name: m[1], kind: 'function', line_start: line, exported: 0 });
   }
 
+  // Endpoints Rails (Plan 4): get '/x' — solo en routes.rb (fuera del DSL de
+  // rutas, un "get 'x'" suelto sería otra cosa)
+  if (/routes\.rb$/i.test(String(_filePath || ''))) {
+    const railsPat = /^[ \t]*(get|post|put|patch|delete)\s+['"]([^'"]+)['"]/gm;
+    while ((m = railsPat.exec(content)) !== null) {
+      const line = content.substring(0, m.index).split('\n').length;
+      symbols.push({ symbol_name: `${m[1].toUpperCase()} ${m[2]}`, kind: 'endpoint', line_start: line, exported: 1 });
+    }
+  }
+
   return { symbols, edges };
 }
 
@@ -428,6 +829,57 @@ async function tryTreeSitter(content, language) {
   } catch {
     return { available: false, tree: null };
   }
+}
+
+// ─── LINE_END: FRONTERA POR SIGUIENTE SÍMBOLO (v3.13 — Plan 1) ────────────────
+// Un símbolo "termina" donde empieza el siguiente símbolo de frontera — el
+// mismo criterio ownerAt de extractCallsWithinFile, ahora persistido en la BD.
+// NUNCA se cuentan llaves: strings/comentarios/template literals hacen frágil
+// el brace-matching; comparar números de línea no se confunde con texto.
+//
+// Solo son FRONTERA los kinds cuyo regex está anclado a inicio de línea (^…gm):
+// los demás (endpoint, markers note/why/hack/fixme) pueden vivir DENTRO de un
+// cuerpo — usarlos como frontera recortaría rangos en la dirección PELIGROSA
+// (faltaría rango en vez de sobrar). La imprecisión resultante (líneas en
+// blanco entre símbolos quedan dentro del rango) cae hacia el lado seguro:
+// un guardia que revisa de más, nunca de menos.
+const BOUNDARY_KINDS = new Set(['function', 'class', 'interface', 'type', 'enum', 'constant', 'struct']);
+
+function computeLineEnds(symbols, content) {
+  const totalLineas = content.split('\n').length;
+
+  const fronteras = symbols
+    .filter(s => BOUNDARY_KINDS.has(s.kind) && s.line_start > 0)
+    .sort((a, b) => a.line_start - b.line_start);
+  for (let i = 0; i < fronteras.length; i++) {
+    fronteras[i].line_end = i + 1 < fronteras.length
+      ? Math.max(fronteras[i + 1].line_start - 1, fronteras[i].line_start)
+      : totalLineas;
+  }
+
+  // Endpoints: hasta el próximo endpoint o la próxima frontera, lo que llegue
+  // antes — cubre el handler inline de router.get('/x', async (req,res)=>{…}).
+  const endpoints = symbols
+    .filter(s => s.kind === 'endpoint' && s.line_start > 0)
+    .sort((a, b) => a.line_start - b.line_start);
+  const cortes = [...endpoints, ...fronteras].map(s => s.line_start).sort((a, b) => a - b);
+  for (const ep of endpoints) {
+    const siguiente = cortes.find(l => l > ep.line_start);
+    ep.line_end = siguiente ? Math.max(siguiente - 1, ep.line_start) : totalLineas;
+  }
+
+  // SQL: cada tabla/índice termina donde empieza el siguiente símbolo SQL.
+  const sqlSyms = symbols
+    .filter(s => (s.kind === 'sql_table' || s.kind === 'sql_index') && s.line_start > 0)
+    .sort((a, b) => a.line_start - b.line_start);
+  for (let i = 0; i < sqlSyms.length; i++) {
+    sqlSyms[i].line_end = i + 1 < sqlSyms.length
+      ? Math.max(sqlSyms[i + 1].line_start - 1, sqlSyms[i].line_start)
+      : totalLineas;
+  }
+
+  // Todo lo demás (markers, etc.): línea única.
+  symbols.forEach(s => { if (!s.line_end) s.line_end = s.line_start || 0; });
 }
 
 // ─── INDEXAR UN ARCHIVO ───────────────────────────────────────────────────────
@@ -458,6 +910,8 @@ function indexFile(db, filePath, projectRoot) {
   if (!extractor) return { skipped: true };
 
   const { symbols, edges } = extractor(content, filePath);
+  symbols.push(...extractCommentMarkers(content));
+  computeLineEnds(symbols, content);
 
   // Limpiar registros anteriores
   try {
@@ -466,15 +920,17 @@ function indexFile(db, filePath, projectRoot) {
   } catch {}
 
   // Insertar símbolos
+  // line_end incluido (v3.13): la columna existía en el schema desde v1 pero el
+  // INSERT la omitía — aunque alguien la calculara, jamás se escribía.
   const insertSym = db.prepare(`
     INSERT OR REPLACE INTO ast_symbols
-      (file, language, symbol_name, kind, line_start, exported, signature, content_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (file, language, symbol_name, kind, line_start, line_end, exported, signature, content_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const sym of symbols) {
     try {
-      insertSym.run(relPath, language, sym.symbol_name, sym.kind, sym.line_start || 0, sym.exported || 0, sym.signature || null, hash);
+      insertSym.run(relPath, language, sym.symbol_name, sym.kind, sym.line_start || 0, sym.line_end || 0, sym.exported || 0, sym.signature || null, hash);
     } catch {}
   }
 
@@ -527,6 +983,36 @@ function indexFile(db, filePath, projectRoot) {
   }
 
   return { symbols: symbols.length, edges: edges.length, language };
+}
+
+// ─── ENLACE CSS→VISTA (Plan 2, Fase A) ────────────────────────────────────────
+// Resuelve to_file de los edges USES_CLASS pendientes buscando qué archivo(s)
+// CSS definen cada clase (igualdad EXACTA de symbol_name — nada de LIKE).
+// Clase definida en 2+ archivos CSS → un edge por cada definición.
+function linkCssEdges(db) {
+  let pend;
+  try {
+    pend = db.prepare("SELECT id, from_file, from_symbol, to_symbol, weight FROM ast_edges WHERE kind = 'USES_CLASS' AND to_file IS NULL").all();
+  } catch { return { linked: 0 }; }
+  if (!pend || !pend.length) return { linked: 0 };
+
+  let linked = 0;
+  for (const e of pend) {
+    let defs;
+    try {
+      defs = db.prepare("SELECT DISTINCT file FROM ast_symbols WHERE kind = 'css_class' AND symbol_name = ?").all(e.to_symbol);
+    } catch { continue; }
+    if (!defs || !defs.length) continue;
+    try {
+      db.prepare('UPDATE ast_edges SET to_file = ? WHERE id = ?').run(defs[0].file, e.id);
+      linked++;
+      for (let i = 1; i < defs.length; i++) {
+        db.prepare('INSERT INTO ast_edges (from_file, to_file, from_symbol, to_symbol, kind, weight) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(e.from_file, defs[i].file, e.from_symbol, e.to_symbol, 'USES_CLASS', e.weight);
+      }
+    } catch {}
+  }
+  return { linked };
 }
 
 // ─── PAGERANK ─────────────────────────────────────────────────────────────────
@@ -688,6 +1174,13 @@ function indexProject(projectRoot, targetDir = null) {
   }
 
   process.stdout.write('\n');
+  // Pasada de enlace CSS→vista (Plan 2, Fase A): los edges USES_CLASS nacen con
+  // to_file NULL (al extraer una vista no se sabe qué CSS define la clase) —
+  // aquí, con TODO indexado, se resuelven por igualdad exacta de symbol_name.
+  try {
+    const cssLink = linkCssEdges(db);
+    if (cssLink.linked) console.log(`[AST-INDEXER] ${cssLink.linked} edges CSS→vista enlazados`);
+  } catch {}
   console.log('[AST-INDEXER] Calculando PageRank...');
   computePageRank(db);
 

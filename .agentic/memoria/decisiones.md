@@ -43,6 +43,38 @@ Impacto: config/plans.json (trialDays: 14 → 7) en las 6 copias. src/billing.js
          con trialEndDate() que el nuevo período da exactamente 7 días.
 Estado: ACTIVO — 🔒 LOCKED: no cambiar sin aprobación explícita del owner.
 
+## [2026-07-15] Estrategia de dos capas en AST indexer — la capa 2 nunca se conectó
+Decisión: (inferida del código) el indexador AST se diseñó con dos capas: regex
+          fallback siempre disponible + tree-sitter opcional para precisión —
+          pero solo la capa 1 se implementó de punta a punta; la capa 2 quedó
+          como wrapper sin invocar.
+Razón: la capa regex cubre 12+ lenguajes sin dependencias; el costo real de
+       tree-sitter (peso de grammars + escribir extracción por lenguaje) se
+       pospuso indefinidamente.
+Contexto: aa:aprende (2026-07-15), investigando por qué line_end nunca se llena.
+          La cabecera de ast-indexer.cjs declara la estrategia; tryTreeSitter
+          existe pero sin llamadas ni dependencias instaladas.
+Alternativas descartadas: desconocidas — inferido del código, verificar con el equipo.
+Impacto: toda la precisión actual del grafo AST (símbolos, edges, PageRank,
+         análisis de impacto) sale del fallback regex. Cualquier mejora de
+         precisión debe o conectarse a la capa 2 o diseñarse para la capa 1.
+
+## [2026-07-15] Tree-sitter por vía WASM, no nativa — evita compilación en Windows
+Decisión: (inferida del código) si algún día se conecta tree-sitter, la vía
+          elegida en el wrapper es web-tree-sitter + grammars .wasm — NO el
+          binding nativo (node-gyp).
+Razón: los binarios nativos ya causaron dolor real en este proyecto en Windows
+       (tar, better-sqlite3 relegado a optionalDependency); WASM instala sin
+       compilar nada en la máquina del usuario.
+Contexto: aa:aprende (2026-07-15) — tryTreeSitter en ast-indexer.cjs:504 usa
+          require('web-tree-sitter') y busca grammars en tree-sitter-wasms/out/.
+Alternativas descartadas:
+  - tree-sitter nativo: requiere toolchain de compilación — la pared "cara"
+  - parser JS puro (@babel/parser): exacto y liviano pero solo JS/TS, no los
+    12 lenguajes que el indexador soporta
+Impacto: si se retoma la fase 2 de precisión, arrancar por web-tree-sitter +
+         tree-sitter-wasms, no por el binding nativo.
+
 ---
 
 ## Ejemplos de cómo se verá este archivo:

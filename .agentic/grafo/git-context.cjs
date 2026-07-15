@@ -407,6 +407,46 @@ fi
   } catch(e) { return false; }
 }
 
+// ─── LÍNEAS CAMBIADAS DE UN ARCHIVO (v3.13 — contención por líneas) ───────────
+// Devuelve los números de línea del lado NUEVO del diff (el archivo en disco)
+// que el working tree cambió respecto a HEAD, o:
+//   []   → el archivo no tiene cambios reales
+//   null → DUDA (git falla, archivo untracked/nuevo, output no parseable) —
+//          el caller debe caer al comportamiento por archivo completo.
+// Regla de coordenadas: lado NUEVO (+) porque el índice AST — verificado por
+// hash — describe el archivo EN DISCO, que es exactamente ese lado del diff.
+// Borrados puros (d=0) marcan la costura [c, c+1] — generoso hacia el lado seguro.
+function getChangedLines(projectPath, file) {
+  try {
+    const fileNorm = String(file).replace(/\\/g, '/');
+    const out = execSync(`git diff HEAD --unified=0 -- "${fileNorm}"`, {
+      cwd: projectPath, stdio: 'pipe', timeout: 10000,
+    }).toString();
+
+    if (!out.trim()) {
+      // Sin diff: o no cambió, o es untracked (git diff no lo ve — sin base
+      // contra qué comparar → null, nunca adivinar).
+      const untracked = execSync('git ls-files --others --exclude-standard', {
+        cwd: projectPath, stdio: 'pipe', timeout: 10000,
+      }).toString().split('\n').map(s => s.trim().replace(/\\/g, '/')).filter(Boolean);
+      return untracked.includes(fileNorm) ? null : [];
+    }
+
+    const lineas = [];
+    const hunkRe = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
+    let m;
+    while ((m = hunkRe.exec(out)) !== null) {
+      const start = parseInt(m[1], 10);
+      const count = m[2] === undefined ? 1 : parseInt(m[2], 10);
+      if (count === 0) lineas.push(start, start + 1);
+      else for (let i = 0; i < count; i++) lineas.push(start + i);
+    }
+    return [...new Set(lineas)].filter(l => l > 0).sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
+}
+
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 if (require.main === module) {
   const projectPath = process.cwd();
@@ -446,6 +486,7 @@ module.exports = {
   formatearReporte,
   instalarHook,
   getDiff,
+  getChangedLines,
   getCommitsRecientes,
   getRamaActual,
   gitDisponible
