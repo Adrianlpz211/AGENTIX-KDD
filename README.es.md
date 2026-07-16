@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.11.4-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.15.0-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -18,14 +18,11 @@
 
 ---
 
-## Qué es
+## En una frase
 
-**Agentix KDD** no es otra IA que programa por ti. Es la **armadura** que se le pone a la IA que ya usas — de forma nativa en **Claude Code y Cursor** — para que **recuerde, no rompa lo que funcionaba, y no se contradiga**.
+**Agentix KDD convierte el conocimiento acumulado de tu repositorio en fuerza activa de prevención: hace que la IA de código recuerde el proyecto, no rompa lo que ya funcionaba, y deje rastro verificable de cada decisión.**
 
-Vive **dentro de tu proyecto**: lee tu código, guarda cada decisión y cada error en una memoria persistente, y usa todo eso para que la siguiente tarea sea más segura que la anterior. Tú sigues con tu editor de siempre; Agentix lo blinda por debajo.
-
-> Agentix hace que la IA de código **recuerde, respete y preserve el proyecto mientras evoluciona.**
-> Convierte el código del proyecto en una **memoria operativa que gobierna el comportamiento futuro de la IA.**
+No es otra IA que programa por ti. Es la **armadura** que se le pone a la IA que ya usas — nativa en **Claude Code y Cursor** — y vive **dentro de tu proyecto**: SQLite local, sin nube, sin cuenta, sin suscripción.
 
 > *KDD = Knowledge-Driven Development — desarrollo guiado por el conocimiento acumulado del propio proyecto. (Paquete npm: `agentic-kdd`.)*
 
@@ -33,71 +30,45 @@ Vive **dentro de tu proyecto**: lee tu código, guarda cada decisión y cada err
 
 ## El problema que resuelve
 
-Abres Cursor o Claude Code. Le explicas tu proyecto *otra vez*. La IA empieza de cero *otra vez*. Rompe algo que ya funcionaba *otra vez*. Cambia una regla de negocio sin acordarse de por qué estaba así.
+Abres Cursor o Claude Code. Le explicas tu proyecto *otra vez*. La IA empieza de cero *otra vez*. Rompe algo que ya funcionaba *otra vez*. Cambia una regla de negocio sin acordarse de por qué estaba así. Dos casos reales de cliente que motivaron la generación actual: un combobox aplicado "en todos lados" rompió selects que YA funcionaban, y un trabajo de CSS rompió validaciones `required` existentes. Ambos son la misma enfermedad: **la IA no ve lo que ya está probado, y nadie mecánico se lo impide.**
 
 No estás programando — estás cuidando el contexto a mano. **Agentix se encarga de eso.**
 
 ---
 
-## Las tres piezas de la armadura
+## El mapa completo — tres piezas, y TODO cuelga de una de ellas
 
-| | Pieza | Qué hace |
-|---|-------|----------|
-| ⚓ | **Ancla** — memoria | Recuerda decisiones, reglas y errores entre sesiones. Búsqueda semántica real (embeddings locales) para traer lo relevante en el momento justo. |
-| 🔧 | **Palanca** — verificación | Antes de aceptar un cambio, **corre los tests y comprueba que no rompió lo que funcionaba**. Si algo se rompe, lo dice — no declara "verde" en falso. |
-| 🔨 | **Martillo** — autonomía | Detecta y corrige problemas por su cuenta (incluida seguridad), y te lo reporta. Tú lees el resultado. |
+Agentix tiene muchos órganos, pero solo tres piezas. Si alguna vez te pierdes en la lista de features, vuelve aquí: **cada cosa que hace pertenece a una de estas tres filas.**
 
----
+| | Pieza | Qué hace | Sus órganos |
+|---|-------|----------|-------------|
+| ⚓ | **Ancla** — memoria | Recuerda decisiones, reglas, errores y la estructura del código entre sesiones, y trae lo relevante en el momento justo. | Memoria 4 capas (CoALA) · grafo de código AST con precisión de líneas · búsqueda híbrida BM25+vectorial · anclas de símbolos · curación autónoma (MemCurator) · telemetría de gates (la "libreta") |
+| 🔧 | **Palanca** — verificación | Antes de aceptar un cambio, comprueba mecánicamente que no rompe lo que ya funcionaba. Si duda, **frena del lado seguro**. Jamás declara "verde" en falso. | Regression Guard (HIT/MISS/DOUBT por líneas) · TDD Gate · Spec Gate + escáner de valores de negocio · Security Gate (secretos/PII/inyección) · Browser Gate (Chrome/Edge real) · UI Native Gate · hooks de git pre/post-commit |
+| 🔨 | **Martillo** — autonomía | Ejecuta ciclos completos de desarrollo con correa: analiza, construye, prueba, aprende, y se recupera de frenazos — reportándote todo. | Pipeline `aa:` · MODO LEGIÓN (sub-agentes en paralelo solo para leer/juzgar) · QA 4 lentes · departamento `audit:` (7 auditores) · Creative Engine · protocolo RECOVERY · locks multi-instancia |
 
-## Cómo funciona
-
-Agentix usa una **memoria de 4 capas** (arquitectura CoALA) guardada en **SQLite dentro de tu proyecto** — tuya, sin nube, sin suscripción:
-
-```
-Working    → contexto de la tarea actual
-Procedural → patrones, errores y decisiones (las reglas de tu proyecto)
-Episódica  → qué se intentó, en qué orden, por qué funcionó o falló
-Semántica  → grafo de módulos, APIs y dependencias — qué rompe qué
-```
-
-Sobre esa memoria corren los **gates** que protegen tu trabajo:
-
-- **Spec Gate** — frena un cambio que contradice una regla de negocio guardada (ej. cambiar una tarifa fijada) y pide confirmación.
-- **Regression Guard + TDD Gate** — corren la suite real; si un cambio rompe un test que pasaba, se detienen.
-- **Security Gate** — revisa los archivos sensibles (auth, multi-tenant) antes de escribir.
+**La propiedad medida que define la armadura:** cuando Agentix duda, protege. Medido contra un parser real: de 1,989 símbolos comparados, el error de rango cae del lado seguro en el **99.75%** de los casos (del lado peligroso: 5 casos, todos ≤5 líneas).
 
 ---
 
-## Despacho de sub-agentes — con correa, no un swarm aparte
+## De dónde viene — tecnologías e inspiraciones (con nombre y apellido)
 
-Sobre el pipeline secuencial, Agentix puede desplegar sub-agentes especializados en
-paralelo para 3 momentos concretos del ciclo `aa:` — reusando exactamente el mismo
-mecanismo que ya usaba `audit: auditar` (el asistente invocando su propia herramienta de
-sub-agentes varias veces en un mensaje), sin infraestructura nueva ni depender de un
-swarm externo.
+Agentix no inventó cada pieza desde cero — combinó ideas probadas que existían por separado y les agregó lo que faltaba: que la memoria **bloquee**, no solo recuerde.
 
-1. **Context Enricher** — antes de que arranque cualquier `aa:`, consulta memoria
-   episódica/procedimental, contratos activos y alertas pendientes, y le entrega al
-   pipeline un brief de riesgo en vez de una tarea pelada. Nunca bloquea: si no encuentra
-   nada, el pipeline sigue exactamente igual que antes.
-2. **Front/Back en paralelo** — cuando una tarea de verdad necesita frontend y backend a
-   la vez, y sus archivos no se cruzan, los dos se construyen al mismo tiempo en vez de
-   que uno dispare al otro — mismo mecanismo de sub-agentes, con verificación explícita
-   de que ningún archivo lo toquen los dos.
-3. **QA con 4 lentes** — antes de aprobar una fase, corren 4 revisores independientes en
-   paralelo (seguridad, decisiones/patrones, errores conocidos, cumplimiento de spec) en
-   vez de un solo criterio juzgando todo. En una prueba real, esto encontró un bug de
-   concurrencia en un fix de sesión de WhatsApp que una revisión de un solo autor se
-   había saltado — el diff se veía bien por sí solo; el bug solo apareció al cruzarlo
-   contra el código fuente de la librería externa.
-
-Misma regla de degradación que todo lo demás aquí: si el entorno no soporta sub-agentes
-en paralelo, cae a secuencial — mismo resultado, solo más lento, nunca se rompe por no
-poder paralelizar.
+| Idea en Agentix | De dónde viene |
+|---|---|
+| Memoria de 4 capas (working / procedural / episódica / semántica) | **CoALA** — *Cognitive Architectures for Language Agents* (Sumers, Yao, Narasimhan & Griffiths, Princeton, 2023). Agentix la implementa en SQLite local. |
+| Mapa del código con PageRank sobre símbolos | La idea del **repo-map de Aider** (Paul Gauthier). Agentix la lleva más lejos: rangos de líneas por símbolo, formularios/CSS como nodos, y el mapa alimenta un gate que FRENA, no solo contexto. |
+| Specs por módulo y reglas de negocio vigiladas | La corriente de **spec-driven development** (popularizada por herramientas como Kiro de AWS). En Agentix la spec no es un documento aparte: se genera del ciclo y el Spec Gate la defiende. |
+| Episodios sin resumir + banco de razonamiento | La línea de investigación de memoria episódica para agentes (Reflexion y sucesores): guardar trayectorias completas evita el *summarization drift*. |
+| Integración con el editor | **Estándares abiertos**: MCP (Model Context Protocol, Anthropic) — 54 herramientas — más `CLAUDE.md`/`AGENTS.md` y hooks de git estándar. Nada propietario. |
+| Verificación en navegador real | **playwright-core** apuntando al Chrome/Edge que YA tienes instalado (cero descargas de navegadores). |
+| Persistencia | **SQLite** (better-sqlite3, con fallback automático a `node:sqlite` de Node 22+ si tu máquina no tiene toolchain de compilación — probado). |
+| Extracción de símbolos | Regex disciplinado, **no** tree-sitter — y esto fue una decisión MEDIDA, no una limitación: se construyó el comparador contra tree-sitter real, se midieron 1,989 símbolos, y la aproximación regex resultó suficiente (99.75% de los errores caen del lado seguro). El comparador queda en el motor para re-medir cuando se quiera. |
+| Filosofía *fail-closed* | Ingeniería de seguridad clásica: ante la duda, el portón se cierra. Toda la contención por líneas degrada a "archivo completo protegido" ante CUALQUIER duda. |
 
 ---
 
-## Inicio rápido
+## Cómo se usa (esto es todo)
 
 ```bash
 # 1. Instalar el CLI
@@ -111,221 +82,167 @@ akdd init
 aa: configurar
 ```
 
-Listo. Agentix lee tu proyecto y se configura solo. A partir de ahí, cada tarea empieza con `aa:`.
+Desde ahí, cada tarea empieza con `aa:`. El pipeline completo (analizar → construir → probar → aprender) corre solo; te detiene únicamente ante un STOP genuino (regla de negocio contradicha, test que se rompe, archivo crítico).
+
+```
+aa: agrega paginación al listado de clientes
+aa: sprint — módulo de facturación completo
+aa: aprende                  ← absorbe trabajo hecho fuera del pipeline
+audit: auditar               ← 7 auditores en paralelo; solo leen, jamás tocan código
+```
+
+> El vocabulario de comandos (`aa:`, `audit:`) es en español — la tarea que escribes después puede ir en cualquier idioma.
+
+**¿Ya tienes Agentix de una versión vieja?** `akdd update` y listo. La ruta de upgrade está **probada, no prometida**: se simuló un cliente con base de datos de la v3.12 y se le corrió el motor v3.15 encima — 31/31 verificaciones en verde, dos veces (con y sin better-sqlite3). Tu memoria queda intacta, las tablas nuevas aparecen solas, y el grafo de código se reconstruye automáticamente UNA vez (sello `INDEX_VERSION`) para ganar la precisión nueva.
+
+---
+
+## Qué pasa solo, sin que escribas nada
+
+| Cuándo | Qué corre automáticamente |
+|--------|----------------------------|
+| En cada **commit** de git | **Pre-commit** (v3.15): escáner de valores de negocio + escudo de seguridad sobre lo staged — visible, nunca bloquea. **Post-commit**: cierra el ciclo, acumula contratos, indexa el código, sincroniza el grafo. |
+| Dentro de cada **`aa:`** | Brief de riesgo del Context Enricher, gates, tests, QA 4 lentes, registro de lo aprendido. |
+| Cada **5 ciclos** | Checkpoint para retomar en otro chat u otra máquina. |
+| En **init / update** | Hooks instalados solos, schema migrado solo, índice reconstruido solo si el motor cambió de versión. |
+
+Desde v3.15, cada protección queda anotada en la libreta (`gate_events`) con su origen: **`mechanical`** (hierro que corre solo) o **`protocol`** (el modelo siguiendo instrucciones). Puedes medir qué fracción de tu protección es hierro: `node .agentic/grafo/gate-telemetry.cjs stats`.
+
+---
+
+## Qué tan maduro está cada órgano (honestidad por niveles)
+
+**🥇 Probado en batalla** (uso real repetido): pipeline `aa:`, memoria 4 capas + búsqueda híbrida, gates clásicos (Spec/TDD/Security/Regression), registro automático por commit, checkpoints, locks multi-instancia, dashboard, MCP (54 herramientas), contención por líneas, Front/Back en paralelo (confirmado con ejecución solapada real).
+
+**🥈 Verificado con fixtures/navegador** (escenarios controlados, aún sin meses de producción): Browser Gate por comportamiento, catálogo de endpoints de 10 frameworks (Express/Fastify/NestJS/Flask/FastAPI/Django/Rails/Laravel/gin/Spring), Ojos UI (forms/selects/required/CSS como nodos del grafo), telemetría + promoción de confianza por mérito, emparejamiento error→cura por anclas, medidor de cobertura, protocolo RECOVERY, hooks pre-commit, manifiesto de madurez del motor con lint mecánico de fronteras.
+
+**🥉 Implementado sin confirmación pública**: colaboración de equipo (beta privada), escalada del Browser Gate a STOP (se gana con semanas de uso).
+
+El propio motor practica lo que predica: sus ~50 módulos están clasificados en `MADUREZ.json` (core/estable/experimental) y un lint mecánico impide que el núcleo dependa de lo experimental.
+
+---
+
+## Números medidos (no estimados)
+
+| Métrica | Valor |
+|---|---|
+| Dirección del error de rangos (vs parser real, 1,989 símbolos) | 99.75% lado seguro |
+| Grafo de un proyecto real (~414 archivos TS+JS) | 3,757 símbolos · ~4,900 conexiones · 100% con rango de líneas |
+| Cobertura declarada | 79% de archivos con símbolos · 93% de líneas cubiertas · los puntos ciegos se DECLARAN con causa (`coverage-meter`) |
+| Verificación de v3.13→v3.15 | ~116 escenarios en verde, re-corridos tras cada plan (regresión cero) |
+| Benchmark 19 fases (SaaS multi-tenant, con/sin Agentix) | errores por fase 2.6→~0 · tests al primer intento 79%→100% · cascada de refactor 4/7→11/11 |
+
+> ⚠️ **Honestidad primero:** el benchmark es **N=1, direccional, no peer-reviewed** — un solo proyecto. Muestra dirección, no verdad absoluta. Repítelo tú mismo: está en `benchmark/`.
 
 ---
 
 ## Compatibilidad
 
-Agentix es **primera clase en Claude Code y Cursor** — es donde está **probado a fondo**. Como su motor se apoya en **estándares abiertos** (`AGENTS.md` y **MCP**), también *debería* funcionar con otros agentes (VS Code, Windsurf, Kiro, Aider…), pero por honestidad: **por ahora solo está probado a fondo en Claude Code y Cursor**. Si lo pruebas en otro IDE y te funciona, abre un issue y lo sumamos a la lista de "probados".
+Agentix es **primera clase en Claude Code y Cursor** — ahí está probado en batalla. Como el motor se apoya en **estándares abiertos** (`AGENTS.md` y **MCP**), *debería* funcionar con otros agentes (VS Code, Windsurf, Kiro, Aider…), pero por honestidad: **hasta hoy solo está probado a fondo en Claude Code y Cursor**. Si lo pruebas en otro IDE y funciona, abre un issue y lo sumamos a la lista.
 
 ---
 
-## Comandos — qué corre solo y qué corres tú
+## Dashboard
 
-> **Leyenda:** 🟢 automático (corre solo) · 🔵 disparador (lo escribes en el chat) · ⚪ manual (terminal, solo cuando lo necesites)
+`akdd dashboard` → tablero visual en localhost:3847. El Knowledge Graph se renderiza en **3D real** — y son tres grafos:
 
-### 🟢 Lo que pasa SOLO — no escribes nada
+- **KDD Memory** — decisiones/errores/patrones de tu memoria.
+- **Code Structure** — mapa nativo de tu código real (archivos, símbolos, forms, clases CSS y sus conexiones), directo del índice AST. Cero llamadas a LLM, cero tokens. Paleta por departamento: módulos hermanos (misma carpeta) comparten familia de color.
+- **Combined** — mezcla ambos: ves cómo tu código y tus decisiones acumuladas se relacionan.
 
-Desde la v3.7+, esto se registra **automáticamente, en segundo plano y a 0 tokens**:
-
-| Cuándo | Qué pasa solo |
-|--------|---------------|
-| En cada **commit** de git | Cierra el ciclo: **registra el ciclo**, **acumula contratos**, indexa el código (AST incremental) y sincroniza el grafo |
-| Cada **5 ciclos** | Guarda un **checkpoint** para retomar en otro chat o PC |
-| Dentro de cada **`aa:`** | Lee la memoria, corre los tests (TDD Gate), QA, el gate de contratos, review y guarda lo aprendido |
-| Al hacer **`akdd init`** en un proyecto con código | Corre `onboard` + `ast` + `sync` solos para dejar el dashboard poblado |
-| Al **instalar / actualizar** | Instala el gatillo de git por sí mismo |
-
-### 🔵 Lo que escribes en el chat — disparadores del pipeline
-
-| Comando | Qué hace |
-|---------|----------|
-| `aa: [cualquier tarea]` | Pipeline completo: analiza · construye · prueba · aprende |
-| `aa: sprint — [objetivo]` | Encadena varias tareas; la memoria fluye entre ellas |
-| `aa: aprende` | Absorbe conocimiento de trabajo hecho fuera del pipeline |
-| `audit: auditar` · `audit: seguridad` | Departamento QA — audita, **no toca código** |
-
-También expone **54 herramientas MCP** para clientes compatibles (Claude Code, Cursor, cualquier cliente MCP por stdio).
-
-> El vocabulario de comandos (`aa:`, `audit:`, `akdd buscar`…) está en español — la tarea que escribes después de `aa:` puede ir en cualquier idioma.
+Guías visuales en lenguaje llano: [cómo leer el grafo](docs/GRAFO-GUIA.md) · [cómo leer contratos + Creative Engine](docs/CONTRATOS-GUIA.md)
 
 ---
 
 ## ⚪ Referencia completa del CLI (manual)
 
-Todo lo de abajo es **manual** — lo corres solo cuando lo necesites. Lo automático está en la sección de arriba.
+Todo lo de abajo es **manual** — se usa solo cuando hace falta. Lo automático ya quedó descrito arriba.
 
 ### Setup y ciclo de vida
 ```bash
-akdd init                      # Instalar Agentix KDD en un proyecto nuevo
-akdd onboard                   # Adoptar un proyecto existente (brownfield)
-akdd update                    # Actualizar el motor desde GitHub (la memoria queda intacta)
-akdd sync                      # Sincronizar memoria + grafo de conocimiento
-akdd hooks [status]            # Instalar / verificar el gatillo automático de git
+akdd init                      # Instalar Agentix KDD en un proyecto
+akdd onboard                   # Onboarding de un proyecto existente (brownfield)
+akdd update                    # Actualizar el motor desde GitHub (tu memoria queda intacta)
+akdd sync                      # Sincronizar memoria + grafo
+akdd hooks [status]            # Instalar / revisar los hooks de git (pre + post commit)
 akdd mcp                       # (Re)configurar MCP para Cursor / Claude Code / VS Code
 akdd health [--fix]            # Diagnóstico del sistema (--fix repara lo que puede)
 akdd dashboard                 # Tablero visual en localhost:3847
 ```
 
-La pestaña Knowledge Graph se renderiza en **3D real** (esferas, no círculos planos) —
-arrastra para orbitar, scroll para zoom, clic en un nodo para resaltar sus conexiones. En
-realidad son tres grafos distintos:
-
-- **KDD Memory** — la memoria de decisiones/errores/patrones descrita arriba.
-- **Code Structure** — un mapa nativo de tu código real (archivos/símbolos y sus imports),
-  sacado directo del índice AST. Sin llamadas a LLM, costo cero en tokens.
-- **Combined** — fusiona los dos anteriores, para ver cómo se relacionan tu código y las
-  decisiones acumuladas del proyecto.
-
-Cada uno tiene un "?" flotante que abre un glosario en lenguaje simple de los términos que
-estás viendo.
-
-¿Primera vez en la pestaña Knowledge Graph del dashboard, o te confunden los números de
-contratos de Preservation Intel? Dos guías visuales:
-
-<a href="docs/GRAFO-GUIA.md"><img src="assets/grafo-guia.svg" width="49%"></a>
-<a href="docs/CONTRATOS-GUIA.md"><img src="assets/contratos-guia.svg" width="49%"></a>
-
-[Cómo leer el grafo](docs/GRAFO-GUIA.md) · [Cómo leer contratos + Creative Engine](docs/CONTRATOS-GUIA.md)
-
 ### Memoria y grafo de conocimiento
 ```bash
-akdd buscar "query"            # Búsqueda híbrida semántica + BM25 en la memoria
-akdd recall "query"            # Traer memoria relevante para una tarea
-akdd historial                 # Recuperar checkpoint — pégalo en un chat nuevo
-akdd checkpoint                # Crear un checkpoint de sesión ahora
-akdd graph                     # Resumen del grafo de conocimiento
-akdd stats                     # Estadísticas de la memoria
-akdd why <archivo|entidad>     # Por qué existe algo — cadena de decisiones
-akdd trail <id>                # Trazabilidad completa de una entidad
+akdd buscar "consulta"         # Búsqueda híbrida semántica + BM25
+akdd recall "consulta"         # Traer memoria relevante para una tarea
+akdd historial                 # Checkpoint para retomar — pégalo en un chat nuevo
+akdd graph · akdd stats        # Resumen y estadísticas del grafo
+akdd why <archivo|entidad>     # Por qué existe esto — cadena de decisiones
 akdd forget <id> "<razón>"     # Borrar un nodo de memoria (auditado)
-akdd decay                     # Aplicar decaimiento temporal a nodos viejos
 akdd cure [run|report]         # MemCurator — gobernanza autónoma de la memoria
-akdd memory                    # Resumen de la memoria
 ```
 
 ### Contratos y gates (capa de preservación)
 ```bash
-akdd contracts                 # Estado del Contract Guard (protegido/verificado/candidato)
-akdd contracts gate            # Correr el gate de contratos a mano
-akdd validate                  # Validar consistencia del conocimiento
-akdd predict <archivo>         # Predecir riesgo de regresión antes de editar
-akdd impacto <archivo|módulo>  # Análisis de impacto — qué se rompe si esto cambia
+akdd contracts                 # Estado del Contract Guard
+akdd predict <archivo>         # Riesgo de regresión antes de editar
+akdd impacto <archivo|módulo>  # Qué se rompe si esto cambia
 akdd ast-impact <archivo>      # Análisis de impacto a nivel AST
+node .agentic/grafo/gate-telemetry.cjs stats     # La libreta: qué protegió, cuándo, hierro vs protocolo
+node .agentic/grafo/coverage-meter.cjs           # Qué ve el sistema y qué no (puntos ciegos declarados)
+node .agentic/grafo/madurez-lint.cjs             # Fronteras de madurez del motor (core/estable/experimental)
 ```
 
-### Creative Engine
+### Motor de código
 ```bash
-akdd creative suggest          # Generar sugerencias de mejora
-akdd creative apply <id>       # Aplicar una sugerencia
-akdd creative dismiss <id>     # Descartar una sugerencia
-akdd creative level            # Ver nivel de autonomía (asistido → autónomo)
-akdd creative wins             # Ver mejoras aplicadas
-akdd creative stats            # Estadísticas del Creative Engine
-```
-
-### AST e inteligencia de código
-```bash
-akdd ast index [target]        # Indexar el código (símbolos, dependencias)
-akdd ast stats                 # Estadísticas del índice AST
-akdd ast symbols <archivo>     # Listar símbolos de un archivo
+akdd ast [stats|symbols <f>]   # Índice AST del proyecto (auto-migra por versión)
 akdd git-context               # Contexto git actual para el agente
 ```
 
-### Departamento QA / Auditoría 🔵 (en el chat — solo audita, no toca código)
+### Departamento QA 🔵 (en el chat — solo audita, jamás toca código)
 ```bash
 audit: auditar                 # Auditoría completa — 7 subagentes en paralelo
-audit: seguridad               # Seguridad — secretos, auth, vulnerabilidades
-audit: frontend                # Frontend — source maps, llaves filtradas, build
-audit: backend                 # Backend — endpoints, validación, APIs
-audit: datos                   # Datos — RLS, BD expuesta, fugas
-audit: performance             # Rendimiento — rate limiting, caché, escalabilidad
-audit: browser                 # QA real en navegador
-audit: codigo                  # Calidad de código y Git
-audit: help                    # Muestra el menú de auditoría
+audit: seguridad · frontend · backend · datos · performance · browser · codigo
 ```
-> Los reportes se guardan en `_output/audit-[fecha].md` y `.audit/reporte-actual.md`.
-> Para corregir un hallazgo: `aa: corrige el hallazgo SEG-01` (o pídelo directo en el chat).
-
-### Observabilidad ⚪ (terminal)
-```bash
-akdd audit                     # Reporte de auditoría de memoria (nodos viejos / en conflicto)
-akdd telemetry                 # Reporte de telemetría
-akdd report                    # Reporte de efectividad (antes/después)
-akdd metrics                   # Métricas del proyecto
-```
+> Reportes en `_output/audit-[fecha].md`. Para corregir un hallazgo: `aa: corrige el hallazgo SEG-01`.
 
 ### Multi-instancia (Lock Manager)
 ```bash
-akdd locks                     # Estado de locks — quién tiene qué
-akdd locks acquire --module=X  # Adquirir lock de un módulo
-akdd locks release --module=X  # Liberar lock de un módulo
-akdd locks check --files=...   # Verificar si hay archivos bloqueados
-akdd locks acquire-schema      # Adquirir el lock de schema (antes de migraciones)
-akdd locks release-schema      # Liberar el lock de schema
-akdd locks wait --module=X     # Esperar hasta que un módulo se libere
-akdd locks release-all         # Liberar todos los locks (limpieza de sesión)
+akdd locks                     # Quién tiene qué módulo
+akdd locks acquire/release --module=X
+akdd locks release-all         # Liberar todo (limpieza de sesión)
 ```
+> Desde v3.15 cada lock deja una ventana en la libreta al liberarse — dos ventanas solapadas de instancias distintas son la prueba mecánica de que el trabajo en paralelo fue real.
 
-### Colaboración (sync de equipo) — 🔒 beta privada
-> La **memoria compartida de equipo** está en **beta privada** y aún no está habilitada para uso
-> público. Todo lo demás de Agentix funciona **100% local, sin ninguna cuenta** — la colaboración
-> es la única pieza que sigue cerrada. ¿La necesitas para tu equipo? [Abre un issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
-
-### Specs y planificación
-```bash
-akdd spec create <módulo>      # Crear una spec para un módulo
-akdd spec                      # Listar specs
-akdd sprint-plan               # Planificar un sprint multi-fase
-akdd benchmarks                # Correr / ver benchmarks
-```
-
-### Embeddings (búsqueda semántica)
-```bash
-akdd embed-status              # Estado del índice de embeddings
-akdd embed-install             # Instalar soporte de embeddings
-akdd jina-install              # Instalar el modelo jina-embeddings-v2 (descarga pesada)
-```
-
-### CI/CD
-```bash
-akdd ci-install                # Instalar la integración de CI
-akdd ci-status                 # Estado de CI
-akdd ci-report                 # Reporte de CI
-akdd llms                      # Generar llms.txt + knowledge-graph.json
-```
+### Colaboración (equipo) — 🔒 beta privada
+> La **memoria de equipo compartida** está en **beta privada**. Todo lo demás funciona **100% local, sin cuenta**. ¿La quieres para tu equipo? [Abre un issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
 ---
 
-## Resultados de benchmark
+## Límites honestos (lo que NO es)
 
-En una prueba de 19 fases construyendo un SaaS multi-tenant real (mismo modelo Claude en ambos modos), con vs. sin Agentix:
-
-| Métrica | Sin | Con |
-|---------|-----|-----|
-| Errores por fase | 2.6 | ~0 |
-| Fases con error repetido | 3 | 0 |
-| Tests al primer intento | 79% | 100% |
-| Cascada de refactor correcta | 4/7 | 11/11 |
-
-> ⚠️ **Honestidad ante todo:** estos números son **N=1, direccionales, no peer-reviewed** — un solo proyecto. Sirven para mostrar la dirección, no como verdad absoluta. Reproduce el benchmark tú mismo en `benchmark/`.
+1. **No es invulnerable.** La armadura reduce y direcciona el error; no lo elimina. La calidad de los arreglos autónomos la pone el modelo de turno.
+2. **Tiene techo de cobertura, y lo declara.** ~21% de archivos del proyecto de prueba quedan sin símbolos (tests con `describe()`, CSS de solo-variables). Lo invisible NO queda desprotegido — la duda cierra el portón — pero no recibe precisión fina. `coverage-meter` te lo dice por proyecto.
+3. **Extractores regex, no parser** — decisión medida (ver "De dónde viene"). Los casos límite caen en DUDA, no en silencio.
+4. **La franja semántica sigue en el modelo.** Los valores de negocio se vigilan por hierro (escáner mecánico), pero el juicio "¿esto contradice el ESPÍRITU de la decisión?" lo hace el LLM siguiendo protocolo — y la libreta registra cuál protección vino de cuál.
+5. **Benchmark N=1** — direccional, reproducible en `benchmark/`, no peer-reviewed.
 
 ---
 
 ## Estado y transparencia
 
-Agentix es software **joven y en evolución**. Se auditaron los 48 archivos del motor y se repararon **30+ bugs** (memoria, gates, búsqueda vectorial, publicación). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
+Agentix es software **joven y en evolución**. Los ~50 módulos del motor fueron auditados y endurecidos (v3.15: fronteras de madurez con lint mecánico, gates movidos a hooks de git, fallback completo a `node:sqlite`, ruta de upgrade probada con simulación). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
 
-Lo que **sí funciona hoy**: el pipeline `aa:`, el registro automático de ciclos y contratos (vía gatillo de git), la memoria persistente con búsqueda semántica real, los gates (Spec / Regression / TDD / Security), el dashboard con métricas reales, el servidor MCP y la coordinación multi-instancia.
+La promesa real, sin inflar:
 
-**El despacho de sub-agentes es más nuevo (v3.10–v3.11)** y cada pieza tiene un nivel de confianza distinto: Context Enricher y QA con 4 lentes están **confirmados contra tareas reales** (el de QA encontró de hecho un bug real de concurrencia que una revisión de un solo autor se había saltado). Front/Back en paralelo está implementado y conectado con el mismo mecanismo, pero todavía no tiene una confirmación limpia de que se dispare en paralelo de verdad en el mundo real — la única prueba real salió con un solo autor, por razones defendibles (una feature chica y muy acoplada), no por un bug conocido. Trátalo como "debería funcionar" y no como "comprobado" hasta que se confirme con una tarea que de verdad separe front de back.
+> **"Agentix hace que tu IA de código recuerde, respete y preserve tu proyecto mientras evoluciona — y cuando algo la haga dudar, se detiene del lado seguro. Cada protección que ejerce queda anotada y auditable."**
+
+Verifícalo tú mismo en 10 minutos: `akdd init` → `aa: configurar` → rompe a propósito algo protegido → mira el STOP con la zona exacta → `node .agentic/grafo/gate-telemetry.cjs stats` → ahí está el evento anotado.
 
 ---
 
 ## Licencia
 
-MIT — úsalo, forkéalo, constrúyelo.
+MIT — úsalo, forkéalo, construye encima.
 
 <div align="center">
 

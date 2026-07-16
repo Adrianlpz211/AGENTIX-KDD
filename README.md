@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.11.6-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.15.0-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -18,14 +18,11 @@ English · [Español](README.es.md)
 
 ---
 
-## What it is
+## In one sentence
 
-**Agentix KDD** isn't another AI that codes for you. It's the **armor** you put on the AI you already use — natively on **Claude Code and Cursor** — so it **remembers, doesn't break what was working, and doesn't contradict itself**.
+**Agentix KDD turns your repository's accumulated knowledge into an active prevention force: it makes your coding AI remember the project, not break what already worked, and leave a verifiable trail of every decision.**
 
-It lives **inside your project**: it reads your code, saves every decision and every error to a persistent memory, and uses all of it to make the next task safer than the last. You keep using your editor; Agentix shields it from underneath.
-
-> Agentix makes AI coding agents **remember, respect, and preserve the project as it evolves.**
-> It turns your project's own code into an **operational memory that governs the AI's future behavior.**
+It's not another AI that codes for you. It's the **armor** you put on the AI you already use — native on **Claude Code and Cursor** — and it lives **inside your project**: local SQLite, no cloud, no account, no subscription.
 
 > *KDD = Knowledge-Driven Development — development guided by the project's own accumulated knowledge. (npm package: `agentic-kdd`.)*
 
@@ -33,69 +30,45 @@ It lives **inside your project**: it reads your code, saves every decision and e
 
 ## The problem it solves
 
-You open Cursor or Claude Code. You explain your project *again*. The AI starts from zero *again*. It breaks something that was working *again*. It changes a business rule without remembering why it was set that way.
+You open Cursor or Claude Code. You explain your project *again*. The AI starts from zero *again*. It breaks something that was working *again*. It changes a business rule without remembering why it was set that way. Two real client cases motivated the current generation: a combobox applied "everywhere" broke selects that ALREADY worked, and CSS work broke existing `required` validations. Both are the same disease: **the AI can't see what's already proven, and nothing mechanical stops it.**
 
 You're not coding — you're babysitting the context by hand. **Agentix takes that over.**
 
 ---
 
-## The three pieces of the armor
+## The full map — three pieces, and EVERYTHING hangs from one of them
 
-| | Piece | What it does |
-|---|-------|--------------|
-| ⚓ | **Anchor** — memory | Remembers decisions, rules and errors across sessions. Real semantic search (local embeddings) surfaces what's relevant at the right moment. |
-| 🔧 | **Lever** — verification | Before accepting a change, it **runs the tests and confirms nothing that worked got broken**. If something breaks, it says so — it never reports a false "green". |
-| 🔨 | **Hammer** — autonomy | Finds and fixes problems on its own (security included) and reports back. You read the result. |
+Agentix has many organs but only three pieces. If you ever get lost in the feature list, come back here: **everything it does belongs to one of these three rows.**
 
----
+| | Piece | What it does | Its organs |
+|---|-------|--------------|------------|
+| ⚓ | **Anchor** — memory | Remembers decisions, rules, errors and the code's structure across sessions, and surfaces what's relevant at the right moment. | 4-layer memory (CoALA) · AST code graph with line-level precision · hybrid BM25+vector search · symbol anchors · autonomous curation (MemCurator) · gate telemetry (the "ledger") |
+| 🔧 | **Lever** — verification | Before accepting a change, mechanically checks it doesn't break what already worked. When in doubt, it **stops on the safe side**. Never reports a false "green". | Regression Guard (line-level HIT/MISS/DOUBT) · TDD Gate · Spec Gate + business-value scanner · Security Gate (secrets/PII/injection) · Browser Gate (real Chrome/Edge) · UI Native Gate · pre/post-commit git hooks |
+| 🔨 | **Hammer** — autonomy | Runs full development cycles on a leash: analyzes, builds, tests, learns, and recovers from stops — reporting everything back. | `aa:` pipeline · LEGION MODE (parallel sub-agents for read/judge steps only) · 4-lens QA · `audit:` department (7 auditors) · Creative Engine · RECOVERY protocol · multi-instance locks |
 
-## How it works
-
-Agentix uses a **4-layer memory** (CoALA architecture) stored in **SQLite inside your project** — yours, no cloud, no subscription:
-
-```
-Working     → context of the current task
-Procedural  → patterns, errors and decisions (your project's rules)
-Episodic    → what was tried, in what order, why it worked or failed
-Semantic    → graph of modules, APIs and dependencies — what breaks what
-```
-
-On top of that memory run the **gates** that protect your work:
-
-- **Spec Gate** — stops a change that contradicts a saved business rule (e.g. changing a fixed rate) and asks for confirmation.
-- **Regression Guard + TDD Gate** — run the real suite; if a change breaks a test that was passing, they stop.
-- **Security Gate** — reviews sensitive files (auth, multi-tenant) before writing.
+**The measured property that defines the armor:** when Agentix doubts, it protects. Measured against a real parser: of 1,989 symbols compared, the range error falls on the safe side in **99.75%** of cases (dangerous side: 5 cases, all ≤5 lines).
 
 ---
 
-## Multi-agent dispatch — sub-agents on a leash, not a separate swarm
+## Where it comes from — technologies and inspirations (named explicitly)
 
-On top of the sequential pipeline, Agentix can dispatch specialized sub-agents in
-parallel for three specific moments in the `aa:` cycle — reusing the exact same
-mechanism `audit: auditar` already used (the assistant invoking its own sub-agent tool
-several times in one message), with no new infrastructure and no external swarm
-dependency.
+Agentix didn't invent every piece from scratch — it combined proven ideas that existed separately and added the missing part: making memory **block**, not just remember.
 
-1. **Context Enricher** — before any `aa:` starts, queries episodic/procedural memory,
-   active contracts and pending alerts, and hands the pipeline a risk brief instead of a
-   bare task. Never blocks: if it finds nothing, the pipeline continues exactly as before.
-2. **Parallel front/back** — when a task genuinely needs both frontend and backend, and
-   their files don't overlap, both get built at the same time instead of one triggering
-   the other — same sub-agent mechanism, with an explicit check that no file gets touched
-   by both.
-3. **4-lens QA** — before approving a phase, 4 independent reviewers run in parallel
-   (security, decisions/patterns, known errors, spec compliance) instead of one pass
-   judging everything. In a real test, this caught a concurrency bug in a WhatsApp
-   session fix that a single-reviewer pass had missed — the diff looked fine on its own;
-   the bug only showed up when cross-checking it against the upstream library's source.
-
-Same degradation rule as everything else here: if the environment doesn't support
-parallel sub-agents, it falls back to sequential — identical result, just slower, never
-breaks because it can't parallelize.
+| Idea in Agentix | Where it comes from |
+|---|---|
+| 4-layer memory (working / procedural / episodic / semantic) | **CoALA** — *Cognitive Architectures for Language Agents* (Sumers, Yao, Narasimhan & Griffiths, Princeton, 2023). Agentix implements it in local SQLite. |
+| Code map with PageRank over symbols | **Aider's repo-map** idea (Paul Gauthier). Agentix takes it further: line ranges per symbol, forms/CSS as nodes, and the map feeds a gate that STOPS — not just context. |
+| Per-module specs and watched business rules | The **spec-driven development** current (popularized by tools like AWS's Kiro). In Agentix the spec isn't a separate document: it's generated from the cycle and the Spec Gate defends it. |
+| Unsummarized episodes + reasoning bank | The episodic-memory research line for agents (Reflexion and successors): storing full trajectories avoids summarization drift. |
+| Editor integration | **Open standards**: MCP (Model Context Protocol, Anthropic) — 54 tools — plus `CLAUDE.md`/`AGENTS.md` and standard git hooks. Nothing proprietary. |
+| Real-browser verification | **playwright-core** pointed at the Chrome/Edge you ALREADY have installed (zero browser downloads). |
+| Persistence | **SQLite** (better-sqlite3, with automatic fallback to Node 22+'s `node:sqlite` when your machine lacks a build toolchain — tested). |
+| Symbol extraction | Disciplined regex, **not** tree-sitter — and this was a MEASURED decision, not a limitation: a comparator against real tree-sitter was built, 1,989 symbols were measured, and the regex approximation proved sufficient (99.75% of errors fall on the safe side). The comparator stays in the engine to re-measure anytime. |
+| *Fail-closed* philosophy | Classic safety engineering: when in doubt, the gate closes. All line-level containment degrades to "whole file protected" on ANY doubt. |
 
 ---
 
-## Quick start
+## How you use it (this is all of it)
 
 ```bash
 # 1. Install the CLI
@@ -109,213 +82,161 @@ akdd init
 aa: configurar
 ```
 
-Done. Agentix reads your project and configures itself. From there, every task starts with `aa:`.
+From there, every task starts with `aa:`. The full pipeline (analyze → build → test → learn) runs on its own; it only stops you on a genuine STOP (contradicted business rule, broken test, critical file).
+
+```
+aa: add pagination to the clients list
+aa: sprint — full invoicing module
+aa: aprende                  ← absorbs work done outside the pipeline
+audit: auditar               ← 7 parallel auditors; read-only, never touch code
+```
+
+> The command vocabulary (`aa:`, `audit:`) is Spanish — the task you write after it can be in any language.
+
+**Already running an older Agentix?** `akdd update` and you're done. The upgrade path is **proven, not promised**: a client with a v3.12-era database was simulated and the v3.15 engine ran on top — 31/31 checks green, twice (with and without better-sqlite3). Your memory stays intact, new tables appear on their own, and the code graph rebuilds itself ONCE (the `INDEX_VERSION` stamp) to gain the new precision.
+
+---
+
+## What happens on its own — you type nothing
+
+| When | What runs automatically |
+|------|--------------------------|
+| On every git **commit** | **Pre-commit** (v3.15): business-value scanner + security shield over staged files — visible, never blocking. **Post-commit**: closes the cycle, accumulates contracts, indexes the code, syncs the graph. |
+| Inside every **`aa:`** | Context Enricher risk brief, gates, tests, 4-lens QA, learning registration. |
+| Every **5 cycles** | Checkpoint to resume in another chat or machine. |
+| On **init / update** | Hooks install themselves, schema migrates itself, index rebuilds itself if the engine changed versions. |
+
+Since v3.15, every protection gets recorded in the ledger (`gate_events`) with its origin: **`mechanical`** (iron that runs on its own) or **`protocol`** (the model following instructions). You can measure what fraction of your protection is iron: `node .agentic/grafo/gate-telemetry.cjs stats`.
+
+---
+
+## How mature each organ is (honesty by tiers)
+
+**🥇 Battle-tested** (repeated real use): the `aa:` pipeline, 4-layer memory + hybrid search, classic gates (Spec/TDD/Security/Regression), automatic per-commit registration, checkpoints, multi-instance locks, dashboard, MCP (54 tools), line-level containment, parallel Front/Back (confirmed with real overlapped execution).
+
+**🥈 Verified with fixtures/browser** (controlled scenarios, not yet months of production): behavior-driven Browser Gate, 10-framework endpoint catalog (Express/Fastify/NestJS/Flask/FastAPI/Django/Rails/Laravel/gin/Spring), UI Eyes (forms/selects/required/CSS as graph nodes), telemetry + merit-based confidence promotion, error→cure matching by anchors, coverage meter, RECOVERY protocol, pre-commit hooks, engine maturity manifest with a mechanical boundary lint.
+
+**🥉 Implemented without public confirmation**: team collaboration (private beta), Browser Gate escalation to STOP (earned with weeks of use).
+
+The engine practices what it preaches: its ~50 modules are classified in `MADUREZ.json` (core/stable/experimental) and a mechanical lint prevents the core from depending on the experimental.
+
+---
+
+## Measured numbers (not estimates)
+
+| Metric | Value |
+|---|---|
+| Range-error direction (vs real parser, 1,989 symbols) | 99.75% safe side |
+| Graph of a real project (~414 TS+JS files) | 3,757 symbols · ~4,900 edges · 100% with line ranges |
+| Declared coverage | 79% of files with symbols · 93% of lines covered · blind spots are DECLARED with a cause (`coverage-meter`) |
+| v3.13→v3.15 verification | ~116 scenarios green, re-run after every plan (zero regression) |
+| 19-phase benchmark (multi-tenant SaaS, with/without Agentix) | errors per phase 2.6→~0 · tests passing first try 79%→100% · refactor cascade 4/7→11/11 |
+
+> ⚠️ **Honesty first:** the benchmark is **N=1, directional, not peer-reviewed** — a single project. It shows direction, not absolute truth. Reproduce it yourself: it's in `benchmark/`.
 
 ---
 
 ## Compatibility
 
-Agentix is **first-class on Claude Code and Cursor** — that's where it's **battle-tested**. Because its engine is built on **open standards** (`AGENTS.md` and **MCP**), it *should* also work with other agents (VS Code, Windsurf, Kiro, Aider…), but in the interest of honesty: **so far it's only thoroughly tested on Claude Code and Cursor**. If you try it on another IDE and it works, open an issue and we'll add it to the "tested" list.
+Agentix is **first-class on Claude Code and Cursor** — that's where it's battle-tested. Because the engine relies on **open standards** (`AGENTS.md` and **MCP**), it *should* also work with other agents (VS Code, Windsurf, Kiro, Aider…), but in the interest of honesty: **so far it's only thoroughly tested on Claude Code and Cursor**. If you try it on another IDE and it works, open an issue and we'll add it to the list.
 
 ---
 
-## Commands — what runs on its own vs what you run
+## Dashboard
 
-> **Legend:** 🟢 automatic (runs by itself) · 🔵 trigger (you type it in chat) · ⚪ manual (terminal, only when needed)
+`akdd dashboard` → visual board at localhost:3847. The Knowledge Graph renders in **real 3D** — and it's three graphs:
 
-### 🟢 What happens on its own — you type nothing
+- **KDD Memory** — the decisions/errors/patterns from your memory.
+- **Code Structure** — a native map of your actual code (files, symbols, forms, CSS classes and their connections), straight from the AST index. Zero LLM calls, zero tokens. Department palette: sibling modules (same folder) share a color family.
+- **Combined** — merges both: you see how your code and your accumulated decisions relate.
 
-Since v3.7+, this is recorded **automatically, in the background, at zero token cost**:
-
-| When | What happens automatically |
-|------|----------------------------|
-| On every git **commit** | Closes the cycle: **registers the cycle**, **accumulates contracts**, indexes the code (incremental AST), syncs the graph |
-| Every **5 cycles** | Saves a **checkpoint** to resume in another chat or machine |
-| Inside every **`aa:`** | Reads memory, runs tests (TDD Gate), QA, the contract gate, review, and saves what it learned |
-| On **`akdd init`** in a project with code | Runs `onboard` + `ast` + `sync` to seed the dashboard |
-| On **install / update** | Installs the git hook by itself |
-
-### 🔵 What you type in chat — pipeline triggers
-
-| Command | What it does |
-|---------|--------------|
-| `aa: [any task]` | Full pipeline: analyze · build · test · learn |
-| `aa: sprint — [goal]` | Chains several tasks; memory flows between them |
-| `aa: aprende` | Absorbs knowledge from work done outside the pipeline |
-| `audit: auditar` · `audit: seguridad` | QA department — audits, **never touches code** |
-
-It also exposes **54 MCP tools** for compatible clients (Claude Code, Cursor, any stdio MCP client).
-
-> The command vocabulary (`aa:`, `audit:`, `akdd buscar`…) is in Spanish — the task you write after `aa:` can be in any language.
+Plain-language visual guides: [how to read the graph](docs/GRAFO-GUIA.md) · [how to read contracts + Creative Engine](docs/CONTRATOS-GUIA.md)
 
 ---
 
 ## ⚪ Full CLI reference (manual)
 
-Everything below is **manual** — run it only when you need it. The automatic behavior is in the section above.
+Everything below is **manual** — use it only when needed. The automatic behavior is described above.
 
 ### Setup & lifecycle
 ```bash
-akdd init                      # Deploy Agentix KDD in a new project
+akdd init                      # Install Agentix KDD in a project
 akdd onboard                   # Onboard an existing (brownfield) project
-akdd update                    # Update the engine from GitHub (memory stays intact)
-akdd sync                      # Sync memory + knowledge graph
-akdd hooks [status]            # Install / check the automatic git hook
+akdd update                    # Update the engine from GitHub (your memory stays intact)
+akdd sync                      # Sync memory + graph
+akdd hooks [status]            # Install / check git hooks (pre + post commit)
 akdd mcp                       # (Re)configure MCP for Cursor / Claude Code / VS Code
 akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd dashboard                 # Visual board at localhost:3847
 ```
 
-The Knowledge Graph tab renders in **real 3D** (spheres, not flat circles) — drag to orbit,
-scroll to zoom, click a node to highlight its connections. It's actually three graphs:
-
-- **KDD Memory** — the decisions/errors/patterns memory described above.
-- **Code Structure** — a native map of your actual code (files/symbols and their imports),
-  built straight from the AST index. No LLM calls, zero token cost.
-- **Combined** — merges both, so you can see how your code and your project's accumulated
-  decisions relate to each other.
-
-Each one has a floating "?" that opens a plain-language glossary of the terms you're looking at.
-
-New to the dashboard's Knowledge Graph tab or confused by Preservation Intel's contract
-counts? Two visual guides (Spanish, plain language, no jargon):
-
-<a href="docs/GRAFO-GUIA.md"><img src="assets/grafo-guia.svg" width="49%"></a>
-<a href="docs/CONTRATOS-GUIA.md"><img src="assets/contratos-guia.svg" width="49%"></a>
-
-[How to read the graph](docs/GRAFO-GUIA.md) · [How to read contracts + Creative Engine](docs/CONTRATOS-GUIA.md)
-
 ### Memory & knowledge graph
 ```bash
-akdd buscar "query"            # Hybrid semantic + BM25 search across memory
+akdd buscar "query"            # Hybrid semantic + BM25 search
 akdd recall "query"            # Recall relevant memory for a task
 akdd historial                 # Resume checkpoint — paste into a new chat
-akdd checkpoint                # Create a session checkpoint now
-akdd graph                     # Knowledge graph summary
-akdd stats                     # Memory statistics
+akdd graph · akdd stats        # Graph summary and statistics
 akdd why <file|entity>         # Why does this exist — decision trail
-akdd trail <id>                # Full decision trail for an entity
 akdd forget <id> "<reason>"    # Remove a memory node (audited)
-akdd decay                     # Apply time-decay to stale nodes
 akdd cure [run|report]         # MemCurator — autonomous memory governance
-akdd memory                    # Memory overview
 ```
 
-### Contracts & gates (Preservation Layer)
+### Contracts & gates (preservation layer)
 ```bash
-akdd contracts                 # Contract Guard status (protected/verified/candidate)
-akdd contracts gate            # Run the contract gate manually
-akdd validate                  # Validate knowledge consistency
-akdd predict <file>            # Predict regression risk before editing
-akdd impacto <file|module>     # Impact analysis — what breaks if this changes
+akdd contracts                 # Contract Guard status
+akdd predict <file>            # Regression risk before editing
+akdd impacto <file|module>     # What breaks if this changes
 akdd ast-impact <file>         # AST-level impact analysis
+node .agentic/grafo/gate-telemetry.cjs stats     # The ledger: what protected, when, iron vs protocol
+node .agentic/grafo/coverage-meter.cjs           # What the system sees and what it doesn't (declared blind spots)
+node .agentic/grafo/madurez-lint.cjs             # Engine maturity boundaries (core/stable/experimental)
 ```
 
-### Creative Engine
+### Code engine
 ```bash
-akdd creative suggest          # Generate improvement suggestions
-akdd creative apply <id>       # Apply a suggestion
-akdd creative dismiss <id>     # Dismiss a suggestion
-akdd creative level            # Show autonomy level (assisted → autonomous)
-akdd creative wins             # Show applied improvements
-akdd creative stats            # Creative Engine statistics
-```
-
-### AST & code intelligence
-```bash
-akdd ast index [target]        # Index the codebase (symbols, dependencies)
-akdd ast stats                 # AST index statistics
-akdd ast symbols <file>        # List symbols in a file
+akdd ast [stats|symbols <f>]   # Project AST index (auto-migrates by version)
 akdd git-context               # Current git context for the agent
 ```
 
 ### QA / Audit department 🔵 (in chat — audits only, never touches code)
 ```bash
 audit: auditar                 # Full audit — 7 subagents in parallel
-audit: seguridad               # Security — secrets, auth, vulnerabilities
-audit: frontend                # Frontend — source maps, leaked keys, build
-audit: backend                 # Backend — endpoints, validation, APIs
-audit: datos                   # Data — RLS, exposed DB, leaks
-audit: performance             # Performance — rate limiting, cache, scalability
-audit: browser                 # Real-browser QA
-audit: codigo                  # Code quality & Git
-audit: help                    # Show the audit menu
+audit: seguridad · frontend · backend · datos · performance · browser · codigo
 ```
-> Reports are saved to `_output/audit-[date].md` and `.audit/reporte-actual.md`.
-> To fix a finding: `aa: corrige el hallazgo SEG-01` (or just ask in chat).
-
-### Observability ⚪ (terminal)
-```bash
-akdd audit                     # Memory audit report (stale / conflicting nodes)
-akdd telemetry                 # Telemetry report
-akdd report                    # Effectiveness report (before/after)
-akdd metrics                   # Project metrics
-```
+> Reports land in `_output/audit-[date].md`. To fix a finding: `aa: corrige el hallazgo SEG-01`.
 
 ### Multi-instance (Lock Manager)
 ```bash
-akdd locks                     # Lock status — who owns what
-akdd locks acquire --module=X  # Acquire a module lock
-akdd locks release --module=X  # Release a module lock
-akdd locks check --files=...   # Check if files are locked
-akdd locks acquire-schema      # Acquire the schema lock (before migrations)
-akdd locks release-schema      # Release the schema lock
-akdd locks wait --module=X     # Block until a module is free
-akdd locks release-all         # Release all locks (session cleanup)
+akdd locks                     # Who owns which module
+akdd locks acquire/release --module=X
+akdd locks release-all         # Release everything (session cleanup)
 ```
+> Since v3.15 every lock leaves a window in the ledger on release — two overlapping windows from different instances are the mechanical proof that parallel work actually happened.
 
-### Collaboration (team sync) — 🔒 private beta
-> Shared **team memory** is in **private beta** and not enabled for public use yet. Everything
-> else in Agentix works **100% locally, no account required** — collaboration is the only piece
-> that's still gated. Want it for your team? [Open an issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
-
-### Specs & planning
-```bash
-akdd spec create <module>      # Create a spec for a module
-akdd spec                      # List specs
-akdd sprint-plan               # Plan a multi-phase sprint
-akdd benchmarks                # Run / view benchmarks
-```
-
-### Embeddings (semantic search)
-```bash
-akdd embed-status              # Embedding index status
-akdd embed-install             # Install embedding support
-akdd jina-install              # Install jina-embeddings-v2 model (heavy download)
-```
-
-### CI/CD
-```bash
-akdd ci-install                # Install CI integration
-akdd ci-status                 # CI status
-akdd ci-report                 # CI report
-akdd llms                      # Generate llms.txt + knowledge-graph.json
-```
+### Collaboration (team) — 🔒 private beta
+> Shared **team memory** is in **private beta**. Everything else works **100% locally, no account required**. Want it for your team? [Open an issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
 ---
 
-## Benchmark results
+## Honest limits (what it is NOT)
 
-Across a 19-phase run building a real multi-tenant SaaS (same Claude model in both modes), with vs. without Agentix:
-
-| Metric | Without | With |
-|--------|---------|------|
-| Errors per phase | 2.6 | ~0 |
-| Phases with a repeated error | 3 | 0 |
-| Tests passing first try | 79% | 100% |
-| Refactor cascade correct | 4/7 | 11/11 |
-
-> ⚠️ **Honesty first:** these are **N=1, directional, not peer-reviewed** — a single project. They show direction, not absolute truth. Reproduce the benchmark yourself in `benchmark/`.
+1. **It's not invulnerable.** The armor reduces and directs error; it doesn't eliminate it. The quality of autonomous fixes comes from whichever model you run.
+2. **It has a coverage ceiling, and declares it.** ~21% of the test project's files end up without symbols (tests with `describe()`, variables-only CSS). The invisible does NOT go unprotected — doubt closes the gate — but it doesn't get fine precision. `coverage-meter` tells you per project.
+3. **Regex extractors, not a parser** — a measured decision (see "Where it comes from"). Edge cases fall into DOUBT, not silence.
+4. **The semantic band stays in the model.** Business values are watched by iron (a mechanical scanner), but the judgment "does this contradict the SPIRIT of the decision?" is made by the LLM following protocol — and the ledger records which protection came from which.
+5. **Benchmark is N=1** — directional, reproducible in `benchmark/`, not peer-reviewed.
 
 ---
 
 ## Status & transparency
 
-Agentix is **young, evolving software**. All 48 engine files were audited and **30+ bugs were fixed** (memory, gates, vector search, packaging). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
+Agentix is **young, evolving software**. The engine's ~50 modules were audited and hardened (v3.15: maturity boundaries with a mechanical lint, gates moved into git hooks, complete `node:sqlite` fallback, upgrade path proven by simulation). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
-What **does work today**: the `aa:` pipeline, automatic registration of cycles and contracts (via the git hook), persistent memory with real semantic search, the gates (Spec / Regression / TDD / Security), the dashboard with real metrics, the MCP server, and multi-instance coordination.
+The real promise, without inflation:
 
-**Multi-agent dispatch is newer (v3.10–v3.11)** and each piece has a different confidence level: Context Enricher and 4-lens QA are **confirmed against real tasks** (the 4-lens QA specifically caught a real concurrency bug a single-reviewer pass had missed). Parallel front/back is implemented and wired the same way, but hasn't yet had a clean real-world confirmation of actually triggering in parallel — the one real test went single-author, for defensible reasons (a small, tightly-coupled feature), not a known bug. Treat it as "should work" rather than "proven" until it's confirmed on a genuinely split front+back task.
+> **"Agentix makes your coding AI remember, respect and preserve your project as it evolves — and when something makes it doubt, it stops on the safe side. Every protection it exercises is recorded and auditable."**
+
+Verify it yourself in 10 minutes: `akdd init` → `aa: configurar` → deliberately break something protected → watch the STOP with the exact zone → `node .agentic/grafo/gate-telemetry.cjs stats` → there's the recorded event.
 
 ---
 
