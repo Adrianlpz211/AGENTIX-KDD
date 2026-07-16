@@ -114,21 +114,24 @@ async function runBrowserGate(url, opts) {
     // positivos (required-attr en vez de form.checkValidity(), que da falsos
     // con valores precargados). Siempre WARN — mismo criterio que ui-native-gate.
     const checks = Array.isArray(opts.checks) ? opts.checks : [];
+    const checkOutcomes = []; // Plan 5, T6: resultado por check, acreditado al behavior
     if (!navError && checks.length) {
       for (const c of checks) {
         if (!c || !c.selector) continue;
+        let checkOk = false;
         try {
           if (c.type === 'element-exists') {
             const el = await page.$(c.selector);
             if (!el) findings.push({ tipo: 'UI_ELEMENT_MISSING', detalle: `${c.etiqueta || c.selector} no existe en la página` });
+            else checkOk = true;
           } else if (c.type === 'required-attr') {
-            const ok = await page.$eval(c.selector, el => el.required === true).catch(() => null);
-            if (ok !== true) {
+            const tieneReq = await page.$eval(c.selector, el => el.required === true).catch(() => null);
+            if (tieneReq !== true) {
               findings.push({
                 tipo: 'UI_REQUIRED_ROTO',
-                detalle: `${c.etiqueta || c.selector} ${ok === null ? 'no existe en la página' : 'perdió el atributo required'}`,
+                detalle: `${c.etiqueta || c.selector} ${tieneReq === null ? 'no existe en la página' : 'perdió el atributo required'}`,
               });
-            }
+            } else checkOk = true;
           } else if (c.type === 'select-usable') {
             const st = await page.$eval(c.selector, el => ({
               opciones: el.options ? el.options.length : 0,
@@ -137,11 +140,38 @@ async function runBrowserGate(url, opts) {
             if (!st) findings.push({ tipo: 'UI_SELECT_ROTO', detalle: `${c.etiqueta || c.selector} no existe en la página` });
             else if (st.deshabilitado) findings.push({ tipo: 'UI_SELECT_ROTO', detalle: `${c.etiqueta || c.selector} está disabled` });
             else if (st.opciones === 0) findings.push({ tipo: 'UI_SELECT_ROTO', detalle: `${c.etiqueta || c.selector} quedó sin opciones` });
+            else checkOk = true;
           }
         } catch (e) {
           findings.push({ tipo: 'UI_CHECK_ERROR', detalle: `${c.type} ${c.selector}: ${String(e.message || e).slice(0, 120)}` });
         }
+        checkOutcomes.push({ behavior_id: c.behavior_id || null, ok: checkOk });
       }
+
+      // Telemetría (Plan 5, T6): UN evento por behavior por corrida — PASS solo
+      // si TODOS sus checks pasaron (la promoción por mérito cuenta corridas
+      // verificadas, no checks sueltos). Fail-soft: sin BD, el gate sigue igual.
+      try {
+        const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+        if (fs.existsSync(dbPath)) {
+          const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
+          let tdb;
+          try { tdb = new (require('better-sqlite3'))(dbPath); }
+          catch { tdb = new (require('node:sqlite').DatabaseSync)(dbPath); }
+          const porBehavior = {};
+          checkOutcomes.forEach(o => {
+            if (!o.behavior_id) return;
+            (porBehavior[o.behavior_id] = porBehavior[o.behavior_id] || []).push(o.ok);
+          });
+          Object.entries(porBehavior).forEach(([bid, oks]) => {
+            gt.recordGateEvent(tdb, {
+              gate: 'browser', verdict: oks.every(Boolean) ? 'PASS' : 'FAIL',
+              behavior_id: bid, file: url, detalle: { checks: oks.length },
+            });
+          });
+          try { tdb.close(); } catch {}
+        }
+      } catch { /* nunca bloquea */ }
     }
 
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -208,7 +238,7 @@ function deriveChecksForView(projectRoot, viewFile) {
     catch { Database = require('node:sqlite').DatabaseSync; }
     const db = new Database(path.join(projectRoot, '.agentic', 'memoria.db'));
     try {
-      const rows = db.prepare("SELECT critical_flows, related_files, confidence FROM protected_behaviors WHERE status = 'active'").all();
+      const rows = db.prepare("SELECT id, critical_flows, related_files, confidence FROM protected_behaviors WHERE status = 'active'").all();
       const vista = String(viewFile).replace(/\\/g, '/').toLowerCase();
       const seen = new Set();
       for (const b of rows) {
@@ -232,7 +262,9 @@ function deriveChecksForView(projectRoot, viewFile) {
             const k = type + '|' + selector;
             if (seen.has(k)) return;
             seen.add(k);
-            checks.push({ type, selector, etiqueta: flow, confidence: b.confidence });
+            // behavior_id (Plan 5, T6): permite acreditar la verificación al
+            // behavior exacto — la promoción por mérito cuenta estos PASS.
+            checks.push({ type, selector, etiqueta: flow, confidence: b.confidence, behavior_id: b.id });
           };
           if (prefijo === 'FORM') add('element-exists');
           else if (prefijo === 'SELECT') { add('element-exists'); add('select-usable'); }

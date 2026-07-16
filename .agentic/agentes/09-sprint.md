@@ -294,3 +294,34 @@ Inferí estas tareas basándome en el proyecto:
 A) Proceder tal como está
 B) [ajuste específico]
 ```
+
+---
+
+## CONTINUIDAD MULTI-DÍA — aa: continúa sprint (v3.14, Plan 6 C3)
+
+El PLAN.md es la verdad LEGIBLE; el espejo parseable vive en project_settings
+(`active_sprint`) mantenido por `sprint-state.cjs`. Regla de una sola pluma:
+quien avanza el sprint actualiza AMBOS en el mismo paso.
+
+### Al INICIAR un sprint (además de escribir PLAN.md):
+```
+node .agentic/grafo/sprint-state.cjs start "[objetivo]" "[tarea 1]" "[tarea 2]" ...
+```
+
+### Al COMPLETAR/SALTAR cada tarea (además de actualizar PLAN.md):
+```
+node .agentic/grafo/sprint-state.cjs advance <n> COMPLETADA "[nota corta]"
+akdd checkpoint   # checkpoint POR TAREA, no solo cada 5 ciclos
+```
+
+### Cuando el usuario escribe `aa: continúa sprint` (chat nuevo, otro día, otra PC):
+1. `node .agentic/grafo/sprint-state.cjs status` → estado exacto
+2. Leer el sprint activo en PLAN.md (la sección de arriba del archivo)
+3. Si divergen → PLAN.md manda; regenerar el espejo con start/advance
+4. Anunciar: "🏃 Retomando sprint [objetivo] — tarea [N]: [título]"
+5. Continuar el protocolo normal de FASE 2 desde esa tarea
+
+### Al CERRAR el sprint (FASE 5):
+```
+node .agentic/grafo/sprint-state.cjs clear
+```

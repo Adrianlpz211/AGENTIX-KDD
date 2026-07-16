@@ -105,6 +105,17 @@ function runUiNativeGate(files, projectRoot) {
     allFindings.push(...escanearArchivo(content, file));
   });
 
+  // Telemetría (Plan 5, T1) — fail-soft total: sin BD o sin módulo, el gate sigue igual
+  try {
+    const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+    if (allFindings.length && fs.existsSync(dbPath)) {
+      const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
+      let db; try { db = new (require('better-sqlite3'))(dbPath); } catch { db = new (require('node:sqlite').DatabaseSync)(dbPath); }
+      allFindings.forEach(f => gt.recordGateEvent(db, { gate: 'ui_native', verdict: 'WARN', file: f.file, detalle: { id: f.id, line: f.line } }));
+      try { db.close(); } catch {}
+    }
+  } catch { /* nunca bloquea */ }
+
   if (allFindings.length === 0) {
     return {
       passed: true,

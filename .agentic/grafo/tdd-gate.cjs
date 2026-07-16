@@ -128,7 +128,8 @@ function runTests(command, projectRoot, testFile = null) {
 
     const result = spawnSync(
       shell, [shellFlag, shellCmd],
-      { cwd: projectRoot, timeout: 120000, stdio: 'pipe', encoding: 'utf8' }
+      // Plan 5 T8: configurable — suites reales pesadas superan los 120s
+      { cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 120000, stdio: 'pipe', encoding: 'utf8' }
     );
     output = (result.stdout || '') + (isWin ? (result.stderr || '') : '');
     errorOutput = result.stderr || '';

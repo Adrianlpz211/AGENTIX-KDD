@@ -196,7 +196,9 @@ function registrarContratos() {
   try {
     const result = execSync(
       `node "${tddGatePath}" run ${area}`,
-      { cwd: ROOT, stdio: 'pipe', timeout: 60000 }
+      // Plan 5 T8: 60s mataba suites reales (Lumo) ANTES de que el timeout
+      // interno del tdd-gate (120s) actuara — el padre estrangulaba al hijo.
+      { cwd: ROOT, stdio: 'pipe', timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 180000 }
     ).toString();
 
     const passMatch   = result.match(/Pasando:\s+(\d+)/);
@@ -204,7 +206,13 @@ function registrarContratos() {
 
     return { success: true, pasando };
   } catch(e) {
-    return { success: false, reason: e.message.slice(0, 100) };
+    const esTimeout = /ETIMEDOUT/i.test(e.message);
+    return {
+      success: false,
+      reason: esTimeout
+        ? `timeout — suite pesada; sube AKDD_TEST_TIMEOUT_MS o corre a mano: node .agentic/grafo/tdd-gate.cjs run ${area}`
+        : e.message.slice(0, 100),
+    };
   }
 }
 
@@ -686,6 +694,16 @@ async function main() {
       });
     }
   } catch { /* episodio es un plus, nunca bloquea post-cycle */ }
+
+  // Step 2.55: Potenciadores de memoria (Plan 5) — anclar errores recientes del
+  // área con los símbolos del changeset, enlazar error→fix por INTERSECCIÓN de
+  // anclas (números, no títulos), promoción por mérito y curación ligera de
+  // anclas. Fail-soft: si algo falla, el post-cycle sigue idéntico.
+  try {
+    const gt = require(path.join(GRAFO_DIR, 'gate-telemetry.cjs'));
+    const pm = gt.memoriaPostCycle(db, { area, cycleId: results.ciclo, taskName, projectRoot: ROOT });
+    if (!silent) console.log(`  2.5+ Potenciadores memoria... ✅ anclados:${pm.anclados} fix-links:${pm.enlazados} promovidos:${pm.promovidos}`);
+  } catch { if (!silent) console.log('  2.5+ Potenciadores memoria... ⚠️  omitido'); }
 
   // Step 2.6: Validar conocimiento existente — detecta memoria obsoleta (patrón
   // no revalidado en 90+ días) o sospechosa (los archivos a los que aplica

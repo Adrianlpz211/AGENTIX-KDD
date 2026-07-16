@@ -640,3 +640,32 @@ Resuelve automáticamente:
 - Grafo sincronizado
 
 **Si NO corres post-cycle.cjs: el dashboard nunca sube del 57%, los ciclos no se cuentan, los contratos no se acumulan.**
+
+## CONTINUIDAD DE SPRINT — aa: continúa sprint (v3.14)
+
+Si el usuario escribe `aa: continúa sprint` (o `aa: continua sprint`):
+1. Correr `node .agentic/grafo/sprint-state.cjs status` y leer el sprint activo de .agentic/PLAN.md
+2. Si divergen, PLAN.md manda (regenerar el espejo)
+3. Anunciar "🏃 Retomando sprint [objetivo] — tarea [N]" y seguir el protocolo de 09-sprint.md desde esa tarea
+El protocolo completo (start/advance/clear por tarea) está en .agentic/agentes/09-sprint.md.
+
+## RECOVERY — bucle de recuperación ante un gate STOP (v3.14, maquinaria Plan 6 C4)
+
+Cuando un gate mecánico (Regression/TDD) frena con STOP durante un ciclo aa::
+
+1. El evento ya quedó en la libreta (gate_events, automático).
+2. Consultar memoria ANTES de proponer: ¿hay error ANCLADO en esa zona?
+   ¿par error→fix conocido (edge was_fixed_by)? El brief del enricher ya los trae.
+3. Proponer el arreglo AL DIFF MÍNIMO — nunca refactor oportunista.
+4. LÍMITES DUROS (no negociables):
+   - Archivo en la lista CRITICAL del SECURITY GATE → NO auto-aplicar: escalar YA al usuario.
+   - STOP del Spec Gate por valores de negocio → SIEMPRE decisión humana, sin excepción.
+5. Aplicar → re-correr EL MISMO gate que frenó.
+6. Verde → registrar RECOVERED y seguir el pipeline:
+   node -e "require('./.agentic/grafo/gate-telemetry.cjs').recordGateEvent(require('better-sqlite3')('.agentic/memoria.db'), {gate:'recovery', verdict:'RECOVERED', detalle:{gateOrigen:'regression'}})"
+7. Rojo → SEGUNDO intento SOLO si la memoria ofrece un par error→fix distinto al primero.
+8. Rojo x2 → registrar RECOVERY_FAILED y escalar al usuario con la traza completa
+   (qué se intentó, por qué, y el veredicto de cada reintento).
+
+La calidad del arreglo la pone el modelo; la maquinaria garantiza el orden, los
+límites y el rastro. Ver estadísticas: recoveryStats en gate-telemetry.cjs.

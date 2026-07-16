@@ -177,7 +177,8 @@ function runTestFile(testPattern, projectRoot) {
 
     const result = require('child_process').spawnSync(
       shell, [flag, cmd],
-      { cwd: projectRoot, timeout: 60000, encoding: 'utf8', stdio: 'pipe' }
+      // Plan 5 T8: configurable — suites pesadas reales (Lumo) superan 60s
+      { cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 60000, encoding: 'utf8', stdio: 'pipe' }
     );
     
     const output = (result.stdout || '') + (result.stderr || '');
@@ -372,6 +373,11 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   ensureSchema(db);
   projectRoot = projectRoot || process.cwd();
 
+  // Telemetría (Plan 5, T1): la libreta donde por fin quedan los veredictos.
+  // Fail-soft total — si el módulo no está o falla, el gate sigue idéntico.
+  const telemetry = safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')));
+  const record = (ev) => { if (telemetry) safe(() => telemetry.recordGateEvent(db, ev)); };
+
   const related = findRelatedBehaviors(db, filesToChange);
   if (related.length === 0) {
     return { passed: true, reason: 'No protected behaviors related to this changeset' };
@@ -392,6 +398,9 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   //       STOP si fallan), con la zona exacta en el mensaje cuando es HIT.
   highConfidence.forEach(behavior => {
     const verdict = lineContainmentVerdict(db, behavior, filesToChange, projectRoot);
+    record({ gate: 'regression', verdict: verdict.mode, behavior_id: behavior.id,
+      file: (filesToChange && filesToChange[0]) || null,
+      detalle: verdict.mode === 'HIT' ? { hits: (verdict.hits || []).slice(0, 3) } : { why: verdict.why || null, confidence: 'HIGH' } });
     if (verdict.mode === 'MISS') {
       notices.push({
         behavior: behavior.description, module: behavior.module, confidence: 'HIGH',
@@ -422,6 +431,9 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   // MEDIA confidence → warn but don't block (misma contención por líneas)
   mediaConfidence.forEach(behavior => {
     const verdict = lineContainmentVerdict(db, behavior, filesToChange, projectRoot);
+    record({ gate: 'regression', verdict: verdict.mode, behavior_id: behavior.id,
+      file: (filesToChange && filesToChange[0]) || null,
+      detalle: verdict.mode === 'HIT' ? { hits: (verdict.hits || []).slice(0, 3) } : { why: verdict.why || null, confidence: 'MEDIA' } });
     if (verdict.mode === 'MISS') {
       notices.push({
         behavior: behavior.description, module: behavior.module, confidence: 'MEDIA',
@@ -440,6 +452,8 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   });
 
   if (violations.length > 0) {
+    violations.forEach(v => record({ gate: 'regression', verdict: 'STOP', behavior_id: v.behavior_id,
+      file: (filesToChange && filesToChange[0]) || null, detalle: { test: v.test_pattern, zona: v.zona || null } }));
     return {
       passed:     false,
       violations,
@@ -598,6 +612,9 @@ function verifyAfterTDD(db, testOutput, changedFiles, projectRoot) {
           module:       behavior.module,
           test_pattern: pattern,
         });
+        // Telemetría (Plan 5): regresión DETECTADA post-TDD — a la libreta
+        safe(() => require(path.join(__dirname, 'gate-telemetry.cjs'))
+          .recordGateEvent(db, { gate: 'tdd', verdict: 'FAIL', behavior_id: behavior.id, detalle: { test: pattern } }));
 
         // Record violation
         const vid = `iv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

@@ -188,6 +188,54 @@ async function enrich(task) {
     if (brief.riesgo === 'BAJO' && brief.contexto.some(c => c.confianza === 'BAJA')) {
       brief.riesgo = 'MEDIO';
     }
+
+    // 7. Zonas de error ANCLADAS (Plan 5, T2-lectura) — solo con riesgo
+    //    MEDIO/ALTO: errores de las áreas relacionadas que tienen ancla de
+    //    símbolo (nombres estables del índice, jamás coincidencia de texto).
+    //    Si la tarea cita el símbolo exacto entre backticks, el aviso sube de
+    //    tono; en ALTO además se sigue el edge was_fixed_by para llegar con la
+    //    cura conocida (Plan 5, T3).
+    try {
+      if (brief.riesgo !== 'BAJO' && areas.length) {
+        const ph2 = areas.map(() => '?').join(',');
+        const anclados = db.prepare(
+          `SELECT id, titulo, anclas FROM nodos
+           WHERE tipo='error' AND anclas IS NOT NULL AND anclas != '[]' AND area IN (${ph2})
+           LIMIT 6`
+        ).all(...areas);
+        const tokensAncla = new Set([...task.matchAll(/\`([^\`]+)\`/g)].map(m => m[1].trim()));
+        let agregados = 0;
+        for (const e of anclados) {
+          let anclas = []; try { anclas = JSON.parse(e.anclas); } catch {}
+          if (!anclas.length) continue;
+          const citada = anclas.find(a => a && tokensAncla.has(a.symbol_name));
+          const muestra = citada || anclas[0];
+          if (!citada && agregados >= 2) continue; // sin cita directa: máximo 2 — no inundar el brief
+          brief.avisos.push(
+            (citada ? '🎯' : '⚠️') +
+            ` Error anclado en esta área: "${String(e.titulo).slice(0, 70)}" — vive en ${muestra.kind}:${muestra.symbol_name} (${muestra.file})`
+          );
+          agregados++;
+          if (brief.riesgo === 'ALTO') {
+            try {
+              const fix = db.prepare(
+                `SELECT hacia_entidad, descripcion FROM relaciones_semanticas
+                 WHERE tipo='was_fixed_by' AND desde_entidad = ? LIMIT 1`
+              ).get(`nodo:error:${e.titulo}`);
+              if (fix) brief.avisos.push(`   ↳ 💊 Cura conocida: ${fix.hacia_entidad}${fix.descripcion ? ' — ' + String(fix.descripcion).slice(0, 80) : ''}`);
+            } catch {}
+          }
+        }
+      }
+    } catch { /* zonas ancladas son un plus, nunca un requisito */ }
+
+    // 8. Presupuesto por riesgo (Plan 5, T5): brief del tamaño del peligro.
+    //    BAJO = recorte (una tarea trivial no necesita el kilo de contexto);
+    //    MEDIO = lo de siempre; ALTO = ya trae las secciones extra de arriba.
+    if (brief.riesgo === 'BAJO') {
+      brief.contexto = brief.contexto.slice(0, 3);
+      brief.avisos = brief.avisos.slice(0, 5);
+    }
   } catch {
     /* cualquier falla de aquí en adelante no invalida lo ya encontrado */
   } finally {
