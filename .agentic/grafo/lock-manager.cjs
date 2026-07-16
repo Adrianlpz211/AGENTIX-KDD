@@ -57,7 +57,21 @@ const INSTANCE_ID = process.env.AGENTIC_INSTANCE_ID || getOrCreateInstanceId();
 function openDB() {
   const projNodeModules = path.join(ROOT, 'node_modules');
   if (!module.paths.includes(projNodeModules)) module.paths.unshift(projNodeModules);
-  const db = new (require('better-sqlite3'))(DB_PATH);
+  let db;
+  try { db = new (require('better-sqlite3'))(DB_PATH); }
+  catch {
+    // Fallback node:sqlite (Node 22+) — better-sqlite3 es optionalDependency y
+    // su build nativo puede faltar (sin toolchain). Polyfills mínimos para la
+    // superficie que usa este módulo: pragma() y transaction().
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(DB_PATH);
+    db.pragma = (s) => { try { db.exec('PRAGMA ' + s); } catch {} };
+    db.transaction = (fn) => (...args) => {
+      db.exec('BEGIN IMMEDIATE');
+      try { const r = fn(...args); db.exec('COMMIT'); return r; }
+      catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+    };
+  }
   // WAL mode: permite lecturas concurrentes mientras se escribe
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000'); // esperar hasta 5s si la BD está ocupada
@@ -257,11 +271,13 @@ function acquireModuleLock(db, moduleName, files = [], purpose = '') {
 // ── Release module lock ───────────────────────────────────────────────────────
 
 function releaseModuleLock(db, moduleName) {
+  let lockSnapshot = null;
   const release = db.transaction(() => {
     const lock = db.prepare(
       "SELECT * FROM module_locks WHERE module_name = ? AND instance_id = ?"
     ).get(moduleName, INSTANCE_ID);
     if (!lock) return { success: false, reason: `No lock owned by this instance for [${moduleName}]` };
+    lockSnapshot = lock;
 
     db.prepare("DELETE FROM module_locks WHERE module_name = ? AND instance_id = ?")
       .run(moduleName, INSTANCE_ID);
@@ -270,7 +286,25 @@ function releaseModuleLock(db, moduleName) {
 
     return { success: true, module: moduleName };
   });
-  return release();
+  const res = release();
+
+  // Plan 7 (T3): los locks se BORRAN al liberarse — sin historial, el Parallel
+  // Guard no puede reconstruir ventanas. Esta migaja mecánica persiste la
+  // ventana [acquired_at → ahora] en la libreta (gate_events): dos ventanas
+  // SOLAPADAS de instancias DISTINTAS = paralelismo probado por hierro,
+  // independiente de transcripts, cwd u obediencia del modelo. Fail-soft.
+  if (res.success && lockSnapshot) {
+    try {
+      require(require('path').join(__dirname, 'gate-telemetry.cjs')).recordGateEvent(db, {
+        gate: 'legion', verdict: 'LOCK_WINDOW', source: 'mechanical',
+        detalle: {
+          module: moduleName, instance: INSTANCE_ID,
+          acquired_at: lockSnapshot.acquired_at, released_at: new Date().toISOString(),
+        },
+      });
+    } catch { /* nunca bloquea el release */ }
+  }
+  return res;
 }
 
 // ── Release all locks for this instance ──────────────────────────────────────

@@ -26,7 +26,8 @@
 const fs   = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { checkParallelDispatch, formatearVeredicto } = require('./parallel-guard.cjs');
+// parallel-guard se requiere perezoso (dentro del try del Paso 10) — post-cycle
+// es core y debe poder CARGAR aunque un módulo de nivel superior se rompa.
 
 const ROOT        = process.cwd();
 const AGENTIC_DIR = path.join(ROOT, '.agentic');
@@ -789,6 +790,7 @@ async function main() {
   if (opts['expected-parallel']) {
     if (!silent) process.stdout.write('  10. Parallel Guard... ');
     try {
+      const { checkParallelDispatch, formatearVeredicto } = require('./parallel-guard.cjs');
       const windowMinutes = parseInt(opts['window-minutes']) || 30;
       const veredicto = await checkParallelDispatch(ROOT, { windowMinutes });
       results.parallelGuard = veredicto;

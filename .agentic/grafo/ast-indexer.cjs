@@ -99,6 +99,12 @@ CREATE INDEX IF NOT EXISTS idx_ast_edge_kind ON ast_edges(kind);
 
 function initASTSchema(db) {
   db.exec(AST_SCHEMA);
+  // Migración tolerante (v3.15): CREATE IF NOT EXISTS no agrega columnas a una
+  // tabla vieja ya existente. line_end viene en el schema desde v1, pero si un
+  // cliente antiquísimo la tuviera sin esa columna, el INSERT nuevo reventaría.
+  // Un ALTER de un centavo lo blinda — mismo patrón del resto del motor.
+  try { db.exec('ALTER TABLE ast_symbols ADD COLUMN line_end INTEGER DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE ast_symbols ADD COLUMN content_hash TEXT'); } catch {}
 }
 
 // ─── DETECCIÓN DE LENGUAJE ────────────────────────────────────────────────────
@@ -1142,9 +1148,30 @@ function getAllSourceFiles(dir, projectRoot, results = []) {
   return results;
 }
 
+// Plan 7 (T6): sello de versión del índice — SUBIR este número cada vez que
+// cambien extractores/kinds/line_end. Un cliente viejo que corre `akdd update`
+// trae el motor nuevo pero su índice cacheado (por hash de contenido) JAMÁS se
+// recalcularía solo: line_end quedaría en 0 y los kinds nuevos no existirían
+// (la "trampa del caché", medida en v3.13). El sello fuerza UNA reconstrucción
+// completa y automática la primera vez que el motor nuevo indexa.
+const INDEX_VERSION = 4;
+
 function indexProject(projectRoot, targetDir = null) {
   const db = openDB(projectRoot);
   initASTSchema(db);
+
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS project_settings (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+    const v = db.prepare(`SELECT value FROM project_settings WHERE key='index_version'`).get();
+    if (!v || parseInt(v.value, 10) !== INDEX_VERSION) {
+      console.log(`[AST-INDEXER] Versión de índice ${v ? v.value : '(ninguna)'} → ${INDEX_VERSION}: reconstrucción completa automática (una sola vez)`);
+      db.exec('DELETE FROM ast_symbols; DELETE FROM ast_edges;');
+      db.prepare(`INSERT OR REPLACE INTO project_settings (key, value, updated_at) VALUES ('index_version', ?, datetime('now'))`)
+        .run(String(INDEX_VERSION));
+    }
+  } catch { /* el sello es un plus — sin project_settings el index corre igual */ }
   db.exec(`
     CREATE TABLE IF NOT EXISTS ast_index_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,0 +1,23 @@
+{
+  "_doc": "Manifiesto de madurez del motor (Plan 7, T4). Vive dentro de grafo/ para viajar con cada akdd update. Niveles: core (intocable salvo arquitectura mayor; CARGA solo con core), stable (probado; carga con core+stable), experimental (en validación; carga con lo que sea). La frontera aplica a requires de CARGA (columna 0); las invocaciones perezosas fail-soft pueden cruzar hacia arriba. Módulos no listados = stable. Lint: node .agentic/grafo/madurez-lint.cjs",
+  "core": [
+    "grafo.cjs", "kdd-memory.cjs", "ast-indexer.cjs", "git-context.cjs",
+    "lock-manager.cjs", "tdd-gate.cjs", "regression-guard.cjs",
+    "post-cycle.cjs", "path-norm.cjs", "gate-telemetry.cjs",
+    "area-detector.cjs", "causal-edges.cjs"
+  ],
+  "stable": [
+    "security-gate.cjs", "spec-gate.cjs", "spec-value-scan.cjs",
+    "contract-guard.cjs", "context-enricher.cjs",
+    "mem-curator.cjs", "creative-engine.cjs", "prediccion.cjs",
+    "install-hooks.cjs", "parallel-guard.cjs", "ui-native-gate.cjs",
+    "stack-profile.cjs", "endpoint-heuristic.cjs", "sprint-state.cjs",
+    "knowledge-validator.cjs", "reasoning-bank.cjs",
+    "harness.cjs", "telemetry.cjs", "effectiveness-report.cjs",
+    "madurez-lint.cjs", "embeddings.cjs"
+  ],
+  "experimental": [
+    "browser-gate.cjs", "ts-enricher.cjs", "collab-manager.cjs",
+    "graph-server.cjs", "watch-errors.cjs", "coverage-meter.cjs"
+  ]
+}

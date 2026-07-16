@@ -52,6 +52,10 @@ function ensureTelemetrySchema(db) {
   safe(() => db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_behavior ON gate_events(behavior_id)`));
   // T2: anclas en la memoria KDD (errores/patrones/decisiones)
   safe(() => db.exec(`ALTER TABLE nodos ADD COLUMN anclas TEXT DEFAULT '[]'`));
+  // Plan 7 (T5): quién protegió — hierro o protocolo. 'mechanical' = código que
+  // corre sin depender del modelo; 'protocol' = el modelo siguiendo instrucción.
+  // Publicable: "qué % de tus protecciones es hierro".
+  safe(() => db.exec(`ALTER TABLE gate_events ADD COLUMN source TEXT DEFAULT 'mechanical'`));
   // T4: anclas retiradas por obsolescencia (rastro, no borrado)
   safe(() => db.exec(`ALTER TABLE protected_behaviors ADD COLUMN anclas_obsoletas TEXT DEFAULT '[]'`));
 }
@@ -63,30 +67,32 @@ function recordGateEvent(db, ev) {
     if (!db || !ev || !ev.gate || !ev.verdict) return false;
     ensureTelemetrySchema(db);
     db.prepare(`
-      INSERT INTO gate_events (gate, verdict, behavior_id, file, detalle, cycle_hint)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO gate_events (gate, verdict, behavior_id, file, detalle, cycle_hint, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       String(ev.gate), String(ev.verdict),
       ev.behavior_id ? String(ev.behavior_id) : null,
       ev.file ? String(ev.file) : null,
       JSON.stringify(ev.detalle || {}),
-      ev.cycle_hint ? String(ev.cycle_hint) : null
+      ev.cycle_hint ? String(ev.cycle_hint) : null,
+      ev.source === 'protocol' ? 'protocol' : 'mechanical'
     );
     return true;
   } catch { return false; } // la telemetría JAMÁS tumba al que la llama
 }
 
 function gateStats(db, opts = {}) {
-  const out = { total: 0, porGate: {}, protecciones: 0, desde: opts.desde || null };
+  const out = { total: 0, porGate: {}, porSource: {}, protecciones: 0, desde: opts.desde || null };
   try {
     ensureTelemetrySchema(db);
     const where = opts.desde ? `WHERE ts >= '${String(opts.desde).slice(0, 10)}'` : '';
     const rows = safe(() => db.prepare(
-      `SELECT gate, verdict, COUNT(*) n FROM gate_events ${where} GROUP BY gate, verdict`
+      `SELECT gate, verdict, COALESCE(source, 'mechanical') src, COUNT(*) n FROM gate_events ${where} GROUP BY gate, verdict, src`
     ).all()) || [];
     rows.forEach(r => {
       out.total += r.n;
-      (out.porGate[r.gate] = out.porGate[r.gate] || {})[r.verdict] = r.n;
+      (out.porGate[r.gate] = out.porGate[r.gate] || {})[r.verdict] = ((out.porGate[r.gate] || {})[r.verdict] || 0) + r.n;
+      out.porSource[r.src] = (out.porSource[r.src] || 0) + r.n;
       // "protección activada" = el guardia hizo su trabajo de verdad
       if (['HIT', 'STOP', 'FAIL'].includes(r.verdict)) out.protecciones += r.n;
     });

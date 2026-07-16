@@ -19,3 +19,4 @@ vendor/
 
 # Artefactos de auditoría / archivos rotos renombrados — internos, NO publicar
 *.ROTO*
+.agentic/_instance_id

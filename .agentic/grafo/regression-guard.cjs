@@ -737,7 +737,9 @@ if (require.main === module) {
     process.exit(0);
   }
 
-  const DB = new (require('better-sqlite3'))(dbPath);
+  let DB;
+  try { DB = new (require('better-sqlite3'))(dbPath); }
+  catch { DB = new (require('node:sqlite').DatabaseSync)(dbPath); }
   ensureSchema(DB);
 
   switch(cmd) {

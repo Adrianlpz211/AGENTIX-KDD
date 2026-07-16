@@ -396,6 +396,15 @@ guardar memoria) se trabaja con un solo autor coherente — NUNCA en paralelo.
   el flujo secuencial. Si hay CUALQUIER duda de que los archivos se crucen, o la tarea es
   solo front o solo back → un solo autor, secuencial, como siempre. Ante la duda,
   secuencial — nunca arriesgar un archivo pisado por ganar velocidad.
+  **Locks (v3.15 — evidencia mecánica):** el brief de CADA sub-agente debe incluir la
+  instrucción de adquirir su lock de módulo al empezar y liberarlo al terminar
+  (`node .agentic/grafo/lock-manager.cjs acquire --module=front-[área] ...` /
+  `release --module=front-[área]`; el back igual con `back-[área]`). No es solo
+  coordinación: al liberar, el lock-manager escribe una ventana LOCK_WINDOW en la
+  libreta (gate_events), y dos ventanas solapadas de instancias distintas son la
+  PRUEBA mecánica de paralelismo que el Parallel Guard verifica — independiente de
+  transcripts y del entorno. Sin locks, el guard puede quedar en SIN_EVIDENCIA
+  aunque el paralelismo haya sido real (falso negativo documentado el 2026-07-16).
 - **Memoria / post-cycle** → escritura única coherente.
 
 ### Regla de degradación (OBLIGATORIA — no rompe nada)
@@ -661,8 +670,10 @@ Cuando un gate mecánico (Regression/TDD) frena con STOP durante un ciclo aa::
    - Archivo en la lista CRITICAL del SECURITY GATE → NO auto-aplicar: escalar YA al usuario.
    - STOP del Spec Gate por valores de negocio → SIEMPRE decisión humana, sin excepción.
 5. Aplicar → re-correr EL MISMO gate que frenó.
-6. Verde → registrar RECOVERED y seguir el pipeline:
-   node -e "require('./.agentic/grafo/gate-telemetry.cjs').recordGateEvent(require('better-sqlite3')('.agentic/memoria.db'), {gate:'recovery', verdict:'RECOVERED', detalle:{gateOrigen:'regression'}})"
+6. Verde → registrar RECOVERED y seguir el pipeline (source:'protocol' — este evento lo
+   escribe el MODELO siguiendo instrucciones, no un gate de hierro; así la libreta mide
+   honestamente cuánta protección es mecánica y cuánta depende de obediencia):
+   node -e "require('./.agentic/grafo/gate-telemetry.cjs').recordGateEvent(require('better-sqlite3')('.agentic/memoria.db'), {gate:'recovery', verdict:'RECOVERED', source:'protocol', detalle:{gateOrigen:'regression'}})"
 7. Rojo → SEGUNDO intento SOLO si la memoria ofrece un par error→fix distinto al primero.
 8. Rojo x2 → registrar RECOVERY_FAILED y escalar al usuario con la traza completa
    (qué se intentó, por qué, y el veredicto de cada reintento).

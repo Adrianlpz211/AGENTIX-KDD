@@ -43,9 +43,10 @@ function checkContractsVsTests() {
   try {
     const projNodeModules = path.join(ROOT, 'node_modules');
     if (!module.paths.includes(projNodeModules)) module.paths.unshift(projNodeModules);
-    db = new (require('better-sqlite3'))(dbPath);
+    try { db = new (require('better-sqlite3'))(dbPath); }
+    catch { db = new (require('node:sqlite').DatabaseSync)(dbPath); }
   } catch(e) {
-    addFinding('WARN', 'contracts', 'No se pudo abrir memoria.db: ' + e.message, 'Verifica que better-sqlite3 está instalado');
+    addFinding('WARN', 'contracts', 'No se pudo abrir memoria.db: ' + e.message, 'Verifica que better-sqlite3 está instalado (o Node 22+ para node:sqlite)');
     return;
   }
 

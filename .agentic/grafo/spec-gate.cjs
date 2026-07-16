@@ -20,7 +20,8 @@ const safe = (fn, fb = null) => { try { return fn(); } catch { return fb; } };
 function openDB(projectRoot) {
   const dbPath = path.join(projectRoot, '.agentic/memoria.db');
   if (!fs.existsSync(dbPath)) return null;
-  try { return new (require('better-sqlite3'))(dbPath); } catch { return null; }
+  try { return new (require('better-sqlite3'))(dbPath); }
+  catch { try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath); } catch { return null; } }
 }
 
 /**

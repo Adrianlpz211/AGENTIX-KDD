@@ -1,0 +1,23 @@
+#!/bin/sh
+# Agentic KDD managed hook
+# pre-commit — gates MECÁNICOS sobre lo staged (Plan 7): la invocación deja de
+# depender de que el modelo se acuerde. v1: SIEMPRE exit 0 (visible, no
+# bloqueante — la escalada a bloqueo se gana con datos). Para desactivar:
+# borra este archivo o corre: node .agentic/grafo/install-hooks.cjs --uninstall
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# 1) Valores de negocio vigilados en el diff staged (spec mecánico)
+[ -f "$ROOT/.agentic/grafo/spec-value-scan.cjs" ] && \
+  node "$ROOT/.agentic/grafo/spec-value-scan.cjs" --staged 2>/dev/null
+
+# 2) Escudo de seguridad sobre los archivos de código staged (secretos/PII/inyección)
+if [ -f "$ROOT/.agentic/grafo/security-gate.cjs" ]; then
+  STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|env)$' | head -20 | tr '\n' ' ')
+  [ -n "$STAGED" ] && node "$ROOT/.agentic/grafo/security-gate.cjs" $STAGED 2>/dev/null
+fi
+
+# v1: nunca bloquear — el hallazgo queda visible en la terminal y en la
+# libreta (gate_events, source=mechanical). exit 0 SIEMPRE.
+exit 0

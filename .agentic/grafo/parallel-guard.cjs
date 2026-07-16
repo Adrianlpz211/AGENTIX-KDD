@@ -109,9 +109,48 @@ async function analizarTranscript(transcriptPath, windowMinutes) {
  * `windowMinutes` minutos de la sesión activa de este proyecto.
  */
 async function checkParallelDispatch(projectRoot, { windowMinutes = 30 } = {}) {
+  // Plan 7 (T3) — EVIDENCIA POR LOCKS, primero: dos ventanas de lock SOLAPADAS
+  // de instancias DISTINTAS dentro de la ventana = paralelismo probado por
+  // hierro (las migajas LOCK_WINDOW las escribe lock-manager al liberar).
+  // Independiente de transcripts, del cwd del orquestador y de la obediencia
+  // del modelo — cierra el falso negativo documentado el 2026-07-16.
+  try {
+    const path = require('path');
+    const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+    if (fs.existsSync(dbPath)) {
+      let db;
+      try { db = new (require('better-sqlite3'))(dbPath, { readonly: true }); }
+      catch { db = new (require('node:sqlite').DatabaseSync)(dbPath, { readOnly: true }); }
+      try {
+        const rows = db.prepare(
+          `SELECT detalle FROM gate_events
+           WHERE gate = 'legion' AND verdict = 'LOCK_WINDOW'
+             AND ts >= datetime('now', ?)`
+        ).all(`-${Math.max(1, windowMinutes)} minutes`);
+        const ventanas = rows
+          .map(r => { try { return JSON.parse(r.detalle); } catch { return null; } })
+          .filter(v => v && v.instance && v.acquired_at && v.released_at)
+          .map(v => ({ instance: v.instance, ini: Date.parse(v.acquired_at), fin: Date.parse(v.released_at), module: v.module }));
+        for (let i = 0; i < ventanas.length; i++) {
+          for (let j = i + 1; j < ventanas.length; j++) {
+            const a = ventanas[i], b = ventanas[j];
+            if (a.instance !== b.instance && a.ini < b.fin && b.ini < a.fin) {
+              try { db.close(); } catch {}
+              return {
+                verdicto: 'CONFIRMADO',
+                razon: `Ventanas de lock solapadas de 2 instancias distintas ([${a.module}] ${a.instance.slice(-8)} ∥ [${b.module}] ${b.instance.slice(-8)}) — paralelismo probado por locks (mecánico).`,
+                evidencia: 'locks',
+              };
+            }
+          }
+        }
+      } finally { try { db.close(); } catch {} }
+    }
+  } catch { /* la evidencia por locks es un plus — sigue la vía de transcripts */ }
+
   const transcriptPath = encontrarTranscriptMasReciente(projectRoot);
   if (!transcriptPath) {
-    return { verdicto: 'SIN_EVIDENCIA', razon: 'No se encontró ningún transcript de sesión para este proyecto.' };
+    return { verdicto: 'SIN_EVIDENCIA', razon: 'Sin ventanas de lock solapadas en la ventana Y sin transcript de sesión para este proyecto. (Tip: los sub-agentes del MODO LEGIÓN deben adquirir su lock de módulo — eso deja evidencia mecánica.)' };
   }
 
   const mensajes = await analizarTranscript(transcriptPath, windowMinutes);
