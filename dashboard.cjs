@@ -1117,6 +1117,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .t-error{background:rgba(239,68,68,.15);color:#f87171}
 .t-patron{background:rgba(16,185,129,.15);color:#34d399}
 .t-decision{background:rgba(59,130,246,.15);color:#60a5fa}
+/* Variantes FRONT — misma familia neón que los nodos del grafo */
+.t-error.front{background:rgba(255,92,168,.18);color:#ff8fc2}
+.t-patron.front{background:rgba(163,230,53,.16);color:#bef264}
+.t-decision.front{background:rgba(34,211,238,.16);color:#67e8f9}
 .mb{font-size:9px;padding:1px 4px;border-radius:3px;font-weight:500}
 .cALTA{background:rgba(16,185,129,.2);color:#34d399}
 .cMEDIA{background:rgba(245,158,11,.2);color:#fbbf24}
@@ -1403,6 +1407,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="fpill" onclick="setFilter('ALTA',this)" data-i="f_high">★ HIGH</div>
         <div class="fpill" onclick="setFilter('god',this)" data-i="f_god">⚡ Divine</div>
       </div>
+      <div class="filter-row" style="margin-top:4px">
+        <div class="fpill side-pill active" onclick="setSide('all',this)" data-i="f_side_all">All</div>
+        <div class="fpill side-pill" onclick="setSide('front',this)" style="border-color:rgba(255,92,168,.45)">Front</div>
+        <div class="fpill side-pill" onclick="setSide('back',this)" style="border-color:rgba(59,130,246,.45)">Back</div>
+      </div>
       <div class="sb-body" id="nodes-list"></div>
     </div>
 
@@ -1458,10 +1467,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <button class="help-fab" onclick="showTermsGlossary('kdd')" title="¿Qué significan los términos de este grafo?">?</button>
     <div id="gc"></div>
     <div class="gtt" id="gtt"></div>
-    <div class="graph-legend">
+    <div class="graph-legend" style="flex-wrap:wrap;max-width:460px">
       <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span data-i="l_err">error</span></div>
       <div class="lg-item"><div class="lg-dot" style="background:#10b981"></div><span data-i="l_pat">pattern</span></div>
       <div class="lg-item"><div class="lg-dot" style="background:#3b82f6"></div><span data-i="l_dec">decision</span></div>
+      <div class="lg-item" style="border-left:1px solid var(--border);padding-left:10px"><div class="lg-dot" style="background:#ff5ca8"></div><span data-i="l_err_f">error front</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#a3e635"></div><span data-i="l_pat_f">pattern front</span></div>
+      <div class="lg-item"><div class="lg-dot" style="background:#22d3ee"></div><span data-i="l_dec_f">decision front</span></div>
       <div class="lg-item"><div class="lg-dot" style="background:transparent;border:2px solid #f59e0b;box-sizing:border-box"></div><span style="color:var(--amber)" data-i="l_divine">divine</span></div>
     </div>
     <div class="graph-controls">
@@ -2385,7 +2397,15 @@ const DEGREE_MAP = ${JSON.stringify(degreeMap)};
 const MAX_DEGREE = ${maxDegree};
 const GOD_THRESHOLD = ${godThreshold};
 const COLORS = {error:'#ef4444',patron:'#10b981',decision:'#3b82f6'};
-let lang='en', isDark=true, currentFilter='all', searchVal='', selectedNodeId=null;
+// Variantes FRONT (16/07/2026, pedido del dueño): el conocimiento que nace del
+// frontend se distingue de un vistazo sin leer el área. Mismo temperamento
+// semántico (error cálido, patrón verdoso, decisión azulado) pero familia
+// neón inconfundible — coherente con la convención "front = eléctrico" del
+// Combined. Rosa (no naranja) para el error: el naranja chocaba con el ámbar
+// de los nodos divinos.
+const COLORS_FRONT = {error:'#ff5ca8',patron:'#a3e635',decision:'#22d3ee'};
+function kddNodeColor(d){ return (esNodoFrontend(d)?COLORS_FRONT:COLORS)[d.tipo]||'#8b5cf6'; }
+let lang='en', isDark=true, currentFilter='all', currentSide='all', searchVal='', selectedNodeId=null;
 let labelsVisible=false;
 let modGraphRendered=false;
 const nodeMap={};
@@ -2399,8 +2419,8 @@ EDGES.forEach(e=>{
 });
 
 const T={
-  en:{tab_graph:'Knowledge Graph',tab_docs:'Project Docs',sb_nodes:'Nodes',sb_report:'Report',sb_stats:'Stats',f_all:'All',f_err:'Errors',f_pat:'Patterns',f_dec:'Decisions',f_high:'★ HIGH',f_god:'⚡ Divine',s_total:'nodes',s_rel:'relations',s_god:'divine',s_high:'HIGH',l_err:'error',l_pat:'pattern',l_dec:'decision',l_divine:'divine',btn_reset:'⟳ Reset',btn_center:'⊙ Center',btn_labels:'Labels',nav_overview:'Overview',nav_project:'Project',nav_stack:'Stack',nav_commands:'Commands',nav_arch:'Architecture',nav_modules:'Modules',nav_rules:'Rules',nav_knowledge:'Knowledge',nav_patterns:'Patterns',nav_decisions:'Decisions',nav_errors:'Errors',nav_questions:'For New Devs',h_stack:'Tech Stack',sub_stack:'Technologies used.',graph_report:'Graph Report',divine_nodes:'Divine nodes',surprising:'Surprising connections',btn_print:'Print / Export PDF',btn_copy:'Copy as Markdown',dark:'Dark',light:'Light'},
-  es:{tab_graph:'Grafo de conocimiento',tab_docs:'Docs del proyecto',sb_nodes:'Nodos',sb_report:'Reporte',sb_stats:'Stats',f_all:'Todos',f_err:'Errores',f_pat:'Patrones',f_dec:'Decisiones',f_high:'★ ALTA',f_god:'⚡ Divinos',s_total:'nodos',s_rel:'relaciones',s_god:'divinos',s_high:'ALTA',l_err:'error',l_pat:'patrón',l_dec:'decisión',l_divine:'divino',btn_reset:'⟳ Resetear',btn_center:'⊙ Centrar',btn_labels:'Labels',nav_overview:'Vista general',nav_project:'Proyecto',nav_stack:'Stack',nav_commands:'Comandos',nav_arch:'Arquitectura',nav_modules:'Módulos',nav_rules:'Reglas',nav_knowledge:'Conocimiento',nav_patterns:'Patrones',nav_decisions:'Decisiones',nav_errors:'Errores',nav_questions:'Para nuevos devs',h_stack:'Stack Tecnológico',sub_stack:'Tecnologías del proyecto.',graph_report:'Reporte del grafo',divine_nodes:'Nodos divinos',surprising:'Conexiones sorprendentes',btn_print:'Imprimir / Exportar PDF',btn_copy:'Copiar como Markdown',dark:'Oscuro',light:'Claro'}
+  en:{tab_graph:'Knowledge Graph',tab_docs:'Project Docs',sb_nodes:'Nodes',sb_report:'Report',sb_stats:'Stats',f_all:'All',f_err:'Errors',f_pat:'Patterns',f_dec:'Decisions',f_high:'★ HIGH',f_god:'⚡ Divine',f_side_all:'All',s_total:'nodes',s_rel:'relations',s_god:'divine',s_high:'HIGH',l_err:'error',l_pat:'pattern',l_dec:'decision',l_err_f:'error front',l_pat_f:'pattern front',l_dec_f:'decision front',l_divine:'divine',btn_reset:'⟳ Reset',btn_center:'⊙ Center',btn_labels:'Labels',nav_overview:'Overview',nav_project:'Project',nav_stack:'Stack',nav_commands:'Commands',nav_arch:'Architecture',nav_modules:'Modules',nav_rules:'Rules',nav_knowledge:'Knowledge',nav_patterns:'Patterns',nav_decisions:'Decisions',nav_errors:'Errors',nav_questions:'For New Devs',h_stack:'Tech Stack',sub_stack:'Technologies used.',graph_report:'Graph Report',divine_nodes:'Divine nodes',surprising:'Surprising connections',btn_print:'Print / Export PDF',btn_copy:'Copy as Markdown',dark:'Dark',light:'Light'},
+  es:{tab_graph:'Grafo de conocimiento',tab_docs:'Docs del proyecto',sb_nodes:'Nodos',sb_report:'Reporte',sb_stats:'Stats',f_all:'Todos',f_err:'Errores',f_pat:'Patrones',f_dec:'Decisiones',f_high:'★ ALTA',f_god:'⚡ Divinos',f_side_all:'Todos',s_total:'nodos',s_rel:'relaciones',s_god:'divinos',s_high:'ALTA',l_err:'error',l_pat:'patrón',l_dec:'decisión',l_err_f:'error front',l_pat_f:'patrón front',l_dec_f:'decisión front',l_divine:'divino',btn_reset:'⟳ Resetear',btn_center:'⊙ Centrar',btn_labels:'Labels',nav_overview:'Vista general',nav_project:'Proyecto',nav_stack:'Stack',nav_commands:'Comandos',nav_arch:'Arquitectura',nav_modules:'Módulos',nav_rules:'Reglas',nav_knowledge:'Conocimiento',nav_patterns:'Patrones',nav_decisions:'Decisiones',nav_errors:'Errores',nav_questions:'Para nuevos devs',h_stack:'Stack Tecnológico',sub_stack:'Tecnologías del proyecto.',graph_report:'Reporte del grafo',divine_nodes:'Nodos divinos',surprising:'Conexiones sorprendentes',btn_print:'Imprimir / Exportar PDF',btn_copy:'Copiar como Markdown',dark:'Oscuro',light:'Claro'}
 };
 
 function setMode(mode,el){
@@ -2480,7 +2500,17 @@ function toggleLabels(){
 
 function setFilter(f,el){
   currentFilter=f;
-  document.querySelectorAll('.fpill').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.fpill:not(.side-pill)').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  renderNodeList();
+  highlightByFilter();
+}
+
+// Segunda dimensión del filtro (front/back) — combinable con el filtro de tipo:
+// "Errors" + "Front" = solo los errores nacidos del frontend.
+function setSide(s,el){
+  currentSide=s;
+  document.querySelectorAll('.side-pill').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');
   renderNodeList();
   highlightByFilter();
@@ -2504,9 +2534,11 @@ function askQuestion(q){
 
 function getFiltered(){
   let r=NODES;
-  if(currentFilter==='ALTA')r=NODES.filter(n=>n.confianza==='ALTA');
-  else if(currentFilter==='god')r=NODES.filter(n=>(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0);
-  else if(currentFilter!=='all')r=NODES.filter(n=>n.tipo===currentFilter);
+  if(currentSide==='front')r=r.filter(n=>esNodoFrontend(n));
+  else if(currentSide==='back')r=r.filter(n=>!esNodoFrontend(n));
+  if(currentFilter==='ALTA')r=r.filter(n=>n.confianza==='ALTA');
+  else if(currentFilter==='god')r=r.filter(n=>(DEGREE_MAP[n.id]||0)>=GOD_THRESHOLD&&GOD_THRESHOLD>0);
+  else if(currentFilter!=='all')r=r.filter(n=>n.tipo===currentFilter);
   if(searchVal){
     const terms=searchVal.split(/\\s+/).filter(Boolean);
     r=r.filter(n=>{
@@ -2536,7 +2568,7 @@ function renderNodeList(){
     return \`<div class="nitem\${n.id===selectedNodeId?' selected':''}\${isGod?' god-node':''}" onclick="selectNode(\${n.id})" id="nitem-\${n.id}">
       <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
         \${isGod?'<span style="color:var(--amber);font-size:10px">⚡</span>':''}
-        <span class="ntb t-\${n.tipo}">\${tl[n.tipo]||n.tipo}</span>
+        <span class="ntb t-\${n.tipo}\${esNodoFrontend(n)?' front':''}">\${tl[n.tipo]||n.tipo}\${esNodoFrontend(n)?' · front':''}</span>
         <span style="font-size:11px;color:var(--text);flex:1;line-height:1.3">\${title}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
@@ -2571,7 +2603,7 @@ function showDetail(node){
     if(!other)return'';
     const t=escHtml(other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo);
     const relLabel=r.dir==='out'?r.tipo:'← '+r.tipo;
-    return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${COLORS[other.tipo]||'#8b5cf6'};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${relLabel}</span></div>\`;
+    return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${kddNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${relLabel}</span></div>\`;
   }).filter(Boolean).join('');
   const cl=node.contenido?node.contenido.split('\\n').filter(l=>l.trim()&&!l.startsWith('##')&&!l.startsWith('Área')&&!l.startsWith('Confianza')&&!l.startsWith('Aplicado')&&!l.startsWith('Útil')&&!l.startsWith('Estado')).slice(0,5).join('\\n'):'';
   const confPct=node.aplicado>0?Math.min(Math.round(node.util/node.aplicado*100),100):0;
@@ -2628,14 +2660,14 @@ function highlightEdge(srcId,tgtId){
   const isPair=e=>{const s=edgeEndId(e.source),t=edgeEndId(e.target);return (s===srcId&&t===tgtId)||(s===tgtId&&t===srcId);};
   g.linkColor(e=>isPair(e)?'#ec4899':'#2a3050');
   g.linkWidth(e=>isPair(e)?3:1);
-  g.nodeColor(d=>d.id===srcId||d.id===tgtId?'#ffffff':(COLORS[d.tipo]||'#8b5cf6'));
+  g.nodeColor(d=>d.id===srcId||d.id===tgtId?'#ffffff':kddNodeColor(d));
 }
 
 function highlightByFilter(){
   const g=active3DGraphs['gc'];
   if(!g)return;
   const ids=getFiltered().map(n=>n.id);
-  g.nodeColor(d=>ids.includes(d.id)?(COLORS[d.tipo]||'#8b5cf6'):'rgba(100,100,110,0.15)');
+  g.nodeColor(d=>ids.includes(d.id)?kddNodeColor(d):'rgba(100,100,110,0.15)');
   g.linkColor(e=>{
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     return ids.includes(s)&&ids.includes(t)?'#3a4060':'rgba(58,64,96,0.05)';
@@ -2652,9 +2684,11 @@ function getNodeRadius(d){
 function resetGraph(){
   closeDetail();
   currentFilter='all';
+  currentSide='all';
   searchVal='';
   document.getElementById('srch').value='';
-  document.querySelectorAll('.fpill').forEach((p,i)=>p.classList.toggle('active',i===0));
+  document.querySelectorAll('.fpill:not(.side-pill)').forEach((p,i)=>p.classList.toggle('active',i===0));
+  document.querySelectorAll('.side-pill').forEach((p,i)=>p.classList.toggle('active',i===0));
   renderNodeList();
   refreshKddColors();
   // En el 2D original esto ya era todo lo que hacía "Reset" (solo filtros/búsqueda)
@@ -3257,7 +3291,7 @@ function renderGraph(){
     nodes:NODES,
     links,
     nodeColor:d=>{
-      const base=COLORS[d.tipo]||'#8b5cf6';
+      const base=kddNodeColor(d);
       if(d.id===selectedNodeId)return '#ffffff';
       if(selectedNodeId){
         // hay un nodo seleccionado: solo sus vecinos directos quedan a color
@@ -3683,7 +3717,7 @@ function renderCombinedGraph(){
     links:combinedLinksArr,
     nodeId:'mergedId', // los links usan mergedId (namespaced kdd-N / code-N), no el id crudo
     nodeColor:d=>{
-      const base=d.group==='kdd'?(COLORS[d.tipo]||'#8b5cf6'):codeNodeColor(d);
+      const base=d.group==='kdd'?kddNodeColor(d):codeNodeColor(d);
       if(d.mergedId===combinedSelectedId)return '#ffffff';
       if(combinedSelectedId){
         return combinedNeighborIds(combinedSelectedId).has(d.mergedId) ? base : blendTowards(base,'#0a0d14',0.75);
@@ -3744,7 +3778,7 @@ function showCombinedDetail(node){
     const other=combinedNodeMap[otherId];
     if(!other)return'';
     const label=other.group==='kdd'?other.titulo:other.file.split(/[\\/]/).pop();
-    const dotColor=other.group==='kdd'?(COLORS[other.tipo]||'#8b5cf6'):'#00e5ff';
+    const dotColor=other.group==='kdd'?kddNodeColor(other):'#00e5ff';
     return \`<div class="rel-item" onclick="focusCombinedNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${dotColor};flex-shrink:0"></div><div class="rel-name">\${escHtml(String(label).slice(0,36))}</div><span class="rel-type-label">área≈</span></div>\`;
   }).filter(Boolean).join('');
 
