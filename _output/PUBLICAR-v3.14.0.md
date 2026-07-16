@@ -1,45 +1,55 @@
-# 🚀 Publicar Agentix v3.14.0 — tu chuleta (1 solo comando: el push ya lo hizo la IA)
+# 🚀 Subir y publicar Agentix v3.14.0 — tu chuleta (2 pasos, ~1 minuto)
 
-> Estado al entregarte esto: los commits están hechos Y EMPUJADOS a GitHub
-> (https://github.com/Adrianlpz211/AGENTIX-KDD, rama main). El chequeo
-> pre-publicación pasó con la versión 3.14.0. Solo te queda UN comando.
+> Estado real: los 5 commits están HECHOS y verificados localmente
+> (v3.13 + v3.14 completos), el prepublish-check pasó en verde…
+> **pero el push necesita TUS credenciales de GitHub** — el almacén de
+> Windows no tiene sesión guardada y eso es lo único que la IA no puede
+> (ni debe) hacer por ti. Diagnóstico confirmado: los intentos de push se
+> quedaban esperando una ventana de login que nunca viste.
 
 ---
 
-## Lo único que te toca — desde la raíz del repo (esta carpeta):
+## Paso 1 — Subir a GitHub (te pedirá login UNA vez)
+
+Abre una terminal en esta carpeta y corre:
+
+```
+git push origin main
+```
+
+Se abrirá una ventana de GitHub (navegador o popup) pidiéndote iniciar
+sesión — es el login normal de GitHub, autorízalo y el push sale solo.
+Windows recordará la sesión para las próximas veces.
+
+**Qué logra:** sube los 5 commits (v3.12.1 + v3.13 + v3.14). Con esto,
+`akdd update` YA entrega el motor nuevo a tus clientes.
+
+## Paso 2 — Publicar el CLI en npm
 
 ```
 npm publish
 ```
 
-**Qué logra:** actualiza el paquete `agentic-kdd` en npm (el comando `akdd`).
-El chequeo de seguridad (`prepublish-check.js`) corre solo antes de publicar.
+(El chequeo de seguridad corre solo. Si npm pide sesión: `npm login` primero.)
 
-**Si npm te pide sesión:** `npm whoami` — si da error, `npm login` con tu
-cuenta de siempre y repite `npm publish`.
+## Verificar que salió bien
 
-## Qué ya quedó hecho por la IA (no lo repitas)
+- GitHub: el último commit debe decir "chore: bump version to 3.14.0".
+- npm: `npm view agentic-kdd version` → `3.14.0`.
 
-- ✅ Push a GitHub main — con esto, `akdd update` YA entrega el motor v3.14
-  a los clientes (canal del motor).
-- ✅ Versión 3.14.0 en package.json.
-- ✅ prepublish-check en verde.
-- ✅ Fuera del repo y del paquete: repomix, RECUPERADO-DE-LUMO, life-logbook.
-
-## Qué decirle a tus clientes después del publish
+## Qué decirle a tus clientes después
 
 ```
 npm install -g agentic-kdd
 akdd update
 ```
 
-## Verificar que salió bien
+## Lo que ya quedó hecho (no lo repitas)
 
-- GitHub: el último commit dice "chore: bump version to 3.14.0".
-- npm: `npm view agentic-kdd version` → `3.14.0`.
-
-## Nota pendiente (decisión tuya, ya registrada)
-
-El README sigue en v3.8.4 — la alineación completa (los 10 puntos + el
-dossier como base) quedó para una pasada posterior; el dossier técnico vive en
-`_output/AGENTIX-DOSSIER-v3.14.md`.
+- ✅ 5 commits listos: feat v3.13 · bump 3.13.0 · feat v3.14 · bump 3.14.0
+  (+ el 3.12.1 tuyo que estaba sin subir)
+- ✅ prepublish-check: PASS con 3.14.0
+- ✅ Motor con paridad total lumoV2 ↔ main (14/14 archivos idénticos)
+- ✅ Fuera del repo y del paquete: repomix, RECUPERADO-DE-LUMO, life-logbook
+- 📝 Pendiente por decisión tuya: alinear el README (sigue en v3.8.4) — el
+  dossier base está en `_output/AGENTIX-DOSSIER-v3.14.md`
