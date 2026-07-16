@@ -785,14 +785,60 @@ const langsPresent = [...new Set(codeStructure.nodes.map(n => n.language).filter
 
 // Paleta cósmica (14/07/2026) — reemplaza el arcoíris de un hue distinto por
 // módulo (se sentía "carnaval", pedido explícito del dueño). Agrupa por lo
-// que el cliente ve (front, azul eléctrico) vs. lo que no ve (back, violeta
-// intenso) — mismo criterio que esNodoFrontend() del lado cliente (la coraza,
-// Feature 6), pero repetido acá server-side porque el legend se arma antes
-// de que el <script> del cliente exista. Todos los tonos quedan brillantes
-// a propósito (nunca se apagan a gris) — un intento anterior con tonos bajos
-// hacía que algunos nodos casi no se notaran.
+// que el cliente ve (front, azul eléctrico) vs. lo que no ve (back) — mismo
+// criterio que esNodoFrontend() del lado cliente (la coraza, Feature 6), pero
+// repetido acá server-side porque el legend se arma antes de que el <script>
+// del cliente exista. Todos los tonos quedan brillantes a propósito (nunca
+// se apagan a gris) — un intento anterior con tonos bajos hacía que algunos
+// nodos casi no se notaran.
 const FRONT_TONES = ['#2979ff', '#4c8dff', '#6fa6ff'];
-const BACK_TONES = ['#b537ff', '#c454ff', '#a940f0', '#d066ff', '#9d2fee', '#e082ff'];
+
+// Paleta tetrádica por departamento (15/07/2026) — pedido explícito del dueño:
+// 4 colores base (violeta/rojo/lima/cian) agrupando módulos "hermanos" (misma
+// carpeta = mismo color), en vez de la familia violeta única de antes. Las
+// variantes claro/oscuro NO están escritas a mano — se calculan por HSL desde
+// los 4 hex originales, para que esto sirva igual en cualquier proyecto futuro
+// sin inventar más hex a mano. Verificado en un mockup real contra datos de
+// lumoV2 antes de aplicarlo aquí.
+const BACK_HUES = ['#6d0fff', '#ff0f27', '#9fff0f', '#0fffe7'];
+function hexToHslServer(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) { h = 0; s = 0; }
+  else {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * (((b - r) / d) + 2);
+    else h = 60 * (((r - g) / d) + 4);
+    if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+function hslToHexServer(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 60) { r = c; g = x; b = 0; } else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; } else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; } else { r = c; g = 0; b = x; }
+  const toHex = v => ('0' + Math.round((v + m) * 255).toString(16)).slice(-2);
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+// Cada hue base genera 3 tonos (base/claro/oscuro) — 12 en total antes de
+// repetir. Orden de la lista: primero los 4 "base" (uno de cada familia),
+// después los 4 "claro", después los 4 "oscuro" — así módulos vecinos
+// alfabéticamente (ej. src/ai y src/api) casi nunca comparten color.
+const BACK_TONES = [];
+for (const tier of [0, 1, 2]) {
+  for (const hex of BACK_HUES) {
+    if (tier === 0) { BACK_TONES.push(hex); continue; }
+    const [h, s, l] = hexToHslServer(hex);
+    BACK_TONES.push(tier === 1 ? hslToHexServer(h, s, Math.min(0.92, l + 0.20)) : hslToHexServer(h, s, Math.max(0.08, l - 0.20)));
+  }
+}
 
 // Perfil de convenciones (Plan 4): si el proyecto declaró sus carpetas front
 // (stack-profile.cjs, key stack_profile en project_settings), la clasificación
@@ -2711,6 +2757,10 @@ const LINK_DIMMED_RGBA='rgba(139,92,246,0.08)';
 // hereda los colores de NODO nuevos (ver MOD_COLORS_SERVER) porque reusa
 // codeNodeColor() para sus nodos de código — eso es "aplicarle los colores
 // de cada grafo", no un esquema aparte.
+// Punto de memoria (14/07/2026) — valores "v3" aprobados antes de subir la
+// intensidad, por si el dueño no le gusta esta v4 "incandescente" y hay que
+// volver: CODE_LINK_BASE_RGBA='rgba(255,255,255,0.14)',
+// CODE_LINK_DIMMED_RGBA='rgba(255,255,255,0.04)', CODE_PARTICLE_COLOR='#ffe066'.
 // v4→v5: 0.28 seguía leyéndose gris contra el fondo negro — una línea de 1px
 // semitransparente casi nunca se ve "blanco brillante" salvo que la opacidad
 // sea bastante más alta (es cómo funciona la mezcla de color, no un bug).
@@ -2811,6 +2861,36 @@ function esNodoFrontend(d){
   }
   return !!(d.area&&/frontend/i.test(d.area));
 }
+
+// Halo de luz alrededor de cada nodo de código (pedido explícito, paleta
+// tetrádica del 15/07/2026) — sprite aditivo con gradiente radial, cacheado
+// por color: con cientos de nodos pero solo ~15 colores posibles, se genera
+// la textura una vez por color y se reusa, no una por nodo.
+const glowTextureCache={};
+function getGlowTexture(color){
+  if(glowTextureCache[color])return glowTextureCache[color];
+  const size=128;
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=size;
+  const ctx=canvas.getContext('2d');
+  const grad=ctx.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2);
+  grad.addColorStop(0,'rgba(255,255,255,0.85)');
+  grad.addColorStop(0.35,color);
+  grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,size,size);
+  const tex=new THREE.CanvasTexture(canvas);
+  glowTextureCache[color]=tex;
+  return tex;
+}
+function createGlowSprite(color,nodeRadius){
+  const mat=new THREE.SpriteMaterial({map:getGlowTexture(color),transparent:true,blending:THREE.AdditiveBlending,depthWrite:false});
+  const sprite=new THREE.Sprite(mat);
+  const s=nodeRadius*3.4;
+  sprite.scale.set(s,s,1);
+  return sprite;
+}
+
 function create3DGraph(containerId, opts){
   const container=document.getElementById(containerId);
   const graph=ForceGraph3D()(container)
@@ -3383,6 +3463,10 @@ function renderCodeGraph(){
       return base;
     },
     nodeVal:d=>Math.pow(getCodeNodeRadius(d)/6,3),
+    nodeThreeObject:d=>{
+      if(!codeModuleVisible(d.modulo))return null;
+      return createGlowSprite(codeNodeColor(d),getCodeNodeRadius(d));
+    },
     nodeLabel:d=>{
       return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
         +'<strong style="color:#e2e8f0">'+escHtml(d.titulo||d.file||'')+'</strong><br>'
@@ -3561,9 +3645,9 @@ function renderCombinedGraph(){
   // "El combined es solo aplicarle los colores de cada grafo" (pedido explícito)
   // — esto valía para nodos (ya lo hacía, ver nodeColor abajo) pero no para
   // LÍNEAS: antes TODAS las líneas de Combined (kdd-kdd, code-code, heurística)
-  // pintaban del mismo púrpura genérico, así que las conexiones reales de
-  // código (arregladas en ast-indexer.cjs) quedaban invisibles, perdidas en la
-  // maraña — existían en los datos, pero no se distinguían a simple vista.
+  // pintaban del mismo púrpura genérico, así que las 848 conexiones reales de
+  // código (recién arregladas en ast-indexer.cjs) quedaban invisibles, perdidas
+  // en la maraña — existían en los datos, pero no se distinguían a simple vista.
   // Code-code ahora usa el blanco de Code Structure. endpoint≈ (front↔back por
   // ruta de API) usa ámbar, para distinguirse de área≈ (que se queda púrpura,
   // igual que kdd-kdd).
@@ -3590,7 +3674,7 @@ function renderCombinedGraph(){
   const getCombinedLinkWidth=e=>{
     const s=mergedEdgeEndId(e.source), t=mergedEdgeEndId(e.target);
     if(combinedSelectedId&&(s===combinedSelectedId||t===combinedSelectedId))return 1.2;
-    if(e.tipo==='endpoint_match')return 0.9;
+    if(e.tipo==='endpoint_match')return 0.9; // solo 50 en Lumo — más grueso para que se note
     return 0.4;
   };
 
@@ -3607,6 +3691,10 @@ function renderCombinedGraph(){
       return base;
     },
     nodeVal:d=>Math.pow((d.group==='kdd'?8:6)/6,3),
+    nodeThreeObject:d=>{
+      if(d.group!=='code')return null; // el glow tetrádico es solo para nodos de código
+      return createGlowSprite(codeNodeColor(d),6);
+    },
     nodeLabel:d=>{
       const label=d.group==='kdd'?d.titulo:d.file;
       return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
