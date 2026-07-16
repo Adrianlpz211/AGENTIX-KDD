@@ -142,13 +142,35 @@ Agentix is **first-class on Claude Code and Cursor** — that's where it's battl
 
 ---
 
-## Dashboard
+## Dashboard — what it looks like on a real project
 
-`akdd dashboard` → visual board at localhost:3847. The Knowledge Graph renders in **real 3D** — and it's three graphs:
+`akdd dashboard` → visual board at localhost:3847. Every capture below is from a real production SaaS project (~414 files). The Knowledge Graph renders in **real 3D** — and it's three graphs:
 
-- **KDD Memory** — the decisions/errors/patterns from your memory.
-- **Code Structure** — a native map of your actual code (files, symbols, forms, CSS classes and their connections), straight from the AST index. Zero LLM calls, zero tokens. Department palette: sibling modules (same folder) share a color family.
-- **Combined** — merges both: you see how your code and your accumulated decisions relate.
+**KDD Memory** — the decisions, errors and patterns from your memory. Since v3.15, knowledge born from the frontend is distinguished by color (pink/lime/cyan vs back's red/green/blue) and filterable with Front/Back:
+
+<img src="assets/dash-kdd-memory.png" alt="KDD Memory — memory with front/back color families" width="100%">
+
+Click any node: its connections light up and the panel shows the full rule, its confidence, which cycle it was born from, and what other knowledge it relates to:
+
+<img src="assets/dash-kdd-node.jpg" alt="KDD Memory — selected node with its connections and detail panel" width="100%">
+
+**Code Structure** — a native map of your actual code (files, symbols, forms, CSS classes and their connections), straight from the AST index. Zero LLM calls, zero tokens. Department palette: sibling modules (same folder) share a color family:
+
+<img src="assets/dash-code-structure.jpg" alt="Code Structure — 3D code map with department palette" width="100%">
+
+**Combined** — merges both: you see how your code and your accumulated decisions relate:
+
+<img src="assets/dash-combined.jpg" alt="Combined — code and knowledge in one graph" width="100%">
+
+### Preservation Intel — the third tab
+
+The contracts that can't be broken (protected/verified/candidate), the Creative Engine with its autonomy level, MemCurator governing the memory, and the code's structural learning:
+
+<img src="assets/dash-preservation-contracts.jpg" alt="Preservation Intel — Contract Guard, Creative Engine, MemCurator, Structural Learning" width="100%">
+
+And the UI/Frontend memory — v3.13's "UI Eyes" in live numbers: watched forms, selects, `required` fields and CSS classes, with the UI Native Gate in green:
+
+<img src="assets/dash-preservation-ui.jpg" alt="Preservation Intel — design memory, UI Native Gate and UI Eyes" width="100%">
 
 Plain-language visual guides: [how to read the graph](docs/GRAFO-GUIA.md) · [how to read contracts + Creative Engine](docs/CONTRATOS-GUIA.md)
 
