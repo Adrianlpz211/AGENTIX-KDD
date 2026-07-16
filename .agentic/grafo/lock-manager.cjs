@@ -295,11 +295,16 @@ function releaseModuleLock(db, moduleName) {
   // independiente de transcripts, cwd u obediencia del modelo. Fail-soft.
   if (res.success && lockSnapshot) {
     try {
+      // acquired_at viene de SQLite datetime('now') = UTC "YYYY-MM-DD HH:MM:SS"
+      // sin zona — Date.parse lo leería como hora LOCAL. Normalizar a ISO UTC
+      // para que el solape se compare en el mismo reloj que released_at.
+      const acqRaw = String(lockSnapshot.acquired_at || '');
+      const acqIso = acqRaw.includes('T') ? acqRaw : new Date(acqRaw.replace(' ', 'T') + 'Z').toISOString();
       require(require('path').join(__dirname, 'gate-telemetry.cjs')).recordGateEvent(db, {
         gate: 'legion', verdict: 'LOCK_WINDOW', source: 'mechanical',
         detalle: {
           module: moduleName, instance: INSTANCE_ID,
-          acquired_at: lockSnapshot.acquired_at, released_at: new Date().toISOString(),
+          acquired_at: acqIso, released_at: new Date().toISOString(),
         },
       });
     } catch { /* nunca bloquea el release */ }

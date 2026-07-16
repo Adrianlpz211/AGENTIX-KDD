@@ -127,10 +127,14 @@ async function checkParallelDispatch(projectRoot, { windowMinutes = 30 } = {}) {
            WHERE gate = 'legion' AND verdict = 'LOCK_WINDOW'
              AND ts >= datetime('now', ?)`
         ).all(`-${Math.max(1, windowMinutes)} minutes`);
+        // Lectura tolerante: filas viejas pueden traer acquired_at en formato
+        // SQLite UTC sin zona ("YYYY-MM-DD HH:MM:SS") — interpretarlas como UTC,
+        // no como hora local, o el solape se corre por el offset de la máquina.
+        const pUTC = s => Date.parse(String(s).includes('T') ? s : String(s).replace(' ', 'T') + 'Z');
         const ventanas = rows
           .map(r => { try { return JSON.parse(r.detalle); } catch { return null; } })
           .filter(v => v && v.instance && v.acquired_at && v.released_at)
-          .map(v => ({ instance: v.instance, ini: Date.parse(v.acquired_at), fin: Date.parse(v.released_at), module: v.module }));
+          .map(v => ({ instance: v.instance, ini: pUTC(v.acquired_at), fin: pUTC(v.released_at), module: v.module }));
         for (let i = 0; i < ventanas.length; i++) {
           for (let j = i + 1; j < ventanas.length; j++) {
             const a = ventanas[i], b = ventanas[j];
