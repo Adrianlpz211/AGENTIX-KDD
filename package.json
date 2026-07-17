@@ -1,6 +1,6 @@
 {
   "name": "agentic-kdd",
-  "version": "3.15.1",
+  "version": "3.15.2",
   "description": "Autonomous development pipeline — aa: · ag: · audit: · AST graph · Harness · Specs · Impact analysis · Decision trail · Metrics · MCP server. Works with Cursor and Claude Code.",
   "bin": {
     "akdd": "bin/akdd.js"

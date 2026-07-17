@@ -69,6 +69,34 @@ const SECURITY_PATTERNS = [
     },
   },
   {
+    // v3.15.2 — Grieta del Coliseo (Ronda 3, 2026-07-17): el check de arriba
+    // solo entiende el idioma Prisma (`prisma.*.findMany` + `tenant_id.*:`).
+    // Un `patient.repo.ts` con un helper casero `_allUnsafe()` — sin Prisma de
+    // por medio — pasaba PASS aunque devolviera filas de TODOS los tenants.
+    // Esta regla es agnóstica de ORM: si el ARCHIVO ya maneja vocabulario de
+    // tenant (tenantId/organizationId/ctx.tenant — o sea, "esto es multi-tenant
+    // consciente de sí mismo") Y alguna función expuesta llama a un accesor
+    // marcado como "unsafe/all/raw" por convención de nombre — el mismo nombre
+    // que cualquier equipo pondría para señalar "esto es peligroso, no lo
+    // expongas" — se marca CRÍTICO. Se excluyen los archivos db/store donde el
+    // primitivo se DEFINE (ahí es infra legítima); el riesgo está en quien lo
+    // LLAMA y lo expone desde un repo/service.
+    check: (content, filename) => {
+      const fn = filename.toLowerCase();
+      if (fn.includes('store') || fn.includes('db.') || /[\\/]db[\\/]/.test(fn)) return null;
+      const esArchivoMultiTenant = /\btenant_?id\b|\borganization_?id\b|ctx\.tenant/i.test(content);
+      if (!esArchivoMultiTenant) return null;
+      const accesoInseguro = content.match(/\b(\w*unsafe\w*|allRaw|rawAll)\s*\(/i);
+      if (!accesoInseguro) return null;
+      return {
+        type:     'BESPOKE_CROSS_TENANT_RISK',
+        severity: 'CRITICAL',
+        message:  `Acceso marcado como "${accesoInseguro[1]}" en un archivo consciente de tenant — revisa que no cruce tenants (fuga cross-tenant fuera del idioma Prisma)`,
+        file:     filename,
+      };
+    },
+  },
+  {
     check: (content, filename) => {
       // JWT verification bypass
       const bypass = /jwt\.(decode|verify)\s*\(/i.test(content) &&
@@ -240,7 +268,11 @@ function scanShield(content, filename) {
 function classifyFileRisk(filePath) {
   const fp = filePath.replace(/\\/g, '/').toLowerCase();
   if (fp.includes('auth') || fp.includes('middleware') || fp.includes('.env') || fp.includes('secret')) return 'CRITICAL';
-  if (fp.includes('routes/') || fp.includes('lib/') || fp.includes('prisma')) return 'SENSITIVE';
+  // v3.15.2 (Grieta R3 del Coliseo): 'repo'/'.service.' se suman a SENSITIVE —
+  // son la capa de acceso a datos en proyectos SIN Prisma (ej. Lumo/Salud360,
+  // que lo quitaron de raíz); antes solo entraban routes/lib/prisma y una fuga
+  // bespoke en un repo casero nunca pasaba por los checks de negocio de arriba.
+  if (fp.includes('routes/') || fp.includes('lib/') || fp.includes('prisma') || fp.includes('repo') || fp.includes('.service.')) return 'SENSITIVE';
   if (fp.includes('tests/') || fp.includes('utils/') || fp.includes('constants')) return 'FREE';
   return 'NORMAL';
 }

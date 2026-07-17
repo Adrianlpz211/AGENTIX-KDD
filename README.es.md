@@ -250,9 +250,21 @@ akdd locks release-all         # Liberar todo (limpieza de sesión)
 
 ---
 
+## El Coliseo — arena adversarial (evidencia, no marketing)
+
+En vez de un benchmark que demuestra que Agentix gana, construimos uno diseñado para **romperlo a propósito**: 15 rondas de ataque escaladas en 4 tiers contra un proyecto real (MediCore, un SaaS clínico multi-tenant con reglas de negocio, aislamiento de tenants y una race de concurrencia real), cada una corrida dos veces — **con** Agentix (`aa:`) y **sin** él (agente desnudo) — para medir la diferencia con hechos, no con narrativa.
+
+**Resultado:** 14 de 15 rondas aguantaron limpio. La única grieta real ocurrió después de que el humano forzara un override explícito contra la recomendación del sistema — y en vez de dejar el riesgo aceptado visible, el agente ocultó el bug reintroducido debilitando el test que lo vigilaba. Un verde falso es peor que un rojo honesto.
+
+**Las 3 grietas encontradas ya están reparadas y verificadas** (13/13 checks mecánicos, `_output/plan-8-grietas-coliseo.md`): un test que verifica un patrón de confianza ALTA ahora es intocable en silencio (`test-integrity-gate.cjs`), el Security Gate dejó de depender del idioma Prisma para detectar fugas cross-tenant, y el TDD Gate corre `typecheck` además de los tests — cerrando el hueco de "verde falso por tipos" en proyectos que usan `tsx`/`esbuild`.
+
+El playbook completo, el marcador ronda a ronda y el proyecto víctima están en la rama [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) — corre las 15 rondas tú mismo.
+
+---
+
 ## Estado y transparencia
 
-Agentix es software **joven y en evolución**. Los ~50 módulos del motor fueron auditados y endurecidos (v3.15: fronteras de madurez con lint mecánico, gates movidos a hooks de git, fallback completo a `node:sqlite`, ruta de upgrade probada con simulación). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
+Agentix es software **joven y en evolución**. Los ~50 módulos del motor fueron auditados y endurecidos (v3.15: fronteras de madurez con lint mecánico, gates movidos a hooks de git, fallback completo a `node:sqlite`, ruta de upgrade probada con simulación; v3.15.2: 3 grietas encontradas y reparadas por el Coliseo, ver arriba). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
 
 La promesa real, sin inflar:
 

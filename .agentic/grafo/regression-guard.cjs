@@ -378,6 +378,29 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
   const telemetry = safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')));
   const record = (ev) => { if (telemetry) safe(() => telemetry.recordGateEvent(db, ev)); };
 
+  // v3.15.2 (Grieta R8 del Coliseo): antes de mirar behaviors por línea,
+  // ¿el changeset toca un test que verifica un patrón ALTA y le desapareció
+  // el título/aserción? Esto es independiente de protected_behaviors (que
+  // vienen de ciclos TDD) — se ancla a la memoria KDD (nodos.archivos_aplica).
+  // Fail-soft: si el módulo no está o falla, el resto del gate sigue igual.
+  const testIntegrity = safe(() => require(path.join(__dirname, 'test-integrity-gate.cjs')));
+  if (testIntegrity) {
+    const tiRes = safe(() => testIntegrity.scan(projectRoot, { staged: false, files: filesToChange }));
+    const criticas = tiRes && tiRes.findings ? tiRes.findings.filter(f => f.nivel === 'CRITICAL') : [];
+    if (criticas.length > 0) {
+      return {
+        passed: false,
+        violations: criticas.map(c => ({
+          behavior_id: null, behavior: `Test protegido modificado: "${c.tituloDesaparecido}" (protege "${c.patronOrigen}")`,
+          module: c.area, test_pattern: c.file, failed: [c.tituloDesaparecido], confidence: 'ALTA',
+        })),
+        warnings: [], notices: [],
+        message: `STOP: test protegido debilitado en el changeset:\n` +
+          criticas.map(c => `  🔴 ${c.file}: desapareció "${c.tituloDesaparecido}" — protege el patrón ALTA "${c.patronOrigen}" (${c.area})`).join('\n'),
+      };
+    }
+  }
+
   const related = findRelatedBehaviors(db, filesToChange);
   if (related.length === 0) {
     return { passed: true, reason: 'No protected behaviors related to this changeset' };

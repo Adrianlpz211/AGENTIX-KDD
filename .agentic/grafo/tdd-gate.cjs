@@ -105,6 +105,41 @@ function detectTestCommand(projectRoot) {
 }
 
 /**
+ * v3.15.2 — Grieta R10 del Coliseo (2026-07-17): un proyecto que usa `tsx`
+ * (o cualquier runner que solo TRANSPILA, no verifica tipos) puede tener
+ * `npm test` en verde con errores de tipos reales sin detectar — se coló un
+ * bug así hasta que se corrió `npm run typecheck` por separado, varias
+ * rondas después. Si el proyecto declara un script "typecheck", correrlo es
+ * parte de "los tests pasan" — no un paso opcional aparte.
+ */
+function detectTypecheckCommand(projectRoot) {
+  const pkgPath = path.join(projectRoot, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg.scripts && pkg.scripts.typecheck) return 'npm run typecheck';
+    } catch {}
+  }
+  return null;
+}
+
+function runTypecheck(command, projectRoot) {
+  try {
+    const isWin = process.platform === 'win32';
+    const shell = isWin ? 'cmd.exe' : 'sh';
+    const shellFlag = isWin ? '/c' : '-c';
+    const result = spawnSync(shell, [shellFlag, command], {
+      cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 120000,
+      stdio: 'pipe', encoding: 'utf8',
+    });
+    const output = (result.stdout || '') + (result.stderr || '');
+    return { passed: (result.status ?? 1) === 0, output };
+  } catch (err) {
+    return { passed: false, output: err.message };
+  }
+}
+
+/**
  * Ejecuta la suite de tests y retorna el resultado estructurado.
  * @param {string} command
  * @param {string} projectRoot
@@ -204,12 +239,17 @@ function parseTestOutput(raw, exitCode) {
   }
 
   // ── Node.js test runner nativo (node --test) ──────────────────────────────
-  // "ℹ tests 5" / "ℹ pass 5" / "ℹ fail 0" — sin esto, cualquier proyecto que use
-  // el test runner integrado de Node (sin dependencias externas) siempre daba
-  // 0/0/0, aunque los tests hubieran pasado de verdad.
-  const nodeTestTotal = raw.match(/[ℹi]\s*tests\s+(\d+)/i);
-  const nodeTestPass  = raw.match(/[ℹi]\s*pass\s+(\d+)/i);
-  const nodeTestFail  = raw.match(/[ℹi]\s*fail\s+(\d+)/i);
+  // "ℹ tests 5" / "ℹ pass 5" / "ℹ fail 0" en modo TTY (spec reporter), o
+  // "# tests 5" / "# pass 5" / "# fail 0" en modo NO-TTY (reporter TAP —
+  // el que usa spawnSync SIEMPRE, porque no hay terminal real). v3.15.2:
+  // el prefijo '#' faltaba — cualquier ejecución programática (exactamente
+  // como corre este propio gate) del test runner nativo de Node, o de tsx
+  // --test (mismo runtime), reportaba 0/0/0 aunque los tests pasaran de
+  // verdad. Se descubrió corrido contra el propio Coliseo (MediCore usa
+  // `tsx --test`).
+  const nodeTestTotal = raw.match(/^[ℹi#]\s*tests\s+(\d+)/im);
+  const nodeTestPass  = raw.match(/^[ℹi#]\s*pass\s+(\d+)/im);
+  const nodeTestFail  = raw.match(/^[ℹi#]\s*fail\s+(\d+)/im);
   if (nodeTestTotal && result.total === 0) {
     result.total  = parseInt(nodeTestTotal[1] || '0');
     result.passed = parseInt(nodeTestPass?.[1] || '0');
@@ -400,6 +440,25 @@ function runSelfHealingLoop(opts) {
 
     console.log(`[TDD-GATE] Resultado: ${result.allPassed ? '✅ PASS' : '❌ FAIL'}`);
     console.log(`[TDD-GATE] Total: ${result.total} | Pasando: ${result.passed} | Fallando: ${result.failed}`);
+
+    // v3.15.2 (Grieta R10): "los tests pasan" no es lo mismo que "el proyecto
+    // compila" cuando el runner (tsx/esbuild) no verifica tipos. Si hay un
+    // script typecheck, correrlo aquí — antes de declarar PASS y registrar
+    // contratos — cierra ese hueco sin inventar un gate nuevo que el agente
+    // pueda olvidar correr aparte.
+    if (result.allPassed) {
+      const tcCmd = detectTypecheckCommand(projectRoot);
+      if (tcCmd) {
+        const tc = runTypecheck(tcCmd, projectRoot);
+        console.log(`[TDD-GATE] Typecheck (${tcCmd}): ${tc.passed ? '✅ PASS' : '❌ FAIL'}`);
+        if (!tc.passed) {
+          result.allPassed = false;
+          result.failed = (result.failed || 0) + 1;
+          result.failures = [...(result.failures || []), `TYPECHECK: ${tc.output.slice(0, 500)}`];
+          history[history.length - 1] = { iteration, ...result };
+        }
+      }
+    }
 
     if (result.allPassed) {
       console.log(`\n[TDD-GATE] ✅ PASS en iteración ${iteration}`);

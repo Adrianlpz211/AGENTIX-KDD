@@ -18,6 +18,12 @@ if [ -f "$ROOT/.agentic/grafo/security-gate.cjs" ]; then
   [ -n "$STAGED" ] && node "$ROOT/.agentic/grafo/security-gate.cjs" $STAGED 2>/dev/null
 fi
 
+# 3) Integridad de tests protegidos (v3.15.2 — Grieta R8 del Coliseo): un test
+# que verifica un patrón ALTA no debe cambiar de título/aserciones en silencio
+# — eso es exactamente cómo se ocultó una race reintroducida en el Coliseo.
+[ -f "$ROOT/.agentic/grafo/test-integrity-gate.cjs" ] && \
+  node "$ROOT/.agentic/grafo/test-integrity-gate.cjs" --staged 2>/dev/null
+
 # v1: nunca bloquear — el hallazgo queda visible en la terminal y en la
 # libreta (gate_events, source=mechanical). exit 0 SIEMPRE.
 exit 0

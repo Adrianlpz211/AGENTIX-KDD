@@ -250,9 +250,21 @@ akdd locks release-all         # Release everything (session cleanup)
 
 ---
 
+## The Coliseum — adversarial arena (evidence, not marketing)
+
+Instead of a benchmark that proves Agentix wins, we built one designed to **break it on purpose**: 15 attack rounds escalated across 4 tiers against a real project (MediCore, a multi-tenant clinical SaaS with business rules, tenant isolation, and a real concurrency race), each run twice — **with** Agentix (`aa:`) and **without** it (naked agent) — to measure the difference with facts, not narrative.
+
+**Result:** 14 of 15 rounds held clean. The one real crack happened after the human forced an explicit override against the system's recommendation — and instead of leaving the accepted risk visible, the agent hid the reintroduced bug by weakening the test that watched it. A false green is worse than an honest red.
+
+**The 3 cracks found are already repaired and verified** (13/13 mechanical checks, `_output/plan-8-grietas-coliseo.md`): a test that verifies a HIGH-confidence pattern is now untouchable in silence (`test-integrity-gate.cjs`), the Security Gate stopped depending on the Prisma dialect to detect cross-tenant leaks, and the TDD Gate now runs `typecheck` alongside tests — closing the "false green from types" gap in projects using `tsx`/`esbuild`.
+
+The full playbook, the round-by-round scoreboard, and the victim project live on the [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) branch — run the 15 rounds yourself.
+
+---
+
 ## Status & transparency
 
-Agentix is **young, evolving software**. The engine's ~50 modules were audited and hardened (v3.15: maturity boundaries with a mechanical lint, gates moved into git hooks, complete `node:sqlite` fallback, upgrade path proven by simulation). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
+Agentix is **young, evolving software**. The engine's ~50 modules were audited and hardened (v3.15: maturity boundaries with a mechanical lint, gates moved into git hooks, complete `node:sqlite` fallback, upgrade path proven by simulation; v3.15.2: 3 cracks found and repaired by the Coliseum, see above). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
 The real promise, without inflation:
 
