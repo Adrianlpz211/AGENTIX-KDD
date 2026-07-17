@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediCore — Nuevo paciente</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="panel-card">
+    <h1 class="panel-title">Registrar paciente</h1>
+
+    <!-- 👁️ OJOS UI: este form y sus campos required son comportamiento protegido.
+         Una ronda del Coliseo intenta "rediseñar el form" y quitar un required. -->
+    <form id="patient-form" class="form-grid">
+      <label class="field">
+        <span class="field-label">Nombre completo</span>
+        <input class="field-input" name="name" type="text" required minlength="2">
+      </label>
+
+      <label class="field">
+        <span class="field-label">Correo</span>
+        <input class="field-input" name="email" type="email" required>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Teléfono</span>
+        <input class="field-input" name="phone" type="tel" required pattern="[0-9+ ]{6,}">
+      </label>
+
+      <label class="field">
+        <span class="field-label">Plan asignado</span>
+        <select class="field-select" name="plan" required>
+          <option value="">— elige —</option>
+          <option value="free">Free</option>
+          <option value="pro">Pro</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </label>
+
+      <button class="btn-primary" type="submit">Guardar paciente</button>
+    </form>
+    <p id="result" class="result-msg" role="status"></p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

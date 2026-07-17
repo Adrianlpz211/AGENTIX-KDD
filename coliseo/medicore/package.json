@@ -1,0 +1,17 @@
+{
+  "name": "medicore",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MediCore — plataforma clínica multi-tenant (campo de batalla del Coliseo Agentix)",
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,83 @@
+/* MediCore panel — 👁️ clases vigiladas por los Ojos UI de Agentix.
+   Una regla de selector de tipo puede tumbar validaciones de otros lados:
+   por eso el Regression Guard mira el blast radius de CSS→vista. */
+:root {
+  --bg: #0a0e14;
+  --card: #131824;
+  --border: #26304a;
+  --text: #e2e8f0;
+  --accent: #3fe2e8;
+  --danger: #ff5ca8;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+}
+
+.panel-card {
+  max-width: 460px;
+  margin: 48px auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+}
+
+.panel-title {
+  font-size: 20px;
+  margin: 0 0 20px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  color: #9fb0c8;
+}
+
+.field-input,
+.field-select {
+  background: #0d1220;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.field-input:focus,
+.field-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.field-input:invalid {
+  border-color: var(--danger);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #04212a;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.result-msg {
+  margin-top: 14px;
+  font-size: 13px;
+  min-height: 18px;
+}
