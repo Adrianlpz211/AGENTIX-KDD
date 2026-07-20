@@ -1,5 +1,20 @@
 # Changelog — Agentic KDD
 
+## [3.16.1] — 2026-07-19
+
+### El pipeline se encontró un bug a sí mismo (y quedó reparado)
+Corriendo `akdd cu sprint --auto` sobre FLOTA360, el agente reportó como tarea
+sugerida un bug real del motor — verificado y corregido el mismo día:
+- **Comando de test mal parseado con config.md en formato YAML de bloque**: `\s*`
+  en `/^\s*test:\s*(.+)$/m` cruza el salto de línea y capturaba la línea
+  siguiente ("runner: node --test") como comando literal → STOP falso del TDD
+  Gate y contratos sin registrar. 6 usos corregidos en 5 archivos
+  (`[^\S\n]*` no cruza líneas) + soporte del campo `comando:` del bloque YAML.
+- **tdd-gate**: `.agentic/` excluido del scope de changeset (el gate mismo
+  ensucia memoria.db al correr — en proyectos que la versionan, el scope quedaba
+  solo con archivos del motor → 0 tests relacionados → fallo mudo en cada
+  post-cycle) + la razón del fallo ahora siempre se imprime.
+
 ## [3.16.0] — 2026-07-19
 
 ### ClickUp Bridge (nuevo, opt-in, experimental) — los sprints entran solos desde ClickUp
