@@ -1,5 +1,20 @@
 # Changelog — Agentic KDD
 
+## [3.16.5] — 2026-07-20
+
+### Hueco #3 del Coliseo SELLADO — expiración de token peligrosamente larga
+El Security Gate detectaba bypass/secretos de JWT pero no una ventana de
+expiración larga (un `expiresIn: '30d'` en `auth.js` pasaba PASS). Nuevo check:
+- Parsea `expiresIn` (unidades s/m/h/d/w/y y número = segundos), y si supera
+  7 días → WARN (no STOP: una sesión larga puede ser legítima —
+  refresh/"recuérdame" — el punto es hacerlo visible para que se confirme).
+- Corre en archivos CRITICAL/SENSITIVE (auth.js lo es). Verificado: `8h`/`7d`
+  limpio, `30d`/`720h`/`1y`/`2592000s` → WARN; Lumo (`7d`, en el límite) sin
+  falso positivo.
+
+Con esto quedan sellados los 3 huecos que el Coliseo dejó documentados el
+2026-07-20 (cross-tenant agnóstico #1, related_files #2, JWT-expiry #3).
+
 ## [3.16.4] — 2026-07-20
 
 ### Hueco #2 del Coliseo SELLADO — related_files vacío en el registro de behaviors

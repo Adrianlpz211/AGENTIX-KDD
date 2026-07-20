@@ -113,6 +113,32 @@ const SECURITY_PATTERNS = [
     },
   },
   {
+    // Ventana de expiración de token peligrosamente larga (hueco #3 del
+    // Coliseo, 2026-07-20). Un `expiresIn: '30d'` amplía enormemente la
+    // ventana de robo de token. WARN (no STOP): una sesión larga puede ser
+    // legítima (refresh token, "recuérdame") — el punto es hacerlo VISIBLE y
+    // que el humano/modelo confirme que es intencional, no bloquear.
+    check: (content, filename) => {
+      if (!/expiresIn/i.test(content)) return null;      // solo donde se firma con expiración
+      const m = content.match(/expiresIn\s*:\s*['"]?(\d+)\s*([smhdwy])?['"]?/i);
+      if (!m) return null;
+      const n = parseInt(m[1], 10);
+      const unidad = (m[2] || 's').toLowerCase();         // jsonwebtoken: número solo = segundos
+      const horas = { s: n/3600, m: n/60, h: n, d: n*24, w: n*168, y: n*8760 }[unidad] ?? n/3600;
+      const LIMITE_HORAS = 168;                           // 7 días
+      if (horas > LIMITE_HORAS) {
+        const legible = m[2] ? `${m[1]}${m[2]}` : `${m[1]}s`;
+        return {
+          type:     'JWT_LONG_EXPIRY',
+          severity: 'HIGH',                               // HIGH = WARN visible, no bloquea
+          message:  `Expiración de token de ${legible} (~${Math.round(horas/24)} días) — ventana de robo larga; confirma que es intencional (refresh/"recuérdame")`,
+          file:     filename,
+        };
+      }
+      return null;
+    },
+  },
+  {
     check: (content, filename) => {
       // Missing return after reply.status in auth middleware
       if (!filename.includes('auth') && !filename.includes('middleware')) return null;
