@@ -294,6 +294,187 @@ function safeRead(full) {
   } catch { return null; }
 }
 
+// ── Cross-tenant agnóstico de ORM y de vocabulario (v3.16.3) ──────────────────
+// El Coliseo (2026-07-20) mostró que los 3 checks de arriba son ciegos a un
+// proyecto tipo FLOTA360: usa `companyId` (no `tenant_id`), un store JSON
+// (`db.load()`, no Prisma) y un `server.js` monolítico clasificado NORMAL (los
+// checks legacy solo corren en CRITICAL/SENSITIVE). Este check cierra las tres
+// grietas: (1) DERIVA la clave de tenant del propio proyecto, (2) es agnóstico
+// de ORM — mira si un handler lee una colección sin filtrar por esa clave, y
+// (3) corre sobre TODOS los archivos con rutas, sin importar su ruta en disco.
+
+// IDs que identifican al REQUESTER o son metadata del token — no son claves de
+// tenant. Un handler filtrado por userId está acotado al que pide (no es fuga);
+// pero la presencia de userId NO prueba que el proyecto sea multi-tenant.
+const IDS_NO_TENANT = new Set([
+  'userId', 'user_id', 'id', 'sessionId', 'session_id', 'tokenId', 'token_id',
+  'requestId', 'request_id', 'traceId', 'trace_id', 'jti', 'sub', 'iat', 'exp',
+]);
+// Backstop débil (multi-idioma) — solo se usa si la derivación del JWT no
+// encontró nada; NO reemplaza la derivación real del proyecto.
+const TENANT_KEYS_CONOCIDAS = [
+  'tenantId', 'tenant_id', 'organizationId', 'companyId', 'accountId',
+  'agencyId', 'orgId', 'workspaceId', 'clinicId', 'negocioId', 'empresaId',
+  'sucursalId', 'clienteId', 'businessId',
+];
+
+/** Archivos candidatos a contener el payload del JWT (nombre con auth/jwt), scan shallow de src. */
+function findAuthFiles(projectRoot) {
+  const found = [];
+  const roots = ['src', 'lib', 'app', '.'].map(d => path.join(projectRoot, d));
+  const walk = (dir, depth) => {
+    if (depth > 4) return;
+    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, depth + 1);
+      else if (/(auth|jwt|token|session)/i.test(e.name) && /\.(js|ts|cjs|mjs)$/.test(e.name)) found.push(full);
+    }
+  };
+  roots.forEach(r => walk(r, 0));
+  return found.slice(0, 30); // cota de seguridad
+}
+
+/**
+ * Deriva las claves de scope/tenant de ESTE proyecto desde su JWT real — no de
+ * una lista fija (el Coliseo mostró que Lumo usa `negocioId`, invisible a una
+ * lista en inglés). Devuelve:
+ *   - scopeKeys: TODOS los *Id del token (incluye userId) — con cualquiera de
+ *     ellos un handler queda acotado al que pide, así que su presencia = "está
+ *     filtrado".
+ *   - tenantKeys: scopeKeys menos los IDs de requester/metadata — su existencia
+ *     es lo que prueba que el proyecto ES multi-tenant (activa el check).
+ */
+function deriveScopeKeys(projectRoot) {
+  const scope = new Set();
+  const extraerIds = (texto) => (texto.match(/\b[a-zA-Z_]\w*(?:Id|_id)\b/g) || []);
+
+  for (const full of findAuthFiles(projectRoot)) {
+    const c = safeRead(full);
+    if (!c) continue;
+    // (a) inline: jwt.sign({ userId, companyId, ... }, ...)
+    const sign = c.match(/(?:jwt\.sign|signToken|generateToken|sign)\s*\(\s*\{([^}]*)\}/i);
+    if (sign) extraerIds(sign[1]).forEach(k => scope.add(k));
+    // (b) tipo/interface del payload: type JwtPayload = { ... } / interface ... {
+    const tipo = c.match(/(?:type|interface)\s+\w*(?:Payload|Token|Claims|JwtUser)\w*\s*=?\s*\{([^}]*)\}/i);
+    if (tipo) extraerIds(tipo[1]).forEach(k => scope.add(k));
+  }
+
+  // Memoria: claves mencionadas junto a "tenant"/"filtrar"/"cross-tenant".
+  try {
+    const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+    if (fs.existsSync(dbPath)) {
+      let db;
+      try { db = new (require('better-sqlite3'))(dbPath, { readonly: true }); }
+      catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { readOnly: true }); }
+      const rows = db.prepare(
+        `SELECT titulo, contenido FROM nodos
+         WHERE titulo LIKE '%tenant%' OR contenido LIKE '%tenant%'
+            OR titulo LIKE '%filtrar%' OR contenido LIKE '%filtrar%'`
+      ).all();
+      for (const r of rows) extraerIds(`${r.titulo} ${r.contenido || ''}`).forEach(k => scope.add(k));
+      try { db.close(); } catch {}
+    }
+  } catch {}
+
+  const scopeKeys = [...scope];
+  let tenantKeys = scopeKeys.filter(k => !IDS_NO_TENANT.has(k));
+  // Backstop: si el JWT no reveló ninguna clave de tenant pero la memoria/
+  // conocidas sugieren una, úsala — nunca deja el check totalmente ciego.
+  if (!tenantKeys.length) {
+    tenantKeys = TENANT_KEYS_CONOCIDAS.filter(k => scopeKeys.includes(k));
+  }
+  return { scopeKeys: scopeKeys.length ? scopeKeys : tenantKeys, tenantKeys };
+}
+
+/** Compat: solo las claves de tenant (para quien llame la API vieja). */
+function deriveTenantKeys(projectRoot) {
+  return deriveScopeKeys(projectRoot).tenantKeys;
+}
+
+/** ¿El contenido define handlers de rutas HTTP? (Express, Fastify, Next.js route handlers) */
+function tieneRutas(content) {
+  return /\b(?:app|router|fastify)\s*\.\s*(?:get|post|put|patch|delete)\s*\(/i.test(content) ||
+         /\bexport\s+(?:async\s+)?function\s+(?:GET|POST|PUT|PATCH|DELETE)\b/.test(content);
+}
+
+/** Extrae el cuerpo `{...}` que empieza en `fromIndex` por balanceo de llaves. */
+function extraerBloque(content, fromIndex) {
+  const start = content.indexOf('{', fromIndex);
+  if (start === -1) return '';
+  let depth = 0;
+  for (let i = start; i < content.length && i < start + 8000; i++) {
+    const ch = content[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return content.slice(start, i + 1); }
+  }
+  return content.slice(start, start + 8000);
+}
+
+// Rutas que por naturaleza NO son tenant-scoped — no exigirles filtro de tenant.
+const RUTAS_NO_TENANT = /\b(login|logout|register|signup|signin|sign-in|auth|health|healthz|ping|status|config|public|webhook|callback)\b/i;
+// Señales de que un handler LEE una colección de datos (plural), agnóstico de ORM.
+const LEE_COLECCION = /\b(?:db\.load|loadAll|\.findMany|\.findAll|\.scan\(|SELECT\s+[\s\S]*\bFROM\b|\.query\s*\()\b|\.(?:reduce|filter|map)\s*\(/i;
+// Middleware que ACOTA al tenant por su cuenta (resuelve el negocio/tenant del
+// request y verifica acceso) — un handler protegido por esto YA está acotado
+// aunque no filtre inline. OJO: requireAuth/requireRole genéricos NO cuentan
+// (solo autentican / chequean rol, no acotan al tenant del que pide) — por eso
+// el patrón exige vocabulario de tenant o "access", no cualquier require*.
+const MIDDLEWARE_TENANT = /\brequire\w*access\b|\brequire(?:negocio|tenant|company|org|account|clinic|empresa)\w*|\b(?:negocio|tenant|company)\w*(?:auth|access|middleware|guard)\b|\bdeny\w+\b|\bscopeto\w*/i;
+
+/**
+ * Detecta fuga cross-tenant en handlers de ruta: un handler que lee una
+ * colección de datos tenant-scoped pero NO menciona la clave de tenant en su
+ * cuerpo → CRÍTICO. Bajo riesgo de falso positivo: solo dispara si el proyecto
+ * ES multi-tenant (hay clave derivada), la ruta no es de las exentas, y el
+ * handler efectivamente lee una colección.
+ */
+function detectCrossTenantLeak(content, filename, keys) {
+  // keys puede ser un array (compat) o {scopeKeys, tenantKeys}.
+  const tenantKeys = Array.isArray(keys) ? keys : (keys && keys.tenantKeys) || [];
+  const scopeKeys  = Array.isArray(keys) ? keys : (keys && keys.scopeKeys) || tenantKeys;
+  if (!tenantKeys.length) return [];                     // proyecto no multi-tenant conocido
+  if (!tieneRutas(content)) return [];
+  // Archivo entero de superadmin (por nombre o por middleware a nivel router
+  // `router.use(superadminMiddleware)`) → platform-level por diseño, no es fuga.
+  if (/superadmin/i.test(filename)) return [];
+  if (/\.use\s*\([^)]*superadmin/i.test(content)) return [];
+  const findings = [];
+  const re = /(?:(?:app|router|fastify)\s*\.\s*(?:get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]|export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE))/gi;
+  let m;
+  while ((m = re.exec(content)) !== null) {
+    const rutaPath = m[1] || m[2] || '';
+    if (RUTAS_NO_TENANT.test(rutaPath)) continue;
+    const bodyStart = content.indexOf('{', m.index);
+    // La declaración (entre el path y el cuerpo) trae los middlewares —
+    // requireSuperadmin, etc. superadmin = platform-level POR DISEÑO (lo dice
+    // el propio CLAUDE.md): esos handlers SÍ deben ver todos los tenants, no
+    // son fuga. Se exime si la declaración, el cuerpo o el archivo son superadmin.
+    const decl = bodyStart > m.index ? content.slice(m.index, bodyStart) : '';
+    const cuerpo = extraerBloque(content, m.index);
+    if (!cuerpo) continue;
+    if (/superadmin/i.test(decl) || /superadmin/i.test(cuerpo)) continue;
+    // Un middleware que acota al tenant en la cadena del handler ya lo protege.
+    if (MIDDLEWARE_TENANT.test(decl)) continue;
+    if (!LEE_COLECCION.test(cuerpo)) continue;           // no lee colección → no aplica
+    // "Está acotado" si el cuerpo menciona CUALQUIER clave de scope del token
+    // (userId/negocioId/companyId…) — cualquiera acota al que pide.
+    const estaAcotado = scopeKeys.some(k => cuerpo.includes(k));
+    if (!estaAcotado) {
+      const linea = content.slice(0, m.index).split('\n').length;
+      findings.push({
+        type:     'CROSS_TENANT_LEAK',
+        severity: 'CRITICAL',
+        message:  `Handler "${rutaPath}" lee una colección de datos sin acotarla al scope del que pide (${tenantKeys.join('/')}) — posible fuga cross-tenant`,
+        file:     filename,
+        line:     linea,
+      });
+    }
+  }
+  return findings;
+}
+
 // ── Gate principal ────────────────────────────────────────────────────────────
 
 function runSecurityGate(files, projectRoot) {
@@ -301,6 +482,9 @@ function runSecurityGate(files, projectRoot) {
   const allFindings = [];
   const scannedFiles = [];
   const sensitiveFiles = [];
+
+  // Claves de scope/tenant del proyecto — derivadas una sola vez para el lote.
+  const keys = deriveScopeKeys(projectRoot);
 
   (files || []).forEach(file => {
     const full = path.isAbsolute(file) ? file : path.join(projectRoot, file);
@@ -312,7 +496,12 @@ function runSecurityGate(files, projectRoot) {
     // Escudo (secretos/PII/injection) → en TODOS los archivos
     allFindings.push(...scanShield(content, filename));
 
-    // Checks de negocio (tenant/JWT/auth) → solo CRITICAL/SENSITIVE
+    // Cross-tenant agnóstico (v3.16.3) → en TODOS los archivos con rutas, sin
+    // importar su clasificación de riesgo (el hueco era justo que server.js
+    // monolítico = NORMAL nunca llegaba a los checks de negocio).
+    allFindings.push(...detectCrossTenantLeak(content, filename, keys));
+
+    // Checks de negocio legacy (tenant Prisma/JWT/auth) → solo CRITICAL/SENSITIVE
     const risk = classifyFileRisk(file);
     if (risk === 'CRITICAL' || risk === 'SENSITIVE') {
       sensitiveFiles.push({ file, risk });
@@ -375,4 +564,4 @@ if (require.main === module) {
   process.exit(result.passed ? 0 : 1);
 }
 
-module.exports = { runSecurityGate, classifyFileRisk, scanShield };
+module.exports = { runSecurityGate, classifyFileRisk, scanShield, detectCrossTenantLeak, deriveTenantKeys, deriveScopeKeys };

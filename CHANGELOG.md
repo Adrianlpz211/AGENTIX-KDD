@@ -1,5 +1,27 @@
 # Changelog — Agentic KDD
 
+## [3.16.3] — 2026-07-20
+
+### Hueco #1 del Coliseo SELLADO — cross-tenant agnóstico de ORM y de vocabulario
+El check cross-tenant del Security Gate era ciego a un proyecto tipo FLOTA360
+(usa `companyId` no `tenant_id`, store JSON no Prisma, y un `server.js`
+monolítico clasificado NORMAL que nunca llegaba a los checks de negocio).
+Reescrito de raíz:
+- **Deriva la clave de tenant del propio proyecto** — del payload del JWT
+  (inline `jwt.sign({...})` o el `type JwtPayload`) y de la memoria, en
+  cualquier idioma. Probado: FLOTA360 → `companyId`; Lumo → `negocioId`,
+  `asesorId`, `lineId` (una lista fija en inglés los habría perdido — el mismo
+  error que el hueco corregía).
+- **Agnóstico de ORM**: marca CRÍTICO un handler de ruta que lee una colección
+  (`db.load`/`findMany`/`reduce`/SELECT…) sin acotarla al scope del que pide.
+- **Corre sobre TODOS los archivos con rutas**, sin importar su clasificación.
+- **Bajo falso positivo, probado a morir**: exime superadmin (platform-level por
+  diseño), rutas no-tenant (login/health/config), y handlers protegidos por
+  middleware que acota al tenant (`requireNegocioAccess`, etc.) — pero NO exime
+  `requireAuth`/`requireRole('admin')` genéricos. Verificado contra las 28 rutas
+  reales de Lumo → **0 falsos positivos**; la trampa del Coliseo → STOP; 7 casos
+  límite → correctos.
+
 ## [3.16.2] — 2026-07-20
 
 ### Coliseo Diabólico corrido en modo "auditoría de maquinaria" — 2 huecos tapados
