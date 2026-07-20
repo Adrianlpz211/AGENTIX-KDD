@@ -18,6 +18,9 @@
   ],
   "experimental": [
     "browser-gate.cjs", "ts-enricher.cjs", "collab-manager.cjs",
-    "graph-server.cjs", "watch-errors.cjs", "coverage-meter.cjs"
+    "graph-server.cjs", "watch-errors.cjs", "coverage-meter.cjs",
+    "change-classifier.cjs", "graph-freshness.cjs", "graph-reviewer.cjs",
+    "code-summaries.cjs", "diff-overlay.cjs", "tour-builder.cjs",
+    "ui-layout-memory.cjs", "clickup-bridge.cjs"
   ]
 }

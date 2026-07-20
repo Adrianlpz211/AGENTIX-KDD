@@ -890,7 +890,114 @@ function computeLineEnds(symbols, content) {
 
 // ─── INDEXAR UN ARCHIVO ───────────────────────────────────────────────────────
 
-function indexFile(db, filePath, projectRoot) {
+// ─── PIEZA 7: RESOLVER DE IMPORTS COMPARTIDO (importMap determinista) ─────────
+// Antes, CADA edge IMPORTS re-resolvía su specifier con hasta 8 fs.existsSync,
+// repitiendo el trabajo para specifiers idénticos desde la misma carpeta, y sin
+// soporte de alias (@/, ~/). Este resolver se crea UNA vez por corrida de
+// indexado y memoiza cada (carpeta, specifier) → misma resolución para todos,
+// bit-idéntica entre corridas, más rápida, y con alias del tsconfig/jsconfig.
+// ADITIVO: indexFile lo recibe como parámetro OPCIONAL — cualquier caller viejo
+// que no lo pase obtiene el comportamiento inline original, intacto.
+// Quita comentarios // y /* */ de un JSONC SIN romper strings — un regex simple
+// aquí es una trampa: los tsconfig reales tienen globs como "@/*" y "**/*.mts"
+// dentro de strings, y un /\/\*...\*\//g se come desde el /* de "@/*" hasta el
+// */ de "**/*.mts", destruyendo justo la sección paths (bug real encontrado
+// probando contra el tsconfig de un proyecto Next.js).
+function stripJsonComments(raw) {
+  let out = '', inStr = false, i = 0;
+  while (i < raw.length) {
+    const c = raw[i], n = raw[i + 1];
+    if (inStr) {
+      out += c;
+      if (c === '\\') { out += n || ''; i += 2; continue; }
+      if (c === '"') inStr = false;
+      i++; continue;
+    }
+    if (c === '"') { inStr = true; out += c; i++; continue; }
+    if (c === '/' && n === '/') { while (i < raw.length && raw[i] !== '\n') i++; continue; }
+    if (c === '/' && n === '*') { i += 2; while (i < raw.length && !(raw[i] === '*' && raw[i + 1] === '/')) i++; i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+function loadAliasTable(projectRoot) {
+  // tsconfig.json / jsconfig.json → compilerOptions.paths + baseUrl.
+  // Parse tolerante (los tsconfig reales traen comentarios): si no parsea,
+  // simplemente no hay alias — nunca rompe el indexado.
+  for (const cfgName of ['tsconfig.json', 'jsconfig.json']) {
+    try {
+      const raw = stripJsonComments(fs.readFileSync(path.join(projectRoot, cfgName), 'utf8'))
+        .replace(/,\s*([}\]])/g, '$1');        // comas colgantes
+      const cfg = JSON.parse(raw);
+      const paths = cfg?.compilerOptions?.paths;
+      if (!paths) continue;
+      const baseUrl = cfg?.compilerOptions?.baseUrl || '.';
+      const table = [];
+      for (const [pattern, targets] of Object.entries(paths)) {
+        if (!Array.isArray(targets) || !targets.length) continue;
+        // "@/*": ["./src/*"] → prefijo "@/" apunta a "<base>/src/"
+        table.push({
+          prefix: pattern.replace(/\*$/, ''),
+          target: path.resolve(projectRoot, baseUrl, String(targets[0]).replace(/\*$/, '')),
+        });
+      }
+      if (table.length) return table;
+    } catch { /* siguiente candidato */ }
+  }
+  return [];
+}
+
+function createImportResolver(projectRoot) {
+  const aliasTable = loadAliasTable(projectRoot);
+  const cache = new Map();
+  const stats = { resolved: 0, unresolved: 0, cacheHits: 0, aliasResolved: 0 };
+
+  // Mismos candidatos que la resolución inline original (incluye el fix
+  // TS+ESM de reemplazo de extensión del 14/07) — una sola fuente de verdad.
+  function probeCandidates(resolvedBase) {
+    const candidates = [resolvedBase];
+    const extMatch = resolvedBase.match(/\.(js|jsx|mjs|cjs)$/i);
+    if (extMatch) {
+      const base = resolvedBase.slice(0, -extMatch[0].length);
+      candidates.push(base + '.ts', base + '.tsx');
+    }
+    const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
+    for (const ext of extensions) candidates.push(resolvedBase + ext);
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return path.relative(projectRoot, c);
+    }
+    return null;
+  }
+
+  function resolve(fromFileAbs, specifier) {
+    if (!specifier) return null;
+    let key, resolvedBase = null;
+
+    if (specifier.startsWith('.')) {
+      const dir = path.dirname(fromFileAbs);
+      key = dir + '|' + specifier;
+      if (cache.has(key)) { stats.cacheHits++; return cache.get(key); }
+      resolvedBase = path.resolve(dir, specifier);
+    } else {
+      const alias = aliasTable.find(a => specifier.startsWith(a.prefix));
+      if (!alias) return null;  // bare import (npm) — igual que siempre: null
+      key = 'alias|' + specifier;
+      if (cache.has(key)) { stats.cacheHits++; return cache.get(key); }
+      resolvedBase = path.join(alias.target, specifier.slice(alias.prefix.length));
+    }
+
+    const result = probeCandidates(resolvedBase);
+    cache.set(key, result);
+    if (result) { stats.resolved++; if (key.startsWith('alias|')) stats.aliasResolved++; }
+    else stats.unresolved++;
+    return result;
+  }
+
+  return { resolve, stats };
+}
+
+function indexFile(db, filePath, projectRoot, importResolver = null) {
   const relPath = path.relative(projectRoot, filePath);
   const language = detectLanguage(filePath);
   if (!language) return { skipped: true };
@@ -950,6 +1057,10 @@ function indexFile(db, filePath, projectRoot) {
     let toFile = null;
     if (edge.kind === 'CALLS') {
       toFile = relPath; // llamada local — mismo archivo, por construcción
+    } else if (importResolver && edge.to_symbol && edge.kind === 'IMPORTS') {
+      // PIEZA 7: resolver compartido/memoizado (cubre relativos Y alias @/).
+      // Mismos candidatos que el inline de abajo — misma respuesta, menos I/O.
+      toFile = importResolver.resolve(filePath, edge.to_symbol);
     } else if (edge.to_symbol?.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filePath), edge.to_symbol);
 
@@ -1185,11 +1296,17 @@ function indexProject(projectRoot, targetDir = null) {
 
   console.log(`[AST-INDEXER] Indexando ${files.length} archivos en ${path.relative(process.cwd(), searchDir) || '.'}`);
 
+  // PIEZA 7: un solo resolver de imports para toda la corrida — memoizado,
+  // determinista y con alias. Best-effort: si su creación falla, se indexa
+  // exactamente igual que siempre (indexFile cae al inline original).
+  let importResolver = null;
+  try { importResolver = createImportResolver(projectRoot); } catch {}
+
   let indexed = 0, skipped = 0, cached = 0, errors = 0;
   const changedFiles = [];
 
   for (const file of files) {
-    const result = indexFile(db, file, projectRoot);
+    const result = indexFile(db, file, projectRoot, importResolver);
     if (result.cached) cached++;
     else if (result.skipped) skipped++;
     else if (result.error) errors++;
@@ -1208,6 +1325,11 @@ function indexProject(projectRoot, targetDir = null) {
     const cssLink = linkCssEdges(db);
     if (cssLink.linked) console.log(`[AST-INDEXER] ${cssLink.linked} edges CSS→vista enlazados`);
   } catch {}
+  // PIEZA 7: métrica del resolver — visible para poder comparar corridas.
+  if (importResolver && (importResolver.stats.resolved || importResolver.stats.unresolved)) {
+    const s = importResolver.stats;
+    console.log(`[AST-INDEXER] importMap: ${s.resolved} resueltos (${s.aliasResolved} por alias) · ${s.unresolved} sin resolver · ${s.cacheHits} cache hits`);
+  }
   console.log('[AST-INDEXER] Calculando PageRank...');
   computePageRank(db);
 
@@ -1296,4 +1418,10 @@ module.exports = {
   AST_SCHEMA,
   LANGUAGE_MAP,
   extractCallsWithinFile,
+  // Export aditivo (Pieza 1): change-classifier.cjs reusa los mismos extractores
+  // para calcular firmas estructurales — una sola fuente de verdad de parsing.
+  EXTRACTORS,
+  // Export aditivo (Pieza 7): resolver compartido de imports, memoizado y con
+  // alias — indexProject lo crea una vez por corrida; expuesto para tests.
+  createImportResolver,
 };

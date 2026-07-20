@@ -34,6 +34,12 @@ const HELP = `
     akdd health            System health check — what's configured, what's missing
     akdd health --fix      Auto-fix common issues
 
+  ClickUp Bridge (opt-in, off by default — "cu" es alias corto de "clickup"):
+    akdd cu on             Activate ClickUp tools (needs CLICKUP_API_TOKEN in .env)
+    akdd cu set-list <id>  Configure the ClickUp List this project pulls from
+    akdd cu status         Show ClickUp bridge status
+    akdd cu sprint         Pull + classify + show the "sprint sólido" (no execution yet)
+
   Memory & Knowledge:
     akdd sync              Sync memory files to SQLite graph
     akdd graph             Sync + show graph stats
@@ -169,6 +175,17 @@ switch (command) {
   case 'onboard': onboard(); break;
   case 'analyze': runModule('akdd-analyze.cjs', args[0] || 'run'); break;
   case 'locks':   runModule('lock-manager.cjs', args[0] || 'status', args[1] || ''); break;
+  case 'clickup': case 'cu': {
+    const sub = arg1;
+    if (sub === 'on')            runModule('clickup-bridge.cjs', 'on');
+    else if (sub === 'status')   runModule('clickup-bridge.cjs', 'status');
+    else if (sub === 'set-list') runModule('clickup-bridge.cjs', 'set-list', arg2 || '');
+    else if (sub === 'pull' || sub === 'sprint') runModule('clickup-bridge.cjs', 'pull', args.includes('--auto') ? '--auto' : '');
+    else if (sub === 'done')     runModule('clickup-bridge.cjs', 'done', `${arg2 || ''} ${args.find(a => a.startsWith('--status=')) || ''}`.trim());
+    else if (sub === 'comment')  runModule('clickup-bridge.cjs', 'comment', `${arg2 || ''} "${args.slice(3).filter(a => !a.startsWith('--')).join(' ')}"`);
+    else console.log('\n  Uso: akdd cu <on|set-list <id>|status|sprint [--auto]|done <id>|comment <id> "texto">\n');
+    break;
+  }
   case 'hooks': {
     const sub = arg1 || 'install';
     if (sub === 'uninstall')   runModule('install-hooks.cjs', '--uninstall');

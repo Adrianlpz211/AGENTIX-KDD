@@ -268,6 +268,24 @@ const CHECKS = [
     },
     fix: 'akdd llms',
   },
+  // ── PIEZA 6 (aditivo): integridad del grafo — Graph Reviewer ────────────────
+  {
+    id: 'graph_integrity',
+    nombre: 'Integridad del grafo (reviewer)',
+    categoria: 'memoria',
+    check: (root) => {
+      try {
+        const s = require(path.join(root, '.agentic', 'grafo', 'graph-reviewer.cjs')).healthSummary(root);
+        if (!s) return { ok: true, msg: 'reviewer no disponible — omitido' };
+        if (s.total === 0) return { ok: true, msg: 'memoria íntegra — 0 referencias rotas' };
+        const parts = [];
+        if (s.fixable) parts.push(`${s.fixable} limpiable(s) con --fix del reviewer`);
+        if (s.reportOnly) parts.push(`${s.reportOnly} requieren decisión humana`);
+        return { ok: false, msg: `${s.total} referencia(s) rota(s): ${parts.join(' + ')}` };
+      } catch { return { ok: true, msg: 'reviewer no disponible — omitido' }; }
+    },
+    fix: 'node .agentic/grafo/graph-reviewer.cjs --fix',
+  },
 ];
 
 // ─── RUNNER ───────────────────────────────────────────────────────────────────

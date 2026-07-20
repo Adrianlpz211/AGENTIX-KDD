@@ -13,6 +13,14 @@ scripts/
 .github/
 vscode-extension/
 
+# Arena de benchmark (seeds completos con node_modules, DBs de prueba, resultados
+# por ronda) — 44MB de evidencia interna, nunca debe llegar a un cliente. Defensa
+# en profundidad: init.js ya filtra esto explícitamente al copiar docs/ (bug real
+# encontrado el 18/07/2026), esta entrada cubre además cualquier empaquetado npm.
+docs/benchmarks/
+docs/benchmarks$dest/
+docs/superpowers/
+
 # Archivos de trabajo internos — nunca deben publicarse
 repomix-output.xml
 life-logbook-dashboard-agentix-10072026.md

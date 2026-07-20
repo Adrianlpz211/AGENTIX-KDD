@@ -257,6 +257,13 @@ function printBrief(brief) {
   lines.push(`**Riesgo estimado:** ${brief.riesgo}`);
   lines.push('');
 
+  // PIEZA 2 (aditivo): una línea de frescura del grafo, solo si hay algo que
+  // avisar (stale/dirty) — fresh y unknown no meten ruido. Best-effort.
+  try {
+    const fl = require('./graph-freshness.cjs').freshnessLine(process.cwd());
+    if (fl) { lines.push(fl); lines.push(''); }
+  } catch {}
+
   if (brief.dependencias.length) {
     lines.push(`**Módulos/áreas relacionadas:** ${brief.dependencias.join(', ')}`);
     lines.push('');

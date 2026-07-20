@@ -300,6 +300,54 @@ function applyMeritPromotion(db) {
 // ya los acepta (es genérico) — esto solo los cuenta para el reporte:
 // "N recuperaciones autónomas este mes, M escaladas".
 
+// ─── RECOVERY MECÁNICO (protocol → mechanical, 18/07/2026) ───────────────────
+// Antes, registrar un RECOVERED dependía de que el modelo, tras reparar un
+// STOP, se acordara de correr un `node -e recordGateEvent(...)` a mano (así
+// quedaba documentado en CLAUDE.md, honestamente marcado `source:'protocol'`).
+// Esta función lo detecta SOLA: si un behavior_id tenía como último evento un
+// STOP/FAIL y ahora vuelve a pasar limpio, se registra RECOVERED con
+// `source:'mechanical'` — sin que nadie tenga que acordarse de nada.
+// No mecaniza EL FIX (eso lo sigue haciendo el modelo) — solo el REGISTRO de
+// que la reparación ocurrió, que es la parte que antes se perdía en silencio.
+function detectAndRecordRecoveries(db, resolvedBehaviorIds, opts = {}) {
+  if (!resolvedBehaviorIds || !resolvedBehaviorIds.length) return 0;
+  let recovered = 0;
+  try {
+    ensureTelemetrySchema(db);
+    // Tercer bug real encontrado probando esto (18/07/2026), más sutil que el
+    // anterior: el MISMO gate registra un evento de contención (DOUBT/HIT/MISS)
+    // ANTES de correr los tests, en la misma llamada donde se resuelve — así
+    // que "¿cuál fue el ÚLTIMO evento?" ve ese DOUBT recién escrito por esta
+    // misma corrida, no el STOP de la corrida anterior que se está reparando.
+    // La pregunta correcta no es "¿el último evento es STOP?" sino "¿hay un
+    // STOP/FAIL sin un RECOVERED posterior?" — los DOUBT/HIT/MISS de en medio
+    // son ruido rutinario del gate, no cambian el estado de recuperación.
+    const lastStop = db.prepare(`
+      SELECT id FROM gate_events
+      WHERE behavior_id = ? AND verdict IN ('STOP','FAIL')
+      ORDER BY id DESC LIMIT 1
+    `);
+    const recoveredSince = db.prepare(`
+      SELECT COUNT(*) n FROM gate_events
+      WHERE behavior_id = ? AND verdict = 'RECOVERED' AND id > ?
+    `);
+    for (const behaviorId of resolvedBehaviorIds) {
+      if (behaviorId == null) continue;
+      const stop = safe(() => lastStop.get(String(behaviorId)));
+      if (!stop) continue; // nunca tuvo un STOP/FAIL — nada que recuperar
+      const already = safe(() => recoveredSince.get(String(behaviorId), stop.id));
+      if (already && already.n > 0) continue; // ya se registró la recuperación de ESE stop
+      const ok = recordGateEvent(db, {
+        gate: 'recovery', verdict: 'RECOVERED', behavior_id: behaviorId,
+        source: 'mechanical',
+        detalle: { gateOrigen: opts.gateOrigen || 'regression', autoDetectado: true },
+      });
+      if (ok) recovered++;
+    }
+  } catch {}
+  return recovered;
+}
+
 function recoveryStats(db, opts = {}) {
   const out = { recovered: 0, failed: 0, tasa: null };
   try {
@@ -367,6 +415,7 @@ module.exports = {
   recordGateEvent,
   gateStats,
   recoveryStats,
+  detectAndRecordRecoveries,
   anchorRecentErrors,
   linkErrorFixes,
   revalidateAnchors,

@@ -727,6 +727,62 @@ async function main() {
     }
   } catch { /* validación es un plus, nunca bloquea post-cycle */ }
 
+  // Step 2.7: Spec Value Scan + Test Integrity Gate — la mitad mecanizable de
+  // "QA MEJORADO — VALIDACIÓN CONTRA HISTORIAL" (CLAUDE.md). Ambos scripts ya
+  // existían (Plan 7 T2 / grieta R8 del Coliseo) pero no corrían solos en
+  // ningún punto del pipeline — dependían de que el modelo se acordara de
+  // invocarlos. Aquí corren SIEMPRE, sobre el mismo diff del último commit que
+  // ya usa el paso de episodio de arriba. Fail-soft y WARN-only (igual que
+  // Knowledge Validator arriba): nunca bloquean post-cycle, solo hacen visible
+  // el hallazgo y lo registran en la libreta (source:'mechanical').
+  let commitFilesForScans = [];
+  try {
+    commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
+      .toString().split('\n').map(f => f.trim()).filter(Boolean);
+  } catch {}
+
+  try {
+    const svs = require(path.join(GRAFO_DIR, 'spec-value-scan.cjs'));
+    const tig = require(path.join(GRAFO_DIR, 'test-integrity-gate.cjs'));
+    const specRes = commitFilesForScans.length
+      ? svs.scan(ROOT, { staged: false, files: commitFilesForScans })
+      : { findings: [], scanned: false };
+    const testFiles = commitFilesForScans.filter(f => /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|py)$/i.test(f));
+    const tigRes = testFiles.length
+      ? tig.scan(ROOT, { staged: false, files: testFiles })
+      : { findings: [], scanned: false };
+    if (!silent) {
+      const n = (specRes.findings || []).length + (tigRes.findings || []).length;
+      console.log(n > 0
+        ? `  2.7 Spec/Test integrity scan... ⚠️  ${n} hallazgo(s) — ver libreta (gate_events)`
+        : '  2.7 Spec/Test integrity scan... ✅ sin hallazgos');
+    }
+  } catch { if (!silent) console.log('  2.7 Spec/Test integrity scan... ⚠️  omitido'); }
+
+  // Step 2.8: UI Layout Memory — mecaniza el hueco "no hay memoria de layout/
+  // posición" señalado en el análisis externo de Agentix (caso real de esta
+  // sesión: el panel de tour se reposicionó y nada habría detectado si algo
+  // lo devolvía a su lugar viejo). Solo vigila elementos que alguien registró
+  // explícitamente con `ui-layout-memory.cjs record` — sin registro, sin
+  // ruido. Se limita a archivos de UI típicos para no correr sobre todo el
+  // changeset. Fail-soft, WARN-only, mismo espíritu que el paso anterior.
+  try {
+    const uilmPath = path.join(GRAFO_DIR, 'ui-layout-memory.cjs');
+    const uiFiles = commitFilesForScans.filter(f => /\.(html|jsx|tsx)$/i.test(f) || /dashboard/i.test(f));
+    if (fs.existsSync(uilmPath) && uiFiles.length) {
+      const uilm = require(uilmPath);
+      const uiRes = uilm.scanDiff(ROOT, { staged: false, files: uiFiles });
+      if (!silent) {
+        const n = (uiRes.findings || []).length;
+        console.log(n > 0
+          ? `  2.8 UI Layout Memory... ⚠️  ${n} hallazgo(s) — ver libreta (gate_events)`
+          : '  2.8 UI Layout Memory... ✅ sin hallazgos');
+      }
+    } else if (!silent) {
+      console.log('  2.8 UI Layout Memory... — (sin archivos de UI en este commit)');
+    }
+  } catch { if (!silent) console.log('  2.8 UI Layout Memory... ⚠️  omitido'); }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);
@@ -808,6 +864,15 @@ async function main() {
       if (!silent) console.log(`⚠️  error verificando: ${e.message.slice(0, 80)}`);
     }
   }
+
+  // Step 12 (PIEZA 2, aditivo): sellar el grafo con el commit HEAD actual —
+  // así checkFreshness() puede medir después qué tan al día está la memoria.
+  // Best-effort: si falla (sin git, sin DB), el post-cycle reporta igual que siempre.
+  if (!silent) process.stdout.write('  11. Freshness stamp... ');
+  try {
+    const fresh = require('./graph-freshness.cjs').stampGraph(process.cwd());
+    if (!silent) console.log(fresh.ok ? `✅ ${fresh.commit.slice(0, 8)}` : `⚠️  (${fresh.reason})`);
+  } catch (e) { if (!silent) console.log('⚠️  (omitido)'); }
 
   if (!silent) {
     console.log('\n══════════════════════════════════════════════════');

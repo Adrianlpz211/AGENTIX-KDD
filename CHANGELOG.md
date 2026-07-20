@@ -1,5 +1,177 @@
 # Changelog — Agentic KDD
 
+## [3.16.0] — 2026-07-19
+
+### ClickUp Bridge (nuevo, opt-in, experimental) — los sprints entran solos desde ClickUp
+- **clickup-bridge.cjs** — trae las tareas de una Lista de ClickUp (API REST directa,
+  sin depender de MCP), las coteja contra el proyecto real (ast_symbols +
+  code-summaries + dominio de config.md) y las clasifica: RELEVANTE_CLARA /
+  RELEVANTE_NUEVA / AMBIGUA / SIN_RASTRO. Apagado por defecto — se activa con
+  `akdd cu on` (pide `CLICKUP_API_TOKEN` en `.env`, lo valida contra la API).
+- **`akdd cu sprint --auto`** — filtro mecánico de auto-elegibilidad que reutiliza los
+  gates reales: solo RELEVANTE_CLARA, sin archivos CRITICAL/SENSITIVE
+  (`classifyFileRisk`), sin valores de negocio en conflicto con la MEMORIA del
+  proyecto (no listas hardcodeadas — la primera prueba real demostró que
+  `spec-gate` solo hablaba inglés), sin tema de auth/sesiones, sin alcance
+  estructural grande (migraciones), y con descripción con sustancia real. El
+  protocolo CLICKUP AUTO (CLAUDE.md) ejecuta el pipeline `aa:` completo solo para
+  las elegibles, con resumen pre-lote obligatorio.
+- **`akdd cu done <id>` / `akdd cu comment <id>`** — cierre del ciclo en ClickUp:
+  tarea completada solo si tests+QA pasaron limpio sin ningún STOP/WARN; ante
+  cualquier duda, solo comentario (el humano cierra el ticket dudoso, no la
+  máquina). El estado de cierre se resuelve por Lista (ClickUp no tiene un
+  "complete" universal — bug encontrado probando contra lista real).
+- Probado de punta a punta contra cuenta real de ClickUp (13 tareas): 5 bugs
+  reales encontrados y corregidos probando contra datos reales, incluyendo las 2
+  trampas de seguridad (ticket de auth y cambio de valor de negocio salían
+  auto-elegibles en la primera versión del filtro).
+
+### Autonomía L4 endurecida (protocol → mechanical, todo probado en proyecto real primero)
+- **RECOVERY mecanizado** — `checkBeforeBuild()` detecta solo cuando un behavior con
+  STOP/FAIL pendiente vuelve a pasar limpio y registra `RECOVERED`
+  (`source: mechanical`) sin depender de que el modelo se acuerde. Ya no existe el
+  paso manual `node -e` del protocolo RECOVERY.
+- **regression-guard multi-runner** — `runTestFile()` detecta el runner real
+  (vitest/jest/mocha/node) en vez de asumir Jest; fix de quote-leak de cmd.exe que
+  rompía el filtro de tests en Windows.
+- **Spec/Test integrity scan automático** — `spec-value-scan.cjs` y
+  `test-integrity-gate.cjs` existían pero nadie los invocaba: ahora corren solos en
+  cada post-cycle (Step 2.7) sobre el diff del último commit. WARN-only.
+- **ui-layout-memory.cjs** (nuevo) — memoria de decisiones de posición/tamaño de UI
+  (elemento + propiedad CSS + motivo). Detecta cambio nuevo, reversión exacta a un
+  valor ya abandonado, y propiedad desaparecida. Post-cycle Step 2.8, solo sobre
+  archivos de UI del commit. Cierra el hueco "el select volvió a su lugar viejo".
+- **graph-reviewer.cjs** — 4º falso positivo corregido: entradas glob
+  (`public/js/**`) en `archivos_aplica` se marcaban como archivo fantasma.
+
+### Arena
+- **Coliseo Diabólico** (escenario 08) — 5 fases adversariales sobre terreno nuevo
+  (FLOTA360: SaaS multi-tenant de flotas con memoria pre-envenenada), 2 brazos:
+  con Agentix (Cursor+Claude sobre el mismo repo) vs sin Agentix (control).
+
+## [Publicado en 3.16.0, trabajado 2026-07-17/18]
+
+### Las 7 piezas (inspiradas en Understand-Anything, probadas en proyecto real antes de portar)
+- **change-classifier.cjs** — distingue cambios COSMETIC (comentarios/formato) de
+  STRUCTURAL (firmas/imports). `knowledge-validator` ya no marca conocimiento como
+  SOSPECHOSO por un comentario — solo por cambios estructurales reales. CLI: `akdd changes`.
+- **graph-freshness.cjs** — el grafo se sella con el commit de git en cada post-cycle;
+  badge en el dashboard (🟢 al día / ✏️ cambios sin commitear / ⏳ N commits atrás) y
+  aviso en el brief de cada `aa:`. CLI: `akdd fresh`.
+- **graph-reviewer.cjs** — integridad determinista de memoria.db: relaciones colgantes,
+  archivos fantasma, contratos con tests borrados, locks vencidos. `--fix` limpia solo
+  categorías seguras; el conocimiento jamás se toca solo. Integrado a `akdd health`.
+  CLI: `akdd integrity`.
+- **importMap determinista** (dentro de ast-indexer) — resolver de imports memoizado,
+  compartido por corrida, con alias del tsconfig (`@/`). Equivalencia verificada contra
+  el resolver viejo: 1,256 aristas, 0 diferencias; determinismo bit-idéntico entre corridas.
+- **code-summaries.cjs** — descripciones en lenguaje natural POR ARCHIVO escritas por el
+  agente leyendo el código real (protocolo `akdd describe`, regla dura: solo nombres de
+  archivo pueden ser técnicos). Vigencia atada a la firma estructural: un comentario no
+  la invalida, una función nueva sí. El "¡NO ENTIENDO!" del dashboard las usa primero.
+- **diff-overlay.cjs** — blast radius visual: `akdd overlay` pinta en Code Structure qué
+  archivos cambiaron (rojo) y cuáles pueden verse afectados a 1 salto (ámbar; naranja
+  intenso si tienen contratos encima). Botón "🔥 Cambios" en el dashboard.
+- **tour-builder.cjs** — "Visita guiada": recorrido del proyecto agrupado POR MÓDULO
+  (no por archivo: 307 archivos → 16 paradas en el proyecto de validación), en orden
+  topológico de dependencias, con tabs Frontend/Backend (misma clasificación que la
+  coraza), selector de salto directo, memoria KDD y contratos por parada. CLI: `akdd tour`.
+- Los 6 módulos nuevos clasificados como `experimental` en MADUREZ.json (un solo
+  proyecto de validación todavía) — lint de fronteras en verde.
+
+### Dashboard
+- Code Structure: color por módulo/carpeta (antes por lenguaje — plano en proyectos
+  mono-lenguaje), "¡NO ENTIENDO!" totalmente en lenguaje natural con traductor
+  heurístico de nombres como respaldo, glosarios "?" actualizados con cada feature nueva.
+- Fix: el modal del glosario vivía anidado dentro de la pestaña Knowledge Graph — en
+  cualquier otra pestaña su contenedor oculto lo colapsaba a tamaño cero.
+- Fix de bug latente pre-existente: `split(/[\\/]/)` dentro del template literal gigante
+  perdía una barra al evaluarse — 5 sitios del dashboard mostraban rutas completas en
+  vez de nombres de archivo desde siempre, en silencio. Corregido en los 6 sitios.
+
+### Instalación
+- Fix: `akdd init` copiaba `docs/` completo al proyecto del cliente — incluyendo 44MB
+  de seeds del arena de benchmark (con node_modules y DBs de prueba). Ahora filtra
+  `benchmarks/`, `benchmarks$dest/` y `superpowers/`; la copia real queda en ~72KB.
+  Defensa en profundidad adicional en `.npmignore`.
+
+## [3.15.2] — 2026-07-17
+
+### Reparación de las 3 grietas encontradas por el Coliseo Agentix
+El Coliseo (arena adversarial de 15 rondas en 4 tiers, mitad Claude Code mitad Cursor,
+sobre el proyecto MediCore) encontró 3 grietas reales — las 3 reparadas con verificación
+mecánica (13/13 checks) + regresión completa de Planes 1-7 en verde:
+- **test-integrity-gate.cjs** (nuevo): si el título de un test que protege un
+  patrón/decisión ALTA desaparece del archivo, se marca CRÍTICO — cierra la grieta más
+  seria (el agente debilitó las aserciones del test que lo vigilaba para ocultar un bug
+  con un verde falso). Enganchado a `regression-guard.checkBeforeBuild()` y al pre-commit.
+- Security Gate: regla agnóstica de ORM (accesores `unsafe`/`allRaw` en archivos
+  tenant-aware → CRÍTICO) — antes solo hablaba el idioma Prisma y dio PASS a una fuga
+  cross-tenant real. `*repo*`/`*.service.*` reclasificados como SENSITIVE.
+- TDD Gate: corre `npm run typecheck` (si existe) tras los tests — `tsx` podía dar verde
+  con errores de tipos reales. Bonus: el parser de `node --test` no reconocía el modo
+  TAP (`#`), reportando 0/0/0 aunque los tests pasaran.
+
+## [3.15.1] — 2026-07-16
+
+- Dashboard: el conocimiento de frontend se distingue por color en KDD Memory y Combined.
+- Fix: ventanas LOCK_WINDOW en un solo reloj (UTC) — `acquired_at` de SQLite venía sin
+  zona horaria y `Date.parse` lo leía como hora local, corriendo el solape por el offset
+  de la máquina (falsos negativos del Parallel Guard en UTC-X).
+- README con evidencias visuales del dashboard en proyecto real.
+
+## [3.15.0] — 2026-07-15
+
+### Endurecimiento estructural (Plan 7 — cero features nuevas: más estricto, más honesto)
+- Telemetría con etiqueta `source: mechanical | protocol` — se puede medir qué fracción
+  de la protección es hierro que corre solo vs obediencia del modelo.
+- Pre-commit hook con gates mecánicos (`security-scan` + `spec-value-scan`) que corren
+  sin pasar por el LLM — visibles, no bloqueantes en v1 (la escalada a bloqueo se gana).
+- Parallel Guard con evidencia por locks solapados — prueba mecánica de paralelismo real,
+  independiente de transcripts y del directorio de orquestación.
+- `MADUREZ.json` + `madurez-lint.cjs` — manifiesto core/stable/experimental de los ~50
+  módulos del motor, con lint que impide que el núcleo cargue módulos experimentales.
+- Upgrade de clientes viejos PROBADO: DB de v3.12 + motor v3.15 encima → 31/31
+  verificaciones en verde, con y sin better-sqlite3.
+
+## [3.14.0] — 2026-07-16
+
+### Potenciadores de memoria (Plan 5) + pendientes construibles (Plan 6)
+- 6 potenciadores de la memoria + telemetría de gates y promoción de confianza por
+  mérito (19/19 escenarios propios, incluido sabotaje de la libreta: el gate sobrevive
+  con la tabla rota).
+- Pendientes construibles: medidor de cobertura declarada, higiene, continuidad de
+  sprint (`aa: continúa sprint`), protocolo RECOVERY ante gates en STOP (13/13
+  escenarios + regresión total de planes anteriores).
+
+## [3.13.0] — 2026-07-15
+
+### Precisión por líneas, portabilidad multi-framework, Ojos UI (Planes 1-4)
+- Regression Guard con precisión por LÍNEAS (HIT/MISS/DOUBT): un cambio solo dispara
+  los behaviors cuyas líneas toca — fail-closed: ante cualquier duda degrada a "archivo
+  completo protegido" (15/15 escenarios contra endpoints y behaviors reales).
+- Ojos UI: forms/selects/required/clases CSS como nodos del grafo; Browser Gate por
+  comportamiento en Chrome/Edge real (19/19 escenarios, incluyendo los 2 bugs reales
+  de Salud360 reproducidos y detectados).
+- Medición tree-sitter: comparador construido y corrido sobre 1,989 símbolos reales —
+  veredicto: la extracción regex es suficiente (99.75% de los errores del lado seguro);
+  la adopción de tree-sitter queda DIFERIDA con evidencia, no por pereza.
+- Portabilidad: las convenciones (carpetas front, frameworks) salen del código y se
+  declaran en datos (`stack-profile.cjs`) — catálogo de endpoints de 10 frameworks.
+
+## [3.12.1] — 2026-07-14
+
+- Fix: `akdd update`/`init` seguía fallando con el tar nativo de Windows — extracción
+  reemplazada por implementación nativa en Node (`tar-extract.js`), sin depender del
+  `tar` de shell. Verificado de punta a punta contra proyecto real.
+- `.npmignore` endurecido.
+
+## [3.12.0] — 2026-07-14
+
+- Base de la generación v3.12+: memoria nativa (Parallel Guard, área, archivos_aplica,
+  UI Native Gate) + Code Structure con coraza (front en anillo exterior, back al centro)
+  y `endpoint≈` (une el frontend con la ruta de API que llama).
+
 ## [3.11.4] — 2026-07-05
 
 ### QA de 4 lentes ahora es proporcional al tamaño real del cambio

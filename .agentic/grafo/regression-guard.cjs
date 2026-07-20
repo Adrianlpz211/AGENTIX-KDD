@@ -149,6 +149,26 @@ function findRelatedBehaviors(db, filePaths) {
   });
 }
 
+// Bug real encontrado el 18/07/2026 probando el mecanismo de RECOVERY contra
+// Lumo (proyecto real de validación): esta función estaba codificada SOLO
+// para Jest (`--testPathPattern`) — en cualquier proyecto vitest (como Lumo
+// mismo) el comando truena con "CACError: Unknown option" sin importar si el
+// test pasa o falla. jest es el único runner común cuyo filtro de archivo es
+// un FLAG con nombre; vitest/mocha/node --test aceptan el patrón como
+// argumento POSICIONAL tal cual — de ahí la detección.
+function detectTestRunner(projectRoot) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+    const script = String((pkg.scripts && pkg.scripts.test) || '');
+    const deps = Object.assign({}, pkg.dependencies, pkg.devDependencies);
+    if (/vitest/.test(script) || deps.vitest) return 'vitest';
+    if (/\bjest\b/.test(script) || deps.jest) return 'jest';
+    if (/mocha/.test(script) || deps.mocha) return 'mocha';
+    if (/node\s+--test|node:test/.test(script)) return 'node';
+  } catch {}
+  return 'unknown';
+}
+
 function runTestFile(testPattern, projectRoot) {
   try {
     const isWin = process.platform === 'win32';
@@ -172,7 +192,18 @@ function runTestFile(testPattern, projectRoot) {
         ? 'backend' : '.';
       cmd = `cd ${backendDir} && pytest -x -v 2>&1`;
     } else {
-      cmd = `npm test -- --testPathPattern="${safePattern}" 2>&1`;
+      // SIN comillas alrededor del patrón — segundo bug real encontrado en la
+      // misma sesión: al pasar por cmd.exe /c con el comando completo como UN
+      // string, las comillas NO se consumen como en un shell normal — llegan
+      // LITERALES al argumento (vitest recibía el filtro como
+      // "tests/unit/x.test.ts" con comillas incluidas y no matcheaba ningún
+      // archivo real → "No test files found", falso negativo). safePattern ya
+      // viene sanitizado (solo rutas, sin espacios en la práctica), así que
+      // no perder la protección de shell-injection al quitar las comillas.
+      const runner = detectTestRunner(projectRoot);
+      cmd = runner === 'jest'
+        ? `npm test -- --testPathPattern=${safePattern} 2>&1`
+        : `npm test -- ${safePattern} 2>&1`;
     }
 
     const result = require('child_process').spawnSync(
@@ -450,6 +481,18 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
       }
     });
   });
+
+  // RECOVERY mecánico (18/07/2026): un behavior HIGH que antes tenía un
+  // STOP/FAIL registrado y ahora vuelve a pasar limpio se marca RECOVERED
+  // solo — ya no depende de que el modelo corra el `node -e` a mano que
+  // documentaba CLAUDE.md (eso quedaba honestamente marcado `source:'protocol'`,
+  // y en la práctica se olvidaba seguido). Corre ANTES de decidir el
+  // passed/failed final: un behavior puede recuperarse aunque OTRO siga roto.
+  if (telemetry) {
+    const violatingIds = new Set(violations.map(v => v.behavior_id));
+    const resolvedIds = highConfidence.filter(b => !violatingIds.has(b.id)).map(b => b.id);
+    safe(() => telemetry.detectAndRecordRecoveries(db, resolvedIds, { gateOrigen: 'regression' }));
+  }
 
   // MEDIA confidence → warn but don't block (misma contención por líneas)
   mediaConfidence.forEach(behavior => {

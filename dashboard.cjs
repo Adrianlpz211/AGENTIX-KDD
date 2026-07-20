@@ -312,6 +312,35 @@ function parseEntries(content) {
 }
 
 const config = readConfig();
+
+// PIEZA 2 (aditivo): frescura del grafo vs commit de git — badge en el header.
+// Best-effort: si el módulo no existe o falla, no hay badge y todo sigue igual.
+// PIEZA 4 (aditivo): overlay de cambios actuales, si akdd overlay lo generó.
+// Corrupto o ausente → null y el botón lo dice, jamás rompe el dashboard.
+let diffOverlayData = null;
+try {
+  const op = path.join(projectPath, '.agentic', 'diff-overlay.json');
+  if (fs.existsSync(op)) diffOverlayData = JSON.parse(fs.readFileSync(op, 'utf8'));
+} catch {}
+
+let graphFreshness = null;
+try { graphFreshness = require(path.join(projectPath, '.agentic', 'grafo', 'graph-freshness.cjs')).checkFreshness(projectPath); } catch {}
+
+// PIEZA 5 (aditivo): visita guiada, si "akdd tour" ya la generó. Ausente o
+// corrupta → null, el panel lo dice, jamás rompe el dashboard.
+let tourData = null;
+try {
+  const tp = path.join(projectPath, '.agentic', 'tour.json');
+  if (fs.existsSync(tp)) tourData = JSON.parse(fs.readFileSync(tp, 'utf8'));
+} catch {}
+const freshnessBadge = (() => {
+  if (!graphFreshness) return '';
+  if (graphFreshness.status === 'fresh') return `<span class="badge" style="background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)" title="El grafo está sellado en el commit actual">🟢 grafo al día</span>`;
+  if (graphFreshness.status === 'dirty') return `<span class="badge" style="background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3)" title="${(graphFreshness.changedFiles||[]).length} archivo(s) sin commitear que el grafo no conoce">✏️ cambios sin commitear</span>`;
+  if (graphFreshness.status === 'stale') return `<span class="badge" style="background:rgba(245,158,11,.2);color:#f59e0b;border:1px solid rgba(245,158,11,.4)" title="${graphFreshness.reason || ''}">⏳ grafo ${graphFreshness.commitsBehind ?? '?'} commit(s) atrás</span>`;
+  return '';  // unknown → sin badge, sin ruido
+})();
+
 const patrones = parseEntries(readMemoria('patrones.md')).filter(p => p.estado === 'ACTIVO');
 const decisiones = parseEntries(readMemoria('decisiones.md'));
 const errores = parseEntries(readMemoria('errores.md'));
@@ -376,12 +405,21 @@ function getGraphData() {
 // lenguaje para diferenciar colores cuando el proyecto es mono-lenguaje (ej. un
 // Next.js todo en TypeScript): src/app vs src/lib vs src/components vs scripts,
 // etc. quedan visualmente separados aunque compartan extensión.
-function deriveModulo(file) {
-  const parts = String(file).split(/[\\/]/).filter(Boolean);
-  parts.pop(); // quitar el nombre de archivo
-  if (!parts.length) return 'raíz';
-  if (parts[0] === 'src' && parts.length > 1) return 'src/' + parts[1];
-  return parts[0];
+// FUENTE ÚNICA: la implementación canónica vive en tour-builder.cjs (que la
+// exporta) — antes había una COPIA aquí, y cuando se corrigió un bug en una
+// (la regla "un nivel más de profundidad" solo aplicaba a src/), hubo que
+// acordarse de corregir la otra a mano. El fallback inline solo existe para
+// motores viejos sin tour-builder; usa la misma regla.
+let deriveModulo;
+try { deriveModulo = require(path.join(projectPath, '.agentic', 'grafo', 'tour-builder.cjs')).deriveModulo; } catch {}
+if (typeof deriveModulo !== 'function') {
+  deriveModulo = function (file) {
+    const parts = String(file).split(/[\\/]/).filter(Boolean);
+    parts.pop();
+    if (!parts.length) return 'raíz';
+    if (parts.length > 1) return parts[0] + '/' + parts[1];
+    return parts[0];
+  };
 }
 
 function getCodeStructureGraph() {
@@ -427,8 +465,22 @@ function getCodeStructureGraph() {
     WHERE kind IN ('endpoint','constant','enum','note','why','hack','fixme','sql_table','sql_index','form','select','field','css_class','css_id')
     ORDER BY line_start ASC
   `;
+  // PIEZA 3 (aditivo): descripciones en lenguaje natural escritas por el agente
+  // (tabla code_summaries, comando akdd describe). La frescura se comprueba
+  // barato comparando el sha256 del contenido al momento de describir contra el
+  // que el índice AST ya guarda — ambos son el mismo hash del mismo contenido.
+  const SUMMARIES_SQL = `
+    SELECT cs.file, cs.summary, cs.content_hash,
+           (SELECT MAX(content_hash) FROM ast_symbols a WHERE a.file = cs.file) AS index_hash
+    FROM code_summaries cs
+    WHERE cs.symbol = ''
+  `;
 
-  function buildGraph(files, rawEdges, rawSymbols, rawExtra) {
+  function buildGraph(files, rawEdges, rawSymbols, rawExtra, rawSummaries) {
+    const summaryByFile = {};
+    (rawSummaries || []).forEach(s => {
+      summaryByFile[s.file] = { text: s.summary, fresh: !s.index_hash || s.index_hash === s.content_hash };
+    });
     const symbolsByFile = {};
     (rawSymbols || []).forEach(s => {
       (symbolsByFile[s.file] = symbolsByFile[s.file] || []).push({ name: s.symbol_name, kind: s.kind, exported: !!s.exported });
@@ -449,6 +501,8 @@ function getCodeStructureGraph() {
       pagerank: f.pagerank || 0,
       symbols: symbolsByFile[f.file] || [],
       extraSymbols: extraByFile[f.file] || [],
+      summary: (summaryByFile[f.file] || {}).text || null,
+      summaryFresh: (summaryByFile[f.file] || {}).fresh !== false,
     }));
     const fileToId = {};
     nodes.forEach(n => { fileToId[n.file] = n.id; });
@@ -469,7 +523,8 @@ function getCodeStructureGraph() {
       const rawEdges = _db.prepare(EDGES_SQL).all();
       const rawSymbols = _db.prepare(SYMBOLS_SQL).all();
       const rawExtra = _db.prepare(EXTRA_SYMBOLS_SQL).all();
-      return buildGraph(files, rawEdges, rawSymbols, rawExtra);
+      let rawSummaries = []; try { rawSummaries = _db.prepare(SUMMARIES_SQL).all(); } catch {}
+      return buildGraph(files, rawEdges, rawSymbols, rawExtra, rawSummaries);
     } finally {
       try { _db.close(); } catch {}
     }
@@ -485,8 +540,9 @@ function getCodeStructureGraph() {
       const rawEdges = allSQL(EDGES_SQL);
       const rawSymbols = allSQL(SYMBOLS_SQL);
       const rawExtra = allSQL(EXTRA_SYMBOLS_SQL);
+      const rawSummaries = allSQL(SUMMARIES_SQL);
       try { _db.close(); } catch {}
-      return buildGraph(files, rawEdges, rawSymbols, rawExtra);
+      return buildGraph(files, rawEdges, rawSymbols, rawExtra, rawSummaries);
     } catch(e2) {
       return empty;
     }
@@ -767,8 +823,8 @@ const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
 const codeStructure = getCodeStructureGraph();
 const endpointHeuristicEdges = getEndpointHeuristicEdges(codeStructure.nodes, projectPath);
 
-// Mismo mapa que LANG_COLORS del cliente (script inline) — duplicado acá porque el
-// legend del Code Structure se arma server-side, antes de que el <script> exista.
+// FUENTE ÚNICA de colores por lenguaje — el cliente lo recibe inyectado como
+// LANG_COLORS (JSON.stringify), ya no tiene copia propia.
 const LANG_COLORS_SERVER = {
   javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
   rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
@@ -1302,6 +1358,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="dot"></div>
   </div>
   <div class="hdr-r">
+    ${freshnessBadge}
     ${godNodes.length > 0 ? `<span class="badge b-god">⚡ ${stats.godNodes} divine</span>` : ''}
     ${surprisingEdges.length > 0 ? `<span class="badge b-sur">✨ ${stats.surprising} surprising</span>` : ''}
     <span class="badge b-high">★ ${stats.high} HIGH</span>
@@ -1514,6 +1571,20 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="graph-controls">
       <button class="gc-btn" onclick="resetCodeGraph()">⟳ Reset</button>
       <button class="gc-btn" onclick="centerCodeGraph()">⊙ Center</button>
+      <button class="gc-btn" id="code-overlay-btn" onclick="toggleCodeOverlay()" title="Pinta qué archivos cambiaron ahora mismo (rojo) y cuáles pueden verse afectados (ámbar — más intenso si tienen contratos encima)">🔥 Cambios</button>
+      <button class="gc-btn" id="tour-btn" onclick="toggleTourPanel()" title="Recorrido guiado del proyecto, en orden — de lo más básico a lo que depende de todo">🧭 Visita guiada</button>
+    </div>
+    <div class="detail-panel" id="tour-panel" style="display:none;position:absolute;right:12px;top:12px;width:420px;max-height:calc(100% - 24px);overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.6);z-index:25;backdrop-filter:blur(8px);padding:16px;font-size:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:14px;font-weight:700;color:var(--text)">🧭 Visita guiada${tourData && tourData.area ? ' — ' + String(tourData.area).replace(/</g, '&lt;') : ''}</div>
+        <div class="dp-close" onclick="closeTourPanel()">×</div>
+      </div>
+      <div id="tour-tabs" style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="fpill" id="tour-tab-front" onclick="switchTourTab('front')" style="font-size:12px">🖼️ Frontend</button>
+        <button class="fpill" id="tour-tab-back" onclick="switchTourTab('back')" style="font-size:12px">⚙️ Backend</button>
+      </div>
+      <select id="tour-jump" onchange="tourJumpTo(this.value)" style="width:100%;font-size:12px;margin-bottom:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px"></select>
+      <div id="tour-body"></div>
     </div>
     <div class="detail-panel" id="code-detail-panel">
       <div class="dp-header">
@@ -2122,6 +2193,7 @@ const SKIP_FIELD_LABELS=new Set(['área','area','confianza','aplicado','útil','
 // seleccionado, es la misma explicación de conceptos generales siempre.
 const TERMS_GLOSSARY={
   kdd:{title:'❓ KDD Memory — términos generales',items:[
+    {term:'Badge del header: 🟢 grafo al día / ✏️ cambios sin commitear / ⏳ atrás',explain:'Arriba a la derecha hay un indicador de qué tan al día está la memoria del proyecto respecto a tu código real. 🟢 = la memoria conoce la última versión guardada; ✏️ = tienes archivos modificados que la memoria todavía no conoce; ⏳ = el código avanzó varios pasos desde la última vez que la memoria se actualizó. Se pone al día solo al cerrar cada ciclo de trabajo.'},
     {term:'error',explain:'Un problema real que pasó en el proyecto y quedó anotado en la memoria para no repetirlo.'},
     {term:'pattern (patrón)',explain:'Una forma de resolver algo que ya se probó y funcionó bien — se guarda para reusarla la próxima vez en vez de reinventar la rueda.'},
     {term:'decision',explain:'Una decisión importante que se tomó sobre cómo construir algo, con la razón por la que se eligió así.'},
@@ -2143,6 +2215,9 @@ const TERMS_GLOSSARY={
     {term:'Chips de módulo (filtro)',explain:'Cada chip es una carpeta/módulo del proyecto — hacé clic para prenderlo o apagarlo. A diferencia de los filtros de KDD Memory, acá podés apagar VARIOS a la vez (no es uno solo excluyente). "Todos"/"Ninguno" prenden o apagan todos de un golpe.'},
     {term:'Coraza (posición del nodo)',explain:'Los archivos de frontend (todo lo que el usuario final ve, ej. carpeta public/) se acomodan en un anillo exterior; el código de atrás (backend, lógica de negocio) se acomoda hacia el centro. Es una forma de ver de un vistazo qué tan "cerca de la superficie" está cada archivo.'},
     {term:'endpoint≈ (línea cian)',explain:'Une un archivo de frontend con un archivo de backend cuando el primero llama a una ruta de API (ej. /api/embudo/...) que el segundo registra. Es una coincidencia de texto de ruta, no un vínculo exacto guardado en la base de datos — si el front arma la URL de forma dinámica sin el wrapper de siempre, esa conexión no se detecta.'},
+    {term:'🔥 Cambios (botón)',explain:'Responde la pregunta "¿y esto que toqué, qué más puede romper?". Al activarlo, el grafo se pinta así: ROJO = archivos que tú modificaste y aún no guardaste en el historial; ÁMBAR = archivos que no tocaste pero dependen de los rojos (ahí es donde algo podría dolerse); NARANJA más intenso = de esos, los que tienen pruebas protegiéndolos (los más delicados de romper); apagado = no tienen nada que ver con tus cambios. Se actualiza pidiendo "akdd overlay" en el chat. Al desactivar el botón, todo vuelve a los colores normales.'},
+    {term:'🧩 Descripción del asistente (en ¡NO ENTIENDO!)',explain:'Cuando un archivo muestra "Qué hace este archivo" con una explicación clara, es porque el asistente LEYÓ ese código de verdad y escribió qué hace en palabras simples. Si un archivo aún no la tiene, se muestra una versión aproximada deducida de los nombres — y puedes pedir "akdd describe" en el chat para que el asistente lo lea y lo explique de verdad.'},
+    {term:'🧭 Visita guiada (botón)',explain:'Un recorrido por el proyecto en el orden en que conviene aprenderlo: primero los archivos base, después los que dependen de ellos. Cada parada trae su explicación en palabras simples, con qué archivos necesita, quién depende de él, qué recuerda el proyecto de esa zona y si tiene pruebas protegiéndolo. Se genera pidiendo "akdd tour" en el chat (podés pedirlo de una parte del proyecto, ej. "akdd tour ai").'},
   ]},
   combined:{title:'❓ Combined — términos generales',items:[
     {term:'¿Qué es esta pestaña?',explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
@@ -2211,15 +2286,21 @@ function glossaryItemsHTML(items){
 function explainKddNode(node){
   const fields=parseContenido(node.contenido);
   const deg=DEGREE_MAP[node.id]||0;
-  const tipoLabel={error:'un error',patron:'un patrón (algo que se probó y funcionó, para reusarlo)',decision:'una decisión de diseño'}[node.tipo]||node.tipo;
-  let summary=\`Esto es \${tipoLabel}, del área "\${node.area||'global'}". \`;
-  if(node.aplicado>0)summary+=\`Se ha usado \${node.aplicado}×, de las cuales \${node.util}× resultó útil. \`;
-  summary+=\`Está conectado con \${deg} otra(s) cosa(s) de la memoria del proyecto.\`;
+  // Misma regla dura que en Code Structure: lo único técnico permitido son
+  // nombres de archivo — el resto, lenguaje que cualquiera entienda.
+  const tipoLabel={
+    error:'un problema que ya pasó en este proyecto y quedó anotado para no repetirlo',
+    patron:'una forma de hacer las cosas que ya se probó y funcionó — se guarda para reusarla',
+    decision:'una decisión que se tomó sobre cómo construir algo, con su porqué'
+  }[node.tipo]||node.tipo;
+  let summary=\`Esto es \${tipoLabel}. Pertenece a la parte del proyecto llamada "\${node.area||'general'}". \`;
+  if(node.aplicado>0)summary+=\`Se ha usado \${node.aplicado} vez/veces, y de esas \${node.util} de verdad ayudaron. \`;
+  summary+=deg>0?\`Está relacionado con \${deg} recuerdo(s) más del proyecto.\`:'Por ahora no está relacionado con ningún otro recuerdo del proyecto.';
   const items=[{label:'📝 En resumen',text:summary},...fields];
-  if(!fields.length)items.push({label:'ℹ️ Nota',text:'Este nodo todavía no tiene más detalle guardado aparte del título — probablemente se detectó automáticamente y nadie lo ha revisado a mano todavía (con "aa: aprende").'});
+  if(!fields.length)items.push({label:'ℹ️ Nota',text:'Este recuerdo solo tiene el título por ahora — se anotó automáticamente y nadie lo ha revisado a mano todavía.'});
   const menciones=node.simbolosMencionados||[];
   if(menciones.length){
-    items.push({label:'🔗 Menciona en código (vínculo real, no aproximado)',
+    items.push({label:'🔗 Dónde vive esto en el código (vínculo comprobado)',
       text:menciones.map(m=>"'"+m.simbolo+"' en "+m.archivo).join(' — ')});
   }
   return {title:'¡NO ENTIENDO! — '+String(node.titulo||'').slice(0,60), bodyHTML:glossaryItemsHTML(items)};
@@ -2276,14 +2357,26 @@ function explainCodeNode(node){
   const outEdges=CODE_EDGES.filter(e=>edgeEndId(e.source)===node.id);
   const inEdges=CODE_EDGES.filter(e=>edgeEndId(e.target)===node.id);
   const rankNote=node.pagerank>0.01?'uno de los archivos más importantes/centrales del proyecto':node.pagerank>0.002?'un archivo con conectividad media':'un archivo bastante periférico — pocas cosas dependen de él';
-  const usedByNames=inEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
-  const needsNames=outEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\/]/).pop():'';}).filter(Boolean);
-  let summary=\`Módulo: \${node.modulo||'—'} · Lenguaje: \${node.language||'—'}. Este archivo tiene \${node.functions} función(es) adentro. Es \${rankNote}. \`;
-  summary+=usedByNames.length?\`\${usedByNames.length} otro(s) archivo(s) DEPENDEN de este, así que si lo cambias hay que revisar: \${usedByNames.slice(0,6).join(', ')}\${usedByNames.length>6?'…':''}. \`:'Ningún otro archivo indexado depende de este todavía. ';
-  summary+=needsNames.length?\`A su vez, este archivo necesita: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:'No depende de ningún otro archivo indexado.';
+  const usedByNames=inEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\\\/]/).pop():'';}).filter(Boolean);
+  const needsNames=outEdges.map(e=>{const o=codeNodeMap[edgeEndId(e.source)===node.id?edgeEndId(e.target):edgeEndId(e.source)];return o?o.file.split(/[\\\\/]/).pop():'';}).filter(Boolean);
+  // Regla dura (fijada por el owner): en este panel lo único técnico permitido
+  // son los NOMBRES DE ARCHIVO — todo lo demás en lenguaje natural, legible por
+  // cualquier persona sea dev o no.
+  let summary=\`Este archivo vive en la carpeta \${node.modulo||'principal'} del proyecto. Es \${rankNote}. \`;
+  summary+=usedByNames.length?\`Si lo cambias, hay que revisar estos otros archivos que dependen de él: \${usedByNames.slice(0,6).join(', ')}\${usedByNames.length>6?'…':''}. \`:'Ningún otro archivo conocido depende de este por ahora. ';
+  summary+=needsNames.length?\`A su vez, para funcionar este archivo usa: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:'Y funciona solo — no necesita de otros archivos del proyecto.';
   const items=[{label:'📝 En resumen',text:summary}];
+
+  // PIEZA 3: si el asistente ya describió este archivo LEYENDO su código de
+  // verdad, esa explicación va PRIMERO — es la fuente buena. La traducción
+  // automática de nombres queda solo como respaldo cuando no hay descripción.
+  if(node.summary){
+    items.push({label:'🧩 Qué hace este archivo',
+      text:node.summary + (node.summaryFresh ? '' : ' (Ojo: esta descripción se escribió sobre una versión anterior del archivo — algo puede haber cambiado desde entonces.)')});
+  }
+
   const syms=node.symbols||[];
-  if(syms.length){
+  if(!node.summary && syms.length){
     const exported=syms.filter(s=>s.exported);
     const list=(exported.length?exported:syms).slice(0,10);
     const scope=s=>s.exported?'se usa en otras partes del sistema':'solo se usa dentro de este mismo archivo';
@@ -2293,28 +2386,28 @@ function explainCodeNode(node){
         const capitalized=h.text.charAt(0).toUpperCase()+h.text.slice(1);
         return \`\${capitalized} (\${scope(s)}).\`;
       }
-      return \`Hace algo relacionado con "\${splitWords(s.name)}" — el nombre no sigue un patrón reconocible para traducirlo automáticamente (\${scope(s)}).\`;
+      return \`Hace algo relacionado con "\${splitWords(s.name)}" — el nombre no alcanza para explicarlo mejor (\${scope(s)}).\`;
     });
-    items.push({label:'🧩 Qué hace este archivo, en palabras simples',
+    items.push({label:'🧩 Qué hace este archivo (aproximado)',
       text:lines.join(' ') + (syms.length>list.length?\` …y \${syms.length-list.length} cosa(s) más.\`:'')
-        + ' (Nota: esto se infiere del nombre de cada función, no de leer el código real — puede no ser 100% exacto si el nombre no describe bien lo que hace.)'});
-  } else {
-    items.push({label:'ℹ️ Nota',text:'No se detectaron funciones ni clases nombradas en este archivo (puede ser solo configuración, tipos, o código sin símbolos exportados reconocidos por el indexador).'});
+        + ' (Esto se deduce del nombre de cada pieza, no de leer el código — pide "akdd describe" para una explicación de verdad.)'});
+  } else if(!node.summary){
+    items.push({label:'ℹ️ Nota',text:'Este archivo no tiene piezas con nombre reconocible — puede ser solo configuración o datos. Pide "akdd describe" para una explicación de verdad.'});
   }
   const extra=node.extraSymbols||[];
   const endpoints=extra.filter(s=>s.kind==='endpoint');
   if(endpoints.length){
-    items.push({label:'🛣️ Rutas de API que expone',
+    items.push({label:'🛣️ Peticiones que este archivo atiende (cuando la app o el panel le piden algo)',
       text:endpoints.map(s=>s.name).join(' · ')});
   }
   const constants=extra.filter(s=>s.kind==='constant'||s.kind==='enum');
   if(constants.length){
-    items.push({label:'🏷️ Constantes/enums definidos',
+    items.push({label:'🏷️ Valores fijos que define (números o listas que no cambian solos)',
       text:constants.map(s=>s.name).join(', ')});
   }
   const sqlDefs=extra.filter(s=>s.kind==='sql_table'||s.kind==='sql_index');
   if(sqlDefs.length){
-    items.push({label:'🗄️ Esquema SQL definido aquí',
+    items.push({label:'🗄️ Tablas donde se guardan datos, definidas aquí',
       text:sqlDefs.map(s=>(s.kind==='sql_table'?'tabla ':'índice ')+s.name).join(', ')});
   }
   const notes=extra.filter(s=>['note','why','hack','fixme'].includes(s.kind));
@@ -2327,16 +2420,16 @@ function explainCodeNode(node){
   const uiMatter=extra.filter(s=>['form','select','field'].includes(s.kind));
   if(uiMatter.length){
     const conReq=s=>(String(s.signature||'').startsWith('[required]')?' (required)':'');
-    items.push({label:'🖼️ Materia de UI (forms/selects/campos)',
+    items.push({label:'🖼️ Piezas de pantalla que define (formularios, listas desplegables, campos)',
       text:uiMatter.map(s=>s.name+conReq(s)).join(' · ')});
   }
   const cssDefs=extra.filter(s=>s.kind==='css_class'||s.kind==='css_id');
   if(cssDefs.length){
     const lista=cssDefs.slice(0,25).map(s=>(s.kind==='css_id'?'#':'.')+s.name).join(', ');
-    items.push({label:'🎨 Clases/ids CSS definidos aquí',
+    items.push({label:'🎨 Estilos visuales que define (colores, tamaños, apariencia)',
       text:lista+(cssDefs.length>25?\` …y \${cssDefs.length-25} más.\`:'')});
   }
-  return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\/]/).pop(), bodyHTML:glossaryItemsHTML(items)};
+  return {title:'¡NO ENTIENDO! — '+node.file.split(/[\\\\/]/).pop(), bodyHTML:glossaryItemsHTML(items)};
 }
 
 function explainCombinedNode(node){
@@ -2352,7 +2445,7 @@ function explainCombinedNode(node){
       ?\`Este archivo coincide por nombre de carpeta con \${areaLinks.length} error(es)/patrón(es)/decisión(es) guardados en la memoria — puede que sea donde ocurrieron, aunque es una aproximación, no un vínculo exacto.\`
       :'No encontramos ningún error/patrón/decisión de la memoria cuya área coincida con la ruta de este archivo.';
   }
-  return {title:'¡NO ENTIENDO! — '+(node.group==='kdd'?String(node.titulo||'').slice(0,50):node.file.split(/[\\/]/).pop()), bodyHTML:glossaryItemsHTML([{label:'📝 En resumen',text:summary}])};
+  return {title:'¡NO ENTIENDO! — '+(node.group==='kdd'?String(node.titulo||'').slice(0,50):node.file.split(/[\\\\/]/).pop()), bodyHTML:glossaryItemsHTML([{label:'📝 En resumen',text:summary}])};
 }
 
 let lastKddNode=null, lastCodeNode=null, lastCombinedNode=null;
@@ -2376,16 +2469,15 @@ const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
 const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
 const ENDPOINT_HEURISTIC_EDGES = ${JSON.stringify(endpointHeuristicEdges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
-// Color por tipo de archivo (lenguaje detectado por el AST indexer) — antes todos los
-// archivos se veían del mismo color salvo que tuvieran una clase adentro; ahora cada
-// lenguaje tiene su propio color, igual que Code Structure lo pide.
-const LANG_COLORS = {
-  javascript:'#f7df1e', typescript:'#3178c6', python:'#4b8bbe', go:'#00add8',
-  rust:'#dea584', java:'#e76f00', kotlin:'#a97bff', cpp:'#649ad2', c:'#5c9fd6',
-  csharp:'#9b4f96', php:'#8993be', ruby:'#cc342d', swift:'#f05138', scala:'#dc322f',
-  elixir:'#a37eba', html:'#e34c26', css:'#2979ff', other:'#00e5ff',
-};
+// Color por lenguaje — FUENTE ÚNICA: se inyecta desde LANG_COLORS_SERVER (arriba,
+// server-side). Antes el cliente tenía su PROPIA copia del mapa y cualquier color
+// nuevo había que agregarlo en dos lugares o divergían en silencio.
+const LANG_COLORS = ${JSON.stringify(LANG_COLORS_SERVER)};
 const MOD_COLORS = ${JSON.stringify(MOD_COLORS_SERVER)};
+// PIEZA 4: diff overlay generado por akdd overlay (null si nunca se corrió)
+const DIFF_OVERLAY = ${JSON.stringify(diffOverlayData)};
+// PIEZA 5: visita guiada generada por akdd tour (null si nunca se corrió)
+const TOUR_DATA = ${JSON.stringify(tourData)};
 function codeNodeColor(d){ return MOD_COLORS[d.modulo] || LANG_COLORS[d.language] || CODE_COLORS[d.tipo] || '#00e5ff'; }
 const LANGS_PRESENT = [...new Set(CODE_NODES.map(n=>n.language).filter(Boolean))].sort();
 const codeNodeMap={};
@@ -3391,6 +3483,135 @@ let codeSelectedId=null;
 // modo específico (solo se ven los módulos del set).
 let codeActiveModules=null;
 
+// PIEZA 4: overlay de cambios actuales (diff-overlay.json generado con
+// "akdd overlay"). Mientras está activo pinta el radio de impacto y pausa los
+// chips de módulo; al apagarlo, todo vuelve exactamente a como estaba.
+let codeOverlayActive=false;
+const OVERLAY_CHANGED=new Set((DIFF_OVERLAY&&DIFF_OVERLAY.changed||[]).map(c=>c.file));
+const OVERLAY_AFFECTED=new Set((DIFF_OVERLAY&&DIFF_OVERLAY.affected||[]).map(a=>a.file));
+const OVERLAY_CONTRACTS=new Set([
+  ...(DIFF_OVERLAY&&DIFF_OVERLAY.changed||[]).filter(c=>c.hasContracts).map(c=>c.file),
+  ...(DIFF_OVERLAY&&DIFF_OVERLAY.affected||[]).filter(a=>a.hasContracts).map(a=>a.file),
+]);
+// PIEZA 5 (v2): visita guiada agrupada por módulo, 2 pestañas (Frontend/
+// Backend — misma clasificación que la coraza) + selector para saltar directo
+// a cualquier módulo sin tener que darle "Siguiente" uno por uno.
+let tourTab = 'front';
+let tourIndex = 0;
+
+function currentTourStops(){
+  if (!TOUR_DATA) return [];
+  return (tourTab === 'front' ? TOUR_DATA.front : TOUR_DATA.back) || [];
+}
+
+function toggleTourPanel(){
+  const panel = document.getElementById('tour-panel');
+  const willShow = panel.style.display === 'none';
+  panel.style.display = willShow ? 'block' : 'none';
+  if (willShow) {
+    if (!TOUR_DATA || (!TOUR_DATA.front.length && !TOUR_DATA.back.length)) {
+      document.getElementById('tour-tabs').style.display = 'none';
+      document.getElementById('tour-jump').style.display = 'none';
+      document.getElementById('tour-body').innerHTML = '<div style="font-size:13px;color:var(--text3)">Todavía no hay visita guiada generada. Pide <code>akdd tour</code> en el chat.</div>';
+      return;
+    }
+    // Arranca en la pestaña que sí tenga contenido si la otra está vacía
+    tourTab = TOUR_DATA.front.length ? 'front' : 'back';
+    tourIndex = 0;
+    renderTourStop();
+  } else {
+    // Al cerrar, restaura los colores normales del grafo (el resaltado del
+    // módulo actual no debe quedar pegado si el usuario cierra el panel).
+    codeActiveModules = null;
+    renderCodeModuleChips();
+    refreshCodeColors();
+  }
+}
+function closeTourPanel(){
+  document.getElementById('tour-panel').style.display = 'none';
+  codeActiveModules = null;
+  renderCodeModuleChips();
+  refreshCodeColors();
+}
+function switchTourTab(tab){
+  tourTab = tab;
+  tourIndex = 0;
+  renderTourStop();
+}
+function tourJumpTo(idx){
+  tourIndex = parseInt(idx, 10) || 0;
+  renderTourStop();
+}
+function renderTourJumpSelect(){
+  const sel = document.getElementById('tour-jump');
+  const stops = currentTourStops();
+  sel.innerHTML = stops.map((s, i) => '<option value="'+i+'"'+(i===tourIndex?' selected':'')+'>'+ (i+1) +'. '+escHtml(s.modulo)+'</option>').join('');
+}
+function renderTourStop(){
+  document.getElementById('tour-tabs').style.display = 'flex';
+  document.getElementById('tour-jump').style.display = 'block';
+  document.getElementById('tour-tab-front').classList.toggle('active', tourTab==='front');
+  document.getElementById('tour-tab-back').classList.toggle('active', tourTab==='back');
+
+  const stops = currentTourStops();
+  renderTourJumpSelect();
+  if (!stops.length) {
+    document.getElementById('tour-body').innerHTML = '<div style="font-size:13px;color:var(--text3)">Sin módulos de este lado.</div>';
+    codeActiveModules = null;
+    renderCodeModuleChips();
+    refreshCodeColors();
+    return;
+  }
+  const s = stops[tourIndex];
+  const esc = (t) => escHtml(String(t == null ? '' : t));
+  const listMods = (arr) => arr.map(esc).join(', ');
+  const parts = [];
+  parts.push('<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Módulo '+s.order+' de '+stops.length+(s.cycleBreak?' · 🔁':'')+' · '+s.fileCount+' archivo(s)</div>');
+  parts.push('<div style="font-size:16px;font-weight:700;color:var(--pl);margin-bottom:10px">'+esc(s.modulo)+'</div>');
+  parts.push('<div style="font-size:14px;color:var(--text2);line-height:1.6;margin-bottom:10px">'+esc(s.summary || 'Todavia no hay descripciones escritas para los archivos de este modulo - pide "akdd describe".')+'</div>');
+  if (s.topFiles && s.topFiles.length) parts.push('<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Archivos principales: '+listMods(s.topFiles.map(f=>f.split(/[\\\\/]/).pop()))+'</div>');
+  if (s.needs && s.needs.length) parts.push('<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Para funcionar, esta carpeta usa: '+listMods(s.needs)+'</div>');
+  if (s.usedBy && s.usedBy.length) parts.push('<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Otras carpetas que dependen de esta: '+listMods(s.usedBy)+'</div>');
+  if (s.memoria && s.memoria.length) {
+    parts.push('<div style="font-size:12px;color:var(--amber);font-weight:700;margin:10px 0 5px">🧠 Lo que el proyecto recuerda de esta zona</div>');
+    s.memoria.forEach(m => parts.push('<div style="font-size:12px;color:var(--text2);margin-bottom:4px">- '+esc(m.titulo)+'</div>'));
+  }
+  if (s.contratos && s.contratos.length) {
+    parts.push('<div style="font-size:12px;color:#34d399;font-weight:700;margin-top:10px">🛡️ Protegido por '+s.contratos.length+' prueba(s) que no se pueden romper en silencio</div>');
+  }
+  const prevDisabled = tourIndex===0 ? ' disabled style="opacity:.4"' : '';
+  const nextDisabled = tourIndex===stops.length-1 ? ' disabled style="opacity:.4"' : '';
+  parts.push('<div style="display:flex;justify-content:space-between;gap:6px;margin-top:14px">'
+    +'<button class="gc-btn" onclick="tourStep(-1)"'+prevDisabled+'>← Anterior</button>'
+    +'<button class="gc-btn" onclick="tourStep(1)"'+nextDisabled+'>Siguiente →</button>'
+    +'</div>');
+  document.getElementById('tour-body').innerHTML = parts.join('');
+
+  // Resalta en el grafo TODOS los archivos de este módulo — reusa el mismo
+  // sistema de filtro por chips que ya existe, en vez de inventar otro.
+  codeActiveModules = new Set([s.modulo]);
+  renderCodeModuleChips();
+  refreshCodeColors();
+}
+function tourStep(delta){
+  const stops = currentTourStops();
+  const next = tourIndex + delta;
+  if (next < 0 || next >= stops.length) return;
+  tourIndex = next;
+  renderTourStop();
+}
+
+function toggleCodeOverlay(){
+  const btn=document.getElementById('code-overlay-btn');
+  if(!DIFF_OVERLAY||(!OVERLAY_CHANGED.size&&!OVERLAY_AFFECTED.size)){
+    if(btn)btn.textContent='🔥 sin datos — corre akdd overlay';
+    return;
+  }
+  codeOverlayActive=!codeOverlayActive;
+  if(btn)btn.classList.toggle('active',codeOverlayActive);
+  refreshCodeColors();
+}
+
 function codeModuleVisible(mod){
   return codeActiveModules===null || codeActiveModules.has(mod);
 }
@@ -3461,6 +3682,12 @@ function renderCodeGraph(){
   const codeLinkHiddenByFilter=e=>{
     const s=edgeEndId(e.source), t=edgeEndId(e.target);
     const sn=codeNodeMap[s], tn=codeNodeMap[t];
+    // PIEZA 4: con el overlay activo, manda el overlay (se atenúa lo que no
+    // está involucrado en el cambio); los chips de módulo quedan en pausa.
+    if(codeOverlayActive){
+      const inOverlay=f=>OVERLAY_CHANGED.has(f)||OVERLAY_AFFECTED.has(f);
+      return !(sn&&tn&&inOverlay(sn.file)&&inOverlay(tn.file));
+    }
     return (sn&&!codeModuleVisible(sn.modulo)) || (tn&&!codeModuleVisible(tn.modulo));
   };
   const CODE_ENDPOINT_MATCH_COLOR='#22d3ee';
@@ -3488,6 +3715,13 @@ function renderCodeGraph(){
     nodes:CODE_NODES,
     links,
     nodeColor:d=>{
+      // PIEZA 4: overlay de cambios — rojo = cambió, ámbar = puede verse
+      // afectado (más intenso si tiene contratos encima), resto casi apagado.
+      if(codeOverlayActive){
+        if(OVERLAY_CHANGED.has(d.file))return '#ff4444';
+        if(OVERLAY_AFFECTED.has(d.file))return OVERLAY_CONTRACTS.has(d.file)?'#fb923c':'#f59e0b';
+        return 'rgba(60,60,70,0.08)';
+      }
       if(!codeModuleVisible(d.modulo))return 'rgba(60,60,70,0.05)';
       const base=codeNodeColor(d);
       if(d.id===codeSelectedId)return '#ffffff';
@@ -3550,7 +3784,7 @@ function showCodeDetail(node){
     const otherId=dir==='out'?edgeEndId(e.target):edgeEndId(e.source);
     const other=codeNodeMap[otherId];
     if(!other)return'';
-    const name=other.file.split(/[\\/]/).pop();
+    const name=other.file.split(/[\\\\/]/).pop();
     return \`<div class="rel-item" onclick="focusCodeNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${codeNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${e.tipo}</span></div>\`;
   }).filter(Boolean).join('');
   const rankNote=node.pagerank>0.01?'archivo central — muchas cosas dependen de él':node.pagerank>0.002?'conectividad media':'archivo periférico';
@@ -3777,7 +4011,7 @@ function showCombinedDetail(node){
     const otherId=mergedEdgeEndId(e.source)===node.mergedId?mergedEdgeEndId(e.target):mergedEdgeEndId(e.source);
     const other=combinedNodeMap[otherId];
     if(!other)return'';
-    const label=other.group==='kdd'?other.titulo:other.file.split(/[\\/]/).pop();
+    const label=other.group==='kdd'?other.titulo:other.file.split(/[\\\\/]/).pop();
     const dotColor=other.group==='kdd'?kddNodeColor(other):'#00e5ff';
     return \`<div class="rel-item" onclick="focusCombinedNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${dotColor};flex-shrink:0"></div><div class="rel-name">\${escHtml(String(label).slice(0,36))}</div><span class="rel-type-label">área≈</span></div>\`;
   }).filter(Boolean).join('');

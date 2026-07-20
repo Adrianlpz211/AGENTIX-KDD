@@ -128,12 +128,79 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd causal-enrich [módulo]` | correr `node .agentic/grafo/causal-edges.cjs enrich [módulo]` |
 | `akdd causal-trace <desde> <hasta>` | correr `node .agentic/grafo/causal-edges.cjs trace <desde> <hasta>` |
 | `akdd detect-changes` | correr `node .agentic/grafo/causal-edges.cjs detect-changes` |
+| `akdd changes [archivo...]` | correr `node .agentic/grafo/change-classifier.cjs classify [archivo...]` (sin args: `status`) |
+| `akdd changes snapshot` | correr `node .agentic/grafo/change-classifier.cjs snapshot` |
+| `akdd fresh` | correr `node .agentic/grafo/graph-freshness.cjs check` |
+| `akdd integrity` | correr `node .agentic/grafo/graph-reviewer.cjs` (reporte de integridad de memoria.db) |
+| `akdd integrity --fix` | correr `node .agentic/grafo/graph-reviewer.cjs --fix` (limpia solo categorías seguras) |
+| `akdd describe [área]` | protocolo DESCRIBE (ver sección AKDD DESCRIBE abajo) |
+| `akdd overlay [base]` | correr `node .agentic/grafo/diff-overlay.cjs [base]` (blast radius visual — botón 🔥 Cambios del dashboard) |
+| `akdd tour [área]` | correr `node .agentic/grafo/tour-builder.cjs [área]` (visita guiada — botón 🧭 del dashboard) |
+| `akdd cu on` / `akdd clickup on` | correr `node .agentic/grafo/clickup-bridge.cjs on` (activa el puente de ClickUp — opt-in, apagado por defecto, pide `CLICKUP_API_TOKEN` en `.env`) |
+| `akdd cu set-list <id>` | correr `node .agentic/grafo/clickup-bridge.cjs set-list <id>` (configura qué Lista de ClickUp usa este proyecto) |
+| `akdd cu status` | correr `node .agentic/grafo/clickup-bridge.cjs status` |
+| `akdd cu sprint` | correr `node .agentic/grafo/clickup-bridge.cjs pull` (trae y clasifica las tareas de la Lista configurada — distinto de `aa: sprint`, solo muestra, no ejecuta) |
+| `akdd cu sprint --auto` | correr `node .agentic/grafo/clickup-bridge.cjs pull --auto` y seguir el protocolo CLICKUP AUTO (ver sección abajo) |
+| `akdd cu done <task-id>` | correr `node .agentic/grafo/clickup-bridge.cjs done <task-id>` (marca la tarea completada en ClickUp — resuelve solo el estado de cierre de la Lista) |
+| `akdd cu comment <task-id> "texto"` | correr `node .agentic/grafo/clickup-bridge.cjs comment <task-id> "texto"` |
 
 Los comandos que SÍ requieren terminal (solo estos dos):
 - `npm install -g agentic-kdd` → instalar el CLI por primera vez
 - `akdd init` → primera instalación en un proyecto nuevo
 
 Todo lo demás corre desde el chat.
+
+## AKDD DESCRIBE — descripciones en lenguaje natural (Pieza 3)
+
+Cuando el usuario escribe `akdd describe [área|archivo]`:
+
+1. Correr `node .agentic/grafo/code-summaries.cjs pending [área] --limit=20` para ver
+   qué archivos no tienen descripción o la tienen desactualizada.
+2. LEER cada archivo del lote (el código real, no solo el nombre) y escribir su
+   descripción con:
+   `node .agentic/grafo/code-summaries.cjs write "<archivo>" "<descripción>"`
+3. **REGLA DURA DE REDACCIÓN (no negociable):** lo único técnico permitido en una
+   descripción son los NOMBRES DE ARCHIVO. Todo lo demás en lenguaje natural que
+   cualquier persona entienda, sea dev o no. Prohibido: "endpoint", "parsea",
+   "instancia", "callback", "provider", "hook", "middleware". En su lugar:
+   "recibe pedidos", "interpreta", "crea", "la marca de IA", "el paso previo".
+   1-3 frases por archivo: qué hace y para qué le sirve al negocio/sistema.
+4. Máximo 20 archivos por corrida (control de tokens). Si quedan más, decirlo.
+5. Además, al cerrar cualquier ciclo `aa:` que haya tocado código: describir los
+   archivos del changeset con el mismo protocolo (paso Memoria) — así el mapa se
+   mantiene al día sin corridas masivas.
+
+Las descripciones se ven en el dashboard: panel "¡NO ENTIENDO!" de Code Structure.
+La vigencia es automática: cambios cosméticos no la invalidan; cambios de
+estructura la marcan desactualizada (aparece de nuevo en `pending`).
+
+## CLICKUP AUTO — ejecución del sprint traído de ClickUp
+
+Cuando el usuario escribe `akdd cu sprint --auto`:
+
+1. Correr `node .agentic/grafo/clickup-bridge.cjs pull --auto` y leer su salida.
+   El script ya calculó mecánicamente qué tareas son AUTO-ELEGIBLES (categoría
+   RELEVANTE_CLARA + sin archivos CRITICAL/SENSITIVE + sin valores de negocio
+   en conflicto con memoria + sin tema de auth/sesiones + sin alcance
+   estructural grande + descripción con sustancia real).
+2. Mostrar al usuario el "Resumen pre-lote" TAL CUAL lo imprime el script
+   (qué correría solo, qué espera confirmación y por qué) — este aviso previo
+   NUNCA se salta, es el seguro barato del diseño.
+3. Para CADA tarea ⚡ AUTO-ELEGIBLE, en orden: ejecutar el pipeline `aa:`
+   completo normal (Context Enricher → Analista → Build → TDD → QA → Memoria →
+   post-cycle) usando nombre + descripción del ticket como la tarea.
+   - Al cerrar LIMPIO (tests + QA PASS, sin ningún STOP/WARN en el camino):
+     `node .agentic/grafo/clickup-bridge.cjs done <task-id>` y
+     `... comment <task-id> "resumen corto de qué se hizo"`.
+   - Si hubo CUALQUIER STOP/WARN/duda: NO marcar done. Solo
+     `... comment <task-id> "qué pasó y por qué queda para revisión humana"`.
+4. Las tareas ✋ (requieren confirmación) NO se ejecutan — quedan listadas al
+   final esperando que el usuario elija cuáles correr con `aa: [tarea]` manual.
+5. Ningún override dentro del auto: si el usuario quiere forzar una tarea
+   no-elegible, eso es un `aa:` manual normal fuera de este protocolo.
+
+Sin `--auto` (`akdd cu sprint` a secas): solo mostrar la clasificación — no
+ejecutar NADA, ni siquiera las elegibles.
 
 ## SIN aa: O audit:
 
@@ -341,6 +408,33 @@ Solo WARN, nunca STOP — mismo criterio que UI Native Gate: no bloquea el
 pipeline, pero deja el hallazgo (y la captura) visible en el reporte en
 vez de que pase desapercibido.
 
+### UI Layout Memory — memoria de decisiones de posición/tamaño de UI (L4, 18/07/2026)
+Un valor de negocio tiene Spec Gate y un patrón de código tiene `patrones.md`,
+pero una decisión de layout ("el panel de tour va a la derecha, más ancho,
+texto más grande — porque el dev lo pidió así") no tenía memoria propia. Si
+un cambio futuro la revierte sin querer, nada lo detecta — el síntoma exacto
+de "el select volvió a su lugar viejo" que señaló el análisis externo de
+Agentix.
+
+`ui-layout-memory.cjs` guarda esas decisiones (elemento HTML por `id` +
+propiedad CSS inline `style="..."`) con su motivo, y detecta en el diff del
+changeset si un elemento vigilado cambia de valor — distinguiendo un cambio
+nuevo de una **reversión exacta a un valor ya abandonado** (historial
+completo, no solo el último valor) y de una **propiedad que desapareció**
+del todo (ej. `right` reemplazado por `left`).
+
+Solo vigila lo que se registró explícitamente — sin registro, sin ruido:
+```
+node .agentic/grafo/ui-layout-memory.cjs record --id=tour-panel --prop=right --value=12px --reason="pedido del dev: panel al lado derecho"
+node .agentic/grafo/ui-layout-memory.cjs check --files=dashboard.cjs
+node .agentic/grafo/ui-layout-memory.cjs list
+```
+Corre solo (Step 2.8 de `post-cycle.cjs`) sobre los archivos de UI del
+último commit (`.html`, `.jsx`, `.tsx`, o cualquiera con "dashboard" en el
+nombre). WARN-only, fail-soft — misma disciplina que Spec Value Scan y Test
+Integrity Gate arriba: números/valores conocidos, no prosa; el juicio de
+"¿este rediseño es intencional?" sigue siendo del modelo/dev.
+
 ## MODO LEGIÓN — sub-agentes en paralelo (v3.9)
 
 La "Iron Legion" de Agentix: en los pasos de **OJOS** (leer/analizar/revisar) el
@@ -451,6 +545,15 @@ de la tarea actual, verificar lo siguiente contra la memoria del proyecto:
 1. **Spec compliance** — ¿El comportamiento nuevo contradice alguna decisión
    documentada en memoria con confianza HIGH o MEDIA?
    Si sí → STOP con reporte exacto de la contradicción.
+   **Mitad mecánica (18/07/2026, protocol → mechanical):** `post-cycle.cjs`
+   (Step 2.7) ya corre solo, sobre el diff del último commit,
+   `spec-value-scan.cjs` (valores de negocio vigilados que el diff toca con
+   un número distinto al que dice la memoria) y `test-integrity-gate.cjs`
+   (títulos de test que existían y desaparecieron/cambiaron — la grieta R8
+   del Coliseo). Ambos existían ya como scripts pero nadie los invocaba
+   automáticamente. Quedan WARN-only y solo sobre valores/títulos conocidos —
+   el juicio semántico de prosa ("¿esto contradice el ESPÍRITU de la
+   decisión?") sigue siendo protocolo del modelo, esto no lo reemplaza.
 
 2. **Error pattern check** — ¿Alguno de los cambios toca un área donde hay
    errores HIGH confidence en memoria?
@@ -567,17 +670,16 @@ Si el mensaje empieza con `aa: explore` o `aa: think`:
 
 ---
 
-## CONTRACT GUARD — Registro automático post-TDD Gate
+## CONTRACT GUARD — registro de contratos (mecánico, no depende de que lo recuerdes)
 
-Después de cada TDD Gate PASS en cualquier ciclo `aa:`, ejecutar:
+`post-cycle.cjs` (Step 2: `registrarContratos()`) ya corre `tdd-gate.cjs run [área]`
+automáticamente en CADA post-cycle — no hace falta invocarlo aparte ni acordarse de
+este paso. Esta sección existía de una versión anterior donde sí era manual
+(`source: protocol`); quedó mecanizada dentro de post-cycle y esta nota es solo
+referencia de dónde vive, no una instrucción para el modelo.
 
-```
-node .agentic/grafo/tdd-gate.cjs run [area]
-```
-
-Donde `[area]` es el nombre del módulo implementado (ej: `clients`, `auth`, `invoices`).
-
-**Esto es obligatorio.** Sin este paso los contratos no se acumulan.
+Si necesitas registrar contratos de un área SIN correr el post-cycle completo
+(ej. depurando), a mano: `node .agentic/grafo/tdd-gate.cjs run [area]`.
 
 ---
 
@@ -670,10 +772,12 @@ Cuando un gate mecánico (Regression/TDD) frena con STOP durante un ciclo aa::
    - Archivo en la lista CRITICAL del SECURITY GATE → NO auto-aplicar: escalar YA al usuario.
    - STOP del Spec Gate por valores de negocio → SIEMPRE decisión humana, sin excepción.
 5. Aplicar → re-correr EL MISMO gate que frenó.
-6. Verde → registrar RECOVERED y seguir el pipeline (source:'protocol' — este evento lo
-   escribe el MODELO siguiendo instrucciones, no un gate de hierro; así la libreta mide
-   honestamente cuánta protección es mecánica y cuánta depende de obediencia):
-   node -e "require('./.agentic/grafo/gate-telemetry.cjs').recordGateEvent(require('better-sqlite3')('.agentic/memoria.db'), {gate:'recovery', verdict:'RECOVERED', source:'protocol', detalle:{gateOrigen:'regression'}})"
+6. Verde → seguir el pipeline. **El registro de RECOVERED ya es mecánico (18/07/2026,
+   protocol → mechanical):** `checkBeforeBuild()` detecta solo, sin que nadie tenga que
+   acordarse de nada, cuando un behavior que tenía un STOP/FAIL pendiente vuelve a pasar
+   limpio — lo marca `source:'mechanical'` en la libreta. Ya no hace falta el `node -e`
+   manual que este archivo pedía antes; el paso 6 de este protocolo es ahora solo
+   "seguir adelante", el registro ocurre solo en la siguiente corrida del gate.
 7. Rojo → SEGUNDO intento SOLO si la memoria ofrece un par error→fix distinto al primero.
 8. Rojo x2 → registrar RECOVERY_FAILED y escalar al usuario con la traza completa
    (qué se intentó, por qué, y el veredicto de cada reintento).

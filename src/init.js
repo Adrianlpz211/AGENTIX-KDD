@@ -27,13 +27,33 @@ async function downloadFromGitHub(spinner) {
 }
 
 // ── Copiar archivos al proyecto ─────────────────────────────────
+// Carpetas/archivos de docs/ que son evidencia interna del arena de benchmark
+// (seeds completos con node_modules, resultados de rondas, DBs de prueba) —
+// NUNCA deben terminar en el proyecto de un cliente. Bug real encontrado el
+// 18/07/2026: `docs` se copiaba completo (44MB, incluía los 4 seeds del arena)
+// a CADA instalación nueva vía `akdd init`. `akdd update` no tenía este bug
+// (no copia `docs` en absoluto) — solo afectaba la instalación inicial.
+const DOCS_EXCLUDE = new Set(['benchmarks', 'benchmarks$dest', 'superpowers']);
+
+function copyDocsFiltered(sourcePath, projectPath) {
+  const src = path.join(sourcePath, 'docs');
+  const dest = path.join(projectPath, 'docs');
+  if (!fs.existsSync(src)) return;
+  fs.ensureDirSync(dest);
+  for (const entry of fs.readdirSync(src)) {
+    if (DOCS_EXCLUDE.has(entry)) continue;
+    fs.copySync(path.join(src, entry), path.join(dest, entry), { overwrite: true });
+  }
+}
+
 function copyAgenticFiles(sourcePath, projectPath) {
-  const rootFiles = ['CLAUDE.md', '_LOCKS.md', '.cursorrules', 'dashboard.cjs', 'docs', '.cursor', '.audit'];
+  const rootFiles = ['CLAUDE.md', '_LOCKS.md', '.cursorrules', 'dashboard.cjs', '.cursor', '.audit'];
   for (const file of rootFiles) {
     const src  = path.join(sourcePath, file);
     const dest = path.join(projectPath, file);
     if (fs.existsSync(src)) fs.copySync(src, dest, { overwrite: true });
   }
+  copyDocsFiltered(sourcePath, projectPath);
 
   const agSrc  = path.join(sourcePath, '.agentic');
   const agDest = path.join(projectPath, '.agentic');

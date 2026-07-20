@@ -203,11 +203,25 @@ function validateEntry(db, nodeId, projectRoot) {
   if (archivos.length > 0) {
     const currentHash = computeContextHash(archivos, projectRoot);
     if (currentHash && node.hash_contexto && currentHash !== node.hash_contexto) {
-      result.issues.push({
-        type:    'stale_context',
-        message: `Referenced files changed since last validation. Hash: ${node.hash_contexto} → ${currentHash}`,
-        files:   archivos,
-      });
+      // PIEZA 1 (aditivo — change-classifier): computeContextHash usa size+mtime,
+      // así que hasta re-guardar un archivo idéntico o cambiar un comentario dispara
+      // esta alerta. Antes de marcar SOSPECHOSO, preguntar al clasificador si TODOS
+      // los archivos cambiaron solo cosméticamente (misma estructura de símbolos/
+      // imports/firmas). Solo se suprime con certeza total: cualquier cambio
+      // STRUCTURAL o archivo sin baseline → la alerta se emite igual que siempre.
+      // Si el clasificador no existe o falla → comportamiento original intacto.
+      let cosmeticOnly = false;
+      try { cosmeticOnly = require('./change-classifier.cjs').allCosmetic(archivos, projectRoot); } catch {}
+
+      if (cosmeticOnly) {
+        result.cosmetic_skip = true;   // visible para debugging, no afecta estado
+      } else {
+        result.issues.push({
+          type:    'stale_context',
+          message: `Referenced files changed since last validation. Hash: ${node.hash_contexto} → ${currentHash}`,
+          files:   archivos,
+        });
+      }
     }
   }
 
@@ -342,6 +356,10 @@ function revalidate(nodeId, projectRoot) {
       fecha_update = datetime('now')
     WHERE id = ?
   `).run(newHash, nodeId));
+
+  // PIEZA 1 (aditivo): al revalidar, refrescar también el fingerprint baseline de
+  // esos archivos — el estado actual pasa a ser la nueva referencia estructural.
+  try { require('./change-classifier.cjs').snapshotFiles(archivos, projectRoot); } catch {}
 
   db.close();
   return { ok: true, id: nodeId, new_hash: newHash, revalidated_at: new Date().toISOString() };
