@@ -160,7 +160,9 @@ function checkConfigVsStack() {
   const config = fs.readFileSync(CONFIG_FILE, 'utf8');
 
   // Check test command is configured
-  const testMatch = config.match(/^\s*test:\s*(.+)$/m);
+  // [^\S\n]* y no \s*: el viejo \s* cruzaba el salto de línea y con config.md
+  // en formato YAML de bloque capturaba la línea siguiente (bug 2026-07-19).
+  const testMatch = config.match(/^[^\S\n]*test:[^\S\n]*(\S.*)$/m) || config.match(/^[^\S\n]*comando:[^\S\n]*(\S.*)$/m);
   if (!testMatch || testMatch[1].trim() === '—' || testMatch[1].trim() === '') {
     addFinding('HIGH', 'config',
       'Comando de tests no configurado en config.md',

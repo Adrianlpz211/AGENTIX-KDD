@@ -195,8 +195,9 @@ function preserveUserState(projectPath, configPath) {
     const stackMatch = config.match(/^## Stack\n([\s\S]+?)(?=\n##|$)/m);
     if (stackMatch) state.stack = stackMatch[1].trim();
 
-    // Test command
-    const testMatch = config.match(/^\s*test:\s*(.+)$/m);
+    // Test command — [^\S\n]* y no \s*: \s* cruzaba el salto de línea y con
+    // config.md en formato YAML de bloque capturaba la línea siguiente (2026-07-19).
+    const testMatch = config.match(/^[^\S\n]*test:[^\S\n]*(\S.*)$/m) || config.match(/^[^\S\n]*comando:[^\S\n]*(\S.*)$/m);
     if (testMatch && testMatch[1].trim() !== '—') {
       state.testCommand = testMatch[1].trim();
     }
@@ -238,9 +239,9 @@ function restoreUserState(configPath, state) {
       }
     }
 
-    // Restaurar test command
+    // Restaurar test command ([^\S\n]*: no cruzar saltos de línea, 2026-07-19)
     if (state.testCommand) {
-      const currentTest = config.match(/^\s*test:\s*(.+)$/m)?.[1]?.trim();
+      const currentTest = config.match(/^[^\S\n]*test:[^\S\n]*(\S.*)$/m)?.[1]?.trim();
       if (!currentTest || currentTest === '—') {
         config = config.replace(/^(\s*test:)\s*.*$/m, `$1 ${state.testCommand}`);
         changed = true;

@@ -66,13 +66,25 @@ function openProjectDB(dbPath, projectRoot) {
  * @returns {string|null}
  */
 function detectTestCommand(projectRoot) {
-  // 1. Leer desde config.md si ya está guardado
+  // 1. Leer desde config.md si ya está guardado.
+  // OJO con el regex: \s* cruza saltos de línea, así que con el formato YAML
+  // en bloque (`test:` solo en su línea, `comando: npm test` debajo) el viejo
+  // /^\s*test:\s*(.+)$/m capturaba la LÍNEA SIGUIENTE completa y devolvía
+  // "runner: node --test" como comando literal → STOP falso en todo el
+  // proyecto (bug real encontrado por el propio pipeline corriendo sobre
+  // FLOTA360, 2026-07-19). [^\S\n]* = solo espacios horizontales.
   const configPath = path.join(projectRoot, '.agentic/config.md');
   if (fs.existsSync(configPath)) {
     const config = fs.readFileSync(configPath, 'utf8');
-    const match = config.match(/^\s*test:\s*(.+)$/m);
-    if (match && match[1].trim() !== '—' && match[1].trim() !== '') {
-      return match[1].trim();
+    // Forma inline: `test: npm test`
+    const inline = config.match(/^[^\S\n]*test:[^\S\n]*(\S.*)$/m);
+    if (inline && inline[1].trim() !== '—') {
+      return inline[1].trim();
+    }
+    // Forma YAML en bloque: `test:` … `  comando: npm test`
+    const comando = config.match(/^[^\S\n]*comando:[^\S\n]*(\S.*)$/m);
+    if (comando && comando[1].trim() !== '—') {
+      return comando[1].trim();
     }
   }
 
@@ -597,7 +609,17 @@ if (require.main === module) {
           scope = [...diff.archivos_modificados, ...diff.archivos_nuevos];
         }
       } catch (e) { /* sin git — scope vacío, igual que antes */ }
+      // Estado interno del motor fuera del scope: el gate MISMO ensucia
+      // memoria.db al correr, y en proyectos que la versionan eso hacía que
+      // el scope fuera solo [.agentic/...] → 0 tests relacionados → fallo
+      // mudo en cada post-cycle (encontrado corriendo sobre FLOTA360,
+      // 2026-07-19). Si tras filtrar no queda nada, scope vacío = escaneo
+      // completo del proyecto, que es lo correcto para un árbol limpio.
+      scope = scope.filter(f => !/^\.agentic[\\\/]/.test(f));
       const result = runSelfHealingLoop({ projectRoot, area, scope });
+      // El fallo era invisible: run devolvía reason sin imprimirla y el exit 1
+      // parecía un crash mudo. Ahora la razón siempre se ve.
+      if (!result.success && result.reason) console.log(`[TDD-GATE] ❌ ${result.reason}`);
       process.exit(result.success ? 0 : 1);
       break;
     }

@@ -509,7 +509,9 @@ function guardarConfigEnBD(db) {
     const nameMatch = config.match(/^Nombre:\s*(.+)$/m);
     if (nameMatch && nameMatch[1].trim() !== '—') upsert.run('project_name', nameMatch[1].trim());
 
-    const testMatch = config.match(/^\s*test:\s*(.+)$/m);
+    // [^\S\n]* y no \s*: \s* cruzaba el salto de línea y con config.md en
+    // formato YAML de bloque capturaba la línea siguiente (bug 2026-07-19).
+    const testMatch = config.match(/^[^\S\n]*test:[^\S\n]*(\S.*)$/m) || config.match(/^[^\S\n]*comando:[^\S\n]*(\S.*)$/m);
     if (testMatch && testMatch[1].trim() !== '—') upsert.run('test_command', testMatch[1].trim());
 
     const stackMatch = config.match(/^## Stack\n([\s\S]+?)(?=\n##|$)/m);
