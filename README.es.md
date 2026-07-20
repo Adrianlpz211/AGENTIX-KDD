@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.16.5-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.16.6-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -304,6 +304,8 @@ Se volvió a correr el Coliseo sobre un terreno nuevo (FLOTA360, SaaS de flotas 
 - **Cross-tenant agnóstico de ORM y de vocabulario**: deriva la clave de tenant de tu propio JWT (`companyId`, `negocioId`, lo que sea) y marca handlers que leen colecciones sin acotarlas — 0 falsos positivos en las 28 rutas reales de Lumo.
 - **`related_files` derivado de los tests**: el Regression Guard ya no queda ciego cuando un behavior se registra con árbol limpio.
 - **Expiración de token larga**: un `expiresIn` que supera 7 días ahora es WARN visible.
+- **Descubrimiento de tests ensanchado**: reconoce el prefijo `test-*.js` (un cliente llevaba 50+ ciclos con 0 contratos porque su convención de nombres no matcheaba y nadie se enteraba).
+- **Estado "0 contratos" ahora grita**: `akdd health` marca en rojo si hubo ciclos pero el Preservation Gate no protege nada, con la causa exacta — el fin de la degradación silenciosa.
 
 El playbook completo, el marcador ronda a ronda y los proyectos víctima están en la rama [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) — corre las rondas tú mismo.
 

@@ -193,6 +193,64 @@ const CHECKS = [
     },
     fix: null,
   },
+  {
+    // Hueco #5 del Coliseo (2026-07-20): un proyecto puede llevar decenas de
+    // ciclos con CERO contratos registrados y nadie se entera — el
+    // Preservation Gate no protege nada porque tdd-gate nunca encontró tests
+    // (o no había cómo correrlos), y el fallo se perdía en una línea ⚠️ del
+    // post-cycle. Este check lo hace RUIDOSO: si hubo ciclos pero no hay
+    // behaviors, o hay archivos de test sin comando para correrlos, lo grita.
+    id: 'preservation_activo',
+    nombre: 'Preservation Gate protegiendo algo',
+    categoria: 'harness',
+    check: (root) => {
+      const dbPath = path.join(root, '.agentic/memoria.db');
+      if (!fs.existsSync(dbPath)) return { ok: true, msg: 'N/A (sin DB aún)' };
+      let db;
+      try { db = new (require('better-sqlite3'))(dbPath, { readonly: true }); }
+      catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { readOnly: true }); } catch { return { ok: true, msg: 'N/A (sin driver)' }; } }
+      const one = (sql) => { try { return db.prepare(sql).get(); } catch { return null; } };
+      const ciclos    = (one('SELECT COUNT(*) n FROM ciclos') || {}).n || 0;
+      const behaviors = (one("SELECT COUNT(*) n FROM protected_behaviors WHERE status='active'") || {}).n || 0;
+      try { db.close(); } catch {}
+
+      if (behaviors > 0) return { ok: true, msg: `${behaviors} behavior(s) protegido(s) tras ${ciclos} ciclo(s)` };
+      if (ciclos < 3)    return { ok: true, msg: `${ciclos} ciclo(s), aún sin contratos (normal al arrancar)` };
+
+      // Ciclos sí, contratos no → diagnóstico: ¿hay tests que no se encuentran/corren?
+      let hayTests = false;
+      try {
+        const tg = require(path.join(root, '.agentic/grafo/tdd-gate.cjs'));
+        hayTests = tg.findTestFiles ? tg.findTestFiles(root).length > 0 : false;
+      } catch {}
+
+      // Comando DECLARADO de verdad (no el probe flojo de detectTestCommand,
+      // que da 'npm test' por bueno aunque el script no exista): config.md
+      // `test:` o package.json scripts.test que no sea el default de error.
+      let comandoDeclarado = false;
+      try {
+        const cfg = fs.readFileSync(path.join(root, '.agentic/config.md'), 'utf8');
+        if (/^[^\S\n]*(?:test|comando):[^\S\n]*\S/im.test(cfg) && !/test:\s*—/.test(cfg)) comandoDeclarado = true;
+      } catch {}
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+        const t = pkg.scripts && pkg.scripts.test;
+        if (t && t !== 'echo "Error: no test specified" && exit 1') comandoDeclarado = true;
+      } catch {}
+
+      const causa = !hayTests
+        ? 'no se encuentran archivos de test (revisa la convención de nombres — el motor busca .test./.spec., prefijo test-*, __tests__/, test_*.py)'
+        : !comandoDeclarado
+          ? 'hay archivos de test PERO ningún comando "test" declarado en package.json ni config.md — decláralo (Agentix NO corre scripts test-* solo, por seguridad)'
+          : 'los tests existen y hay comando, pero no pasan / no registran — corre: node .agentic/grafo/tdd-gate.cjs run <área> para ver por qué';
+
+      return {
+        ok: false,
+        msg: `⚠️  ${ciclos} ciclos y 0 contratos — el Preservation Gate NO está protegiendo nada. Causa probable: ${causa}`,
+      };
+    },
+    fix: null,
+  },
   // ── Specs ─────────────────────────────────────────────────────────────────
   {
     id: 'specs',

@@ -1,5 +1,25 @@
 # Changelog — Agentic KDD
 
+## [3.16.6] — 2026-07-20
+
+### Huecos #4 y #5 del Coliseo SELLADOS — descubrimiento de tests + estado ruidoso
+Un cliente arrancó un proyecto de cero y tras 50+ ciclos tenía CERO contratos
+registrados, sin darse cuenta: sus tests se llamaban `test-catalogos.js`
+(prefijo `test-`, no sufijo `.test.`) y no había comando `test` declarado, así
+que `tdd-gate` nunca los encontraba y el fallo se perdía en una línea del
+post-cycle. Dos arreglos globales, probados a morir:
+- **#4 — `findTestFiles` reconoce el prefijo `test-*`/`spec-*`** (además de
+  `.test.`/`.spec.`/`__tests__/`/pytest). Anclado al nombre base para no
+  confundir `contest-x.js` ni `latest-x.js`. Verificado: FLOTA360 (`.test.js`)
+  sigue registrando sin regresión.
+- **#5 — nuevo check ruidoso en `akdd health`**: si hubo ≥3 ciclos y hay 0
+  contratos, lo GRITA (❌) con la causa exacta — no se encuentran tests / hay
+  tests pero ningún comando declarado / hay comando pero no registran. Antes
+  este estado era invisible. Diagnóstico verificado en los 3 escenarios.
+- Nota de seguridad: Agentix **NO** auto-corre scripts `test-*.js` (uno podría
+  llamarse `test-hard-delete.js` y borrar datos) — los reconoce y avisa que
+  declares el comando, la decisión de correrlos es del humano.
+
 ## [3.16.5] — 2026-07-20
 
 ### Hueco #3 del Coliseo SELLADO — expiración de token peligrosamente larga

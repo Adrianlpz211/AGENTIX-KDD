@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.16.5-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.16.6-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -304,6 +304,8 @@ The Coliseum was re-run on new terrain (FLOTA360, a multi-tenant fleet SaaS with
 - **ORM- and vocabulary-agnostic cross-tenant**: derives the tenant key from your own JWT (`companyId`, `negocioId`, whatever) and flags handlers that read collections without scoping them — 0 false positives across Lumo's 28 real routes.
 - **`related_files` derived from tests**: the Regression Guard no longer goes blind when a behavior is registered on a clean tree.
 - **Long token expiry**: an `expiresIn` over 7 days is now a visible WARN.
+- **Widened test discovery**: recognizes the `test-*.js` prefix (a client ran 50+ cycles with 0 contracts because their naming convention didn't match — and nobody noticed).
+- **"0 contracts" state now shouts**: `akdd health` flags red when there were cycles but the Preservation Gate protects nothing, with the exact cause — the end of silent degradation.
 
 The full playbook, the round-by-round scoreboard, and the victim projects live on the [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) branch — run the rounds yourself.
 

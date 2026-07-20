@@ -328,9 +328,14 @@ function parseTestOutput(raw, exitCode) {
  */
 function findTestFiles(projectRoot, scope = []) {
   const testPatterns = [
-    /\.(test|spec)\.(ts|tsx|js|jsx)$/,
+    /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/,
     /__(tests?)__\//,
     /test\/.*\.(ts|js)$/,
+    // Prefijo test-* / spec-* (convención común que el motor ignoraba — hueco
+    // #4 del Coliseo, 2026-07-20: un cliente con `test-catalogos.js` en
+    // `web/scripts/` nunca registraba contratos porque ningún patrón matcheaba).
+    // Se ancla al nombre base para no confundir un dir `test-fixtures/`.
+    /(^|[\\/])(test|spec)-[^\\/]+\.(ts|tsx|js|jsx|mjs|cjs)$/i,
     // Python
     /test_.*\.py$/,
     /.*_test\.py$/,
