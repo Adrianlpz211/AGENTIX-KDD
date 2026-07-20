@@ -1,5 +1,22 @@
 # Changelog — Agentic KDD
 
+## [3.16.4] — 2026-07-20
+
+### Hueco #2 del Coliseo SELLADO — related_files vacío en el registro de behaviors
+Un behavior registrado con árbol limpio (o cuyo changeset filtrado quedaba
+vacío) guardaba `related_files: []` — sabía su test pero no la FUENTE que
+protege, así que regression-guard `check <archivo>` nunca lo asociaba a un
+cambio de código (pasaba PASS ciego). Arreglado:
+- `related_files` ahora es la UNIÓN de los cambios que SON fuente real +
+  los archivos que los tests importan (`inferSourceFromTests` lee los
+  imports/requires relativos del test). Aunque el changeset venga vacío o con
+  basura (.claude/, config), la fuente inferida del test siempre entra.
+- El scope de tdd-gate excluye también `.claude/`, `.git/`, `node_modules/`,
+  `dist/build/coverage` (antes solo `.agentic/`) — no eran código del proyecto.
+- Verificado: `tdd-gate run billing` sobre árbol limpio → `related_files:
+  ["src/billing.js"]` (derivado del import del test); `check src/billing.js`
+  pasa de "PASS" ciego a "WARN: 1 MEDIA behavior in changeset path".
+
 ## [3.16.3] — 2026-07-20
 
 ### Hueco #1 del Coliseo SELLADO — cross-tenant agnóstico de ORM y de vocabulario

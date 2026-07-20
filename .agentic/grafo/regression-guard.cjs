@@ -557,6 +557,34 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
  * Auto-registra snapshot de comportamientos sanos.
  * No requiere intervención del dev.
  */
+/**
+ * Deriva los archivos FUENTE que un test ejercita, leyendo sus imports/requires
+ * relativos. Respaldo para cuando el behavior se registra con changeset vacío
+ * (árbol limpio, o el scope filtró .agentic/) — sin esto related_files quedaba
+ * [] y regression-guard `check <archivo>` nunca podía asociar fuente↔behavior
+ * (hueco #2 del Coliseo, 2026-07-20). Un test casi siempre importa lo que prueba.
+ */
+function inferSourceFromTests(testFiles, root) {
+  const fuentes = new Set();
+  for (const t of testFiles || []) {
+    const abs = path.isAbsolute(t) ? t : path.join(root, t);
+    let c; try { c = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    const imports = c.match(/(?:from\s+|require\(\s*)['"](\.[^'"]+)['"]/g) || [];
+    for (const imp of imports) {
+      const m = imp.match(/['"](\.[^'"]+)['"]/);
+      if (!m) continue;
+      let rel = m[1].replace(/\.(js|ts|jsx|tsx|mjs|cjs)$/, '');
+      const baseDir = path.dirname(abs);
+      // Probar extensiones reales sobre el import resuelto.
+      for (const ext of ['.ts', '.js', '.tsx', '.jsx', '.mjs', '.cjs']) {
+        const cand = path.resolve(baseDir, rel + ext);
+        if (fs.existsSync(cand)) { fuentes.add(path.relative(root, cand).replace(/\\/g, '/')); break; }
+      }
+    }
+  }
+  return [...fuentes];
+}
+
 function registerBehavior(db, params) {
   ensureSchema(db);
 
@@ -575,6 +603,21 @@ function registerBehavior(db, params) {
   const anchors = computeTouchedSymbols(db, changedFiles, root); // v3.13 — nombres estables, nunca líneas
   const flows   = extractFlows(changedFiles, root, db);
   const tests   = testPassed.length > 0 ? testPassed : inferTestPatterns(changedFiles);
+
+  // related_files: UNIÓN de los cambios que SON fuente real + los archivos que
+  // los tests importan. No un either/or: aunque el changeset traiga basura
+  // (.claude/, config) o venga vacío, la fuente inferida del test siempre
+  // entra, así el behavior sabe qué FUENTE protege, no solo su test (hueco #2).
+  const esFuente = (f) => {
+    const n = String(f).replace(/\\/g, '/');
+    return /\.(js|ts|jsx|tsx|mjs|cjs|py)$/.test(n) &&
+      !/\.(test|spec)\./.test(n) &&
+      !/^\.(claude|agentic|git)\//.test(n) && !/node_modules\//.test(n);
+  };
+  const cambiosFuente = changedFiles.filter(esFuente);
+  const inferidos     = inferSourceFromTests(tests, root);
+  let relatedFiles    = [...new Set([...cambiosFuente, ...inferidos])].slice(0, 10);
+  if (relatedFiles.length === 0) relatedFiles = changedFiles.slice(0, 10); // último recurso
 
   if (module_ === 'global' && changedFiles.length === 0) return null;
 
@@ -624,7 +667,7 @@ function registerBehavior(db, params) {
         description,
         JSON.stringify(flows),
         JSON.stringify(tests),
-        JSON.stringify(changedFiles.slice(0, 10)),
+        JSON.stringify(relatedFiles),
         JSON.stringify(mergedAnchors.slice(0, 50)),
         existing.id
       )
@@ -644,7 +687,7 @@ function registerBehavior(db, params) {
       id, module_, description,
       JSON.stringify(flows),
       JSON.stringify(tests),
-      JSON.stringify(changedFiles.slice(0, 10)),
+      JSON.stringify(relatedFiles),
       JSON.stringify(anchors.slice(0, 50))
     )
   );

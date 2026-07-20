@@ -615,7 +615,9 @@ if (require.main === module) {
       // mudo en cada post-cycle (encontrado corriendo sobre FLOTA360,
       // 2026-07-19). Si tras filtrar no queda nada, scope vacío = escaneo
       // completo del proyecto, que es lo correcto para un árbol limpio.
-      scope = scope.filter(f => !/^\.agentic[\\\/]/.test(f));
+      // Excluir estado del motor y config del entorno (no son código fuente
+      // del proyecto): .agentic/, .claude/, .git/, node_modules/, dist/build.
+      scope = scope.filter(f => !/^(\.agentic|\.claude|\.git|node_modules|dist|build|coverage)[\\\/]/.test(f));
       const result = runSelfHealingLoop({ projectRoot, area, scope });
       // El fallo era invisible: run devolvía reason sin imprimirla y el exit 1
       // parecía un crash mudo. Ahora la razón siempre se ve.
