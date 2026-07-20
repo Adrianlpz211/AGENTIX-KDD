@@ -76,6 +76,12 @@ function escanearArchivo(content, filename) {
   for (const regla of NATIVE_RULES) {
     if (regla.exceptoArchivo && regla.exceptoArchivo.test(filename)) continue;
     lineas.forEach((linea, i) => {
+      // Saltar líneas de comentario (// o *) — un comentario que MENCIONA
+      // alert()/confirm() no es un uso real (falso positivo encontrado en el
+      // Coliseo, 2026-07-20: la línea "// esto usa alert() a propósito" se
+      // marcaba igual que la llamada real de abajo).
+      const t = linea.trim();
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
       if (regla.pattern.test(linea)) {
         findings.push({
           id: regla.id,

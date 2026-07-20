@@ -1,5 +1,33 @@
 # Changelog — Agentic KDD
 
+## [3.16.2] — 2026-07-20
+
+### Coliseo Diabólico corrido en modo "auditoría de maquinaria" — 2 huecos tapados
+Se corrieron las 5 fases del Coliseo sobre FLOTA360 evaluando qué atrapan los
+gates MECÁNICOS por su cuenta (independiente del juicio del modelo). Resultado:
+los gates de dominio acotado funcionan (UI Native, UI Layout Memory, Lock
+Manager cross-instancia, secretos); los semánticos dependían del brief+modelo.
+Dos huecos mecánicos reales, tapados:
+- **spec-value-scan ahora deriva las claves vigiladas de la MEMORIA del
+  proyecto**, no solo de una lista fija en inglés (trial_days…). Cualquier
+  identificador snake_case que aparezca junto a un número en un nodo
+  decision/patron ALTA/MEDIA se vigila automáticamente. Antes, un valor propio
+  como `fuel_surcharge_pct` (decisión ALTA en memoria) era invisible al escaneo
+  mecánico; ahora el diff que lo toca con otro número se marca solo.
+- **ui-native-gate salta líneas de comentario** — un comentario que menciona
+  `alert()`/`confirm()` ya no cuenta como uso real (falso positivo).
+
+### Huecos documentados, pendientes de arreglo cuidadoso (no rushear)
+- Security Gate cross-tenant: solo corre sobre archivos CRITICAL/SENSITIVE (un
+  `src/server.js` monolítico es NORMAL y se salta) y matchea el literal
+  `tenant_id`/dialecto Prisma, ciego a `companyId` + store JSON. Una fuga
+  cross-tenant en ese estilo pasa mecánicamente — hoy la ataja el brief de
+  memoria + juicio del modelo, no el gate.
+- Security Gate no marca un valor de config peligroso (JWT 30d) en archivo
+  CRITICAL — detecta bypass/secretos, no "valor riesgoso".
+- protected_behaviors.related_files queda vacío si el behavior se registra con
+  árbol limpio → regression-guard `check <archivo>` no asocia fuente↔behavior.
+
 ## [3.16.1] — 2026-07-19
 
 ### El pipeline se encontró un bug a sí mismo (y quedó reparado)

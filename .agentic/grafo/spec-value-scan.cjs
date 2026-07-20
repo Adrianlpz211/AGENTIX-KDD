@@ -56,6 +56,36 @@ function openDBWrite(projectRoot) {
   return null;
 }
 
+/**
+ * Claves de negocio DERIVADAS de la memoria del proyecto — no solo la lista
+ * hardcodeada en inglés. El Coliseo (2026-07-20) mostró el hueco: un valor
+ * como `fuel_surcharge_pct` vivía como decisión ALTA en la memoria de FLOTA360
+ * pero spec-value-scan era ciego a él porque no estaba en WATCHED_KEYS. Ahora
+ * se extraen los identificadores snake_case que aparecen JUNTO A un número en
+ * cualquier nodo decision/patron ALTA/MEDIA — es decir, lo que el propio
+ * proyecto ya marcó como regla de negocio con un valor. Así la protección
+ * mecánica cubre lo que de verdad está en la memoria, no un vocabulario fijo.
+ */
+function memoryDerivedKeys(db) {
+  if (!db) return [];
+  const rows = safe(() => db.prepare(
+    `SELECT titulo, contenido FROM nodos
+     WHERE tipo IN ('patron','decision') AND confianza IN ('ALTA','MEDIA')`
+  ).all()) || [];
+  const keys = new Set();
+  for (const r of rows) {
+    const texto = `${r.titulo}\n${r.contenido || ''}`;
+    for (const linea of texto.split('\n')) {
+      if (!/\d/.test(linea)) continue; // solo líneas con un número
+      // identificadores snake_case de 2+ segmentos (fuel_surcharge_pct,
+      // sla_penalty_threshold_hours…) — evita palabras sueltas comunes.
+      const ids = linea.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) || [];
+      ids.forEach(id => keys.add(id));
+    }
+  }
+  return [...keys];
+}
+
 /** Valor recordado de una clave: primer número en un nodo HIGH/MEDIA que la mencione. */
 function rememberedValue(db, key) {
   const rows = safe(() => db.prepare(
@@ -94,7 +124,11 @@ function scan(projectRoot, { staged = true, files = null } = {}) {
   const agregadas = diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++'));
   const db = openDB(projectRoot);
 
-  for (const key of WATCHED_KEYS) {
+  // Lista fija (SaaS genérico) ∪ lo que el propio proyecto marcó como regla de
+  // negocio con un valor en su memoria. Set para no escanear dos veces la misma.
+  const claves = [...new Set([...WATCHED_KEYS, ...memoryDerivedKeys(db)])];
+
+  for (const key of claves) {
     const re = new RegExp(`${key}\\s*[:=]\\s*['"]?(\\d+(?:\\.\\d+)?)`, 'i');
     for (const linea of agregadas) {
       const m = linea.match(re);
