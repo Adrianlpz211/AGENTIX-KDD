@@ -42,9 +42,9 @@ Agentix has many organs but only three pieces. If you ever get lost in the featu
 
 | | Piece | What it does | Its organs |
 |---|-------|--------------|------------|
-| ⚓ | **Anchor** — memory | Remembers decisions, rules, errors and the code's structure across sessions, and surfaces what's relevant at the right moment. | 4-layer memory (CoALA) · AST code graph with line-level precision · hybrid BM25+vector search · symbol anchors · autonomous curation (MemCurator) · gate telemetry (the "ledger") |
-| 🔧 | **Lever** — verification | Before accepting a change, mechanically checks it doesn't break what already worked. When in doubt, it **stops on the safe side**. Never reports a false "green". | Regression Guard (line-level HIT/MISS/DOUBT) · TDD Gate · Spec Gate + business-value scanner · Security Gate (secrets/PII/injection) · Browser Gate (real Chrome/Edge) · UI Native Gate · pre/post-commit git hooks |
-| 🔨 | **Hammer** — autonomy | Runs full development cycles on a leash: analyzes, builds, tests, learns, and recovers from stops — reporting everything back. | `aa:` pipeline · LEGION MODE (parallel sub-agents for read/judge steps only) · 4-lens QA · `audit:` department (7 auditors) · Creative Engine · RECOVERY protocol · multi-instance locks |
+| ⚓ | **Anchor** — memory | Remembers decisions, rules, errors and the code's structure across sessions, and surfaces what's relevant at the right moment. | 4-layer memory (CoALA) · AST code graph with line-level precision · hybrid BM25+vector search · symbol anchors · natural-language per-file descriptions · autonomous curation (MemCurator) · gate telemetry (the "ledger") |
+| 🔧 | **Lever** — verification | Before accepting a change, mechanically checks it doesn't break what already worked. When in doubt, it **stops on the safe side**. Never reports a false "green". | Regression Guard (line-level HIT/MISS/DOUBT) · TDD Gate · Spec Gate + business-value scanner derived from your memory · Security Gate (secrets/PII/injection + ORM-agnostic cross-tenant) · Browser Gate (real Chrome/Edge) · UI Native Gate · UI Layout Memory (UI position/size) · pre/post-commit git hooks |
+| 🔨 | **Hammer** — autonomy | Runs full development cycles on a leash: analyzes, builds, tests, learns, and recovers from stops — reporting everything back. | `aa:` pipeline · LEGION MODE (parallel sub-agents for read/judge steps only) · 4-lens QA · `audit:` department (7 auditors) · Creative Engine · RECOVERY protocol (mechanized) · multi-instance locks · ClickUp bridge (opt-in) |
 
 **The measured property that defines the armor:** when Agentix doubts, it protects. Measured against a real parser: of 1,989 symbols compared, the range error falls on the safe side in **99.75%** of cases (dangerous side: 5 cases, all ≤5 lines).
 
@@ -97,11 +97,38 @@ audit: auditar               ← 7 parallel auditors; read-only, never touch cod
 
 ---
 
+## 🆕 ClickUp bridge — let sprints come to you (v3.16, opt-in)
+
+If your team tracks work in **ClickUp**, Agentix can pull the tasks of a List, cross-check them against your project, and assemble the "solid sprint" — no copy-pasting tickets by hand. **Off by default** (like hooks or embeddings): does nothing until you turn it on.
+
+```bash
+akdd cu on                     # activate (asks for CLICKUP_API_TOKEN in your .env, validates it)
+akdd cu set-list <list-id>     # which ClickUp List this project uses (once)
+akdd cu sprint                 # pull + classify + show (executes nothing)
+akdd cu sprint --auto          # run only what passes the low-risk filter
+```
+
+Each task is classified **by cross-checking it against your code and your memory** — never blind:
+
+| | Category | Meaning |
+|---|---|---|
+| 🟢 | **Clearly relevant** | Direct evidence in your code that this already exists |
+| 🔵 | **Relevant new** | Doesn't exist yet, but fits the project's domain (legit new work) |
+| 🟡 | **Ambiguous** | Insufficient description → Explore Mode: asks before building |
+| 🔴 | **No trace** | Zero relation to the project → skipped, with a note on ClickUp |
+
+**`--auto` is pseudo-L5, not blind L5.** A task runs on its own ONLY if it's *clearly relevant*, touches no critical files (auth/middleware), doesn't contradict a business value in your memory, doesn't touch authentication, isn't a large structural change, and has a substantive description. Everything else waits for your confirmation — the flag isn't "trust everything", it's "trust what already proved obviously safe". On a clean close it marks the task done in ClickUp; on any doubt it just leaves a comment and defers to a human.
+
+> The ClickUp token is per-account (one per client) and set ONCE in the project's `.env` — the client who files tasks in ClickUp never touches anything. Works the same in Claude Code and Cursor.
+
+---
+
 ## What happens on its own — you type nothing
 
 | When | What runs automatically |
 |------|--------------------------|
 | On every git **commit** | **Pre-commit** (v3.15): business-value scanner + security shield over staged files — visible, never blocking. **Post-commit**: closes the cycle, accumulates contracts, indexes the code, syncs the graph. |
+| On every **post-cycle** (v3.16) | Automatic Spec/Test integrity scan (business values and test titles that changed) + UI Layout Memory (registered UI positions/sizes that get reverted) + RECOVERED registration when a stopped gate passes clean again — all mechanical, no reliance on the model remembering. |
 | Inside every **`aa:`** | Context Enricher risk brief, gates, tests, 4-lens QA, learning registration. |
 | Every **5 cycles** | Checkpoint to resume in another chat or machine. |
 | On **init / update** | Hooks install themselves, schema migrates itself, index rebuilds itself if the engine changed versions. |
@@ -115,6 +142,8 @@ Since v3.15, every protection gets recorded in the ledger (`gate_events`) with i
 **🥇 Battle-tested** (repeated real use): the `aa:` pipeline, 4-layer memory + hybrid search, classic gates (Spec/TDD/Security/Regression), automatic per-commit registration, checkpoints, multi-instance locks, dashboard, MCP (54 tools), line-level containment, parallel Front/Back (confirmed with real overlapped execution).
 
 **🥈 Verified with fixtures/browser** (controlled scenarios, not yet months of production): behavior-driven Browser Gate, 10-framework endpoint catalog (Express/Fastify/NestJS/Flask/FastAPI/Django/Rails/Laravel/gin/Spring), UI Eyes (forms/selects/required/CSS as graph nodes), telemetry + merit-based confidence promotion, error→cure matching by anchors, coverage meter, RECOVERY protocol, pre-commit hooks, engine maturity manifest with a mechanical boundary lint.
+
+**🥉 New in v3.16, tested against a real project (not yet months of production)**: ClickUp bridge (pull + classification + `--auto` with an eligibility filter — tested against a real account, 13 tasks), UI Layout Memory (UI position/size memory), ORM-agnostic cross-tenant (tested against Lumo's 28 real routes, 0 false positives), natural-language per-file descriptions (`akdd describe`), dashboard guided tour and change overlay, COSMETIC/STRUCTURAL change classifier.
 
 **🥉 Implemented without public confirmation**: team collaboration (private beta), Browser Gate escalation to STOP (earned with weeks of use).
 
@@ -217,7 +246,17 @@ node .agentic/grafo/madurez-lint.cjs             # Engine maturity boundaries (c
 ### Code engine
 ```bash
 akdd ast [stats|symbols <f>]   # Project AST index (auto-migrates by version)
+akdd describe [area]           # Natural-language per-file descriptions ("I DON'T GET IT" panel)
 akdd git-context               # Current git context for the agent
+```
+
+### ClickUp bridge 🆕 (opt-in — off by default)
+```bash
+akdd cu on                     # Activate (asks for CLICKUP_API_TOKEN in .env, validates it)
+akdd cu set-list <list-id>     # Configure which List this project uses
+akdd cu sprint [--auto]        # Pull + classify (with --auto: run the low-risk ones)
+akdd cu done <task-id>         # Mark a task done in ClickUp
+akdd cu comment <task-id> "…"  # Leave a comment on a task
 ```
 
 ### QA / Audit department 🔵 (in chat — audits only, never touches code)
@@ -258,13 +297,21 @@ Instead of a benchmark that proves Agentix wins, we built one designed to **brea
 
 **The 3 cracks found are already repaired and verified** (13/13 mechanical checks, `_output/plan-8-grietas-coliseo.md`): a test that verifies a HIGH-confidence pattern is now untouchable in silence (`test-integrity-gate.cjs`), the Security Gate stopped depending on the Prisma dialect to detect cross-tenant leaks, and the TDD Gate now runs `typecheck` alongside tests — closing the "false green from types" gap in projects using `tsx`/`esbuild`.
 
-The full playbook, the round-by-round scoreboard, and the victim project live on the [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) branch — run the 15 rounds yourself.
+### Second round (v3.16.3–3.16.5) — machinery audit
+
+The Coliseum was re-run on new terrain (FLOTA360, a multi-tenant fleet SaaS with pre-poisoned memory), this time measuring specifically **what the MECHANICAL gates catch on their own**, independent of the model's judgment. Honest finding: the narrow-domain gates (native UI, layout, locks, secrets) are solid iron; the semantic traps leaned on the memory brief + the model. Three mechanical holes were found and **sealed**, each tested against the real large project (Lumo):
+
+- **ORM- and vocabulary-agnostic cross-tenant**: derives the tenant key from your own JWT (`companyId`, `negocioId`, whatever) and flags handlers that read collections without scoping them — 0 false positives across Lumo's 28 real routes.
+- **`related_files` derived from tests**: the Regression Guard no longer goes blind when a behavior is registered on a clean tree.
+- **Long token expiry**: an `expiresIn` over 7 days is now a visible WARN.
+
+The full playbook, the round-by-round scoreboard, and the victim projects live on the [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) branch — run the rounds yourself.
 
 ---
 
 ## Status & transparency
 
-Agentix is **young, evolving software**. The engine's ~50 modules were audited and hardened (v3.15: maturity boundaries with a mechanical lint, gates moved into git hooks, complete `node:sqlite` fallback, upgrade path proven by simulation; v3.15.2: 3 cracks found and repaired by the Coliseum, see above). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
+Agentix is **young, evolving software**. The engine's ~65 modules were audited and hardened (v3.15: maturity boundaries with a mechanical lint, gates moved into git hooks, complete `node:sqlite` fallback, upgrade path proven by simulation; v3.15.2: 3 cracks from the first Coliseum repaired; v3.16: opt-in ClickUp bridge, mechanized L4 autonomy, and 3 more mechanical holes sealed by the Coliseum's second round — see above). Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
 The real promise, without inflation:
 

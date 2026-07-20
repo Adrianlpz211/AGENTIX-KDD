@@ -42,9 +42,9 @@ Agentix tiene muchos órganos, pero solo tres piezas. Si alguna vez te pierdes e
 
 | | Pieza | Qué hace | Sus órganos |
 |---|-------|----------|-------------|
-| ⚓ | **Ancla** — memoria | Recuerda decisiones, reglas, errores y la estructura del código entre sesiones, y trae lo relevante en el momento justo. | Memoria 4 capas (CoALA) · grafo de código AST con precisión de líneas · búsqueda híbrida BM25+vectorial · anclas de símbolos · curación autónoma (MemCurator) · telemetría de gates (la "libreta") |
-| 🔧 | **Palanca** — verificación | Antes de aceptar un cambio, comprueba mecánicamente que no rompe lo que ya funcionaba. Si duda, **frena del lado seguro**. Jamás declara "verde" en falso. | Regression Guard (HIT/MISS/DOUBT por líneas) · TDD Gate · Spec Gate + escáner de valores de negocio · Security Gate (secretos/PII/inyección) · Browser Gate (Chrome/Edge real) · UI Native Gate · hooks de git pre/post-commit |
-| 🔨 | **Martillo** — autonomía | Ejecuta ciclos completos de desarrollo con correa: analiza, construye, prueba, aprende, y se recupera de frenazos — reportándote todo. | Pipeline `aa:` · MODO LEGIÓN (sub-agentes en paralelo solo para leer/juzgar) · QA 4 lentes · departamento `audit:` (7 auditores) · Creative Engine · protocolo RECOVERY · locks multi-instancia |
+| ⚓ | **Ancla** — memoria | Recuerda decisiones, reglas, errores y la estructura del código entre sesiones, y trae lo relevante en el momento justo. | Memoria 4 capas (CoALA) · grafo de código AST con precisión de líneas · búsqueda híbrida BM25+vectorial · anclas de símbolos · descripciones en lenguaje natural por archivo · curación autónoma (MemCurator) · telemetría de gates (la "libreta") |
+| 🔧 | **Palanca** — verificación | Antes de aceptar un cambio, comprueba mecánicamente que no rompe lo que ya funcionaba. Si duda, **frena del lado seguro**. Jamás declara "verde" en falso. | Regression Guard (HIT/MISS/DOUBT por líneas) · TDD Gate · Spec Gate + escáner de valores de negocio derivados de tu memoria · Security Gate (secretos/PII/inyección + cross-tenant agnóstico de ORM) · Browser Gate (Chrome/Edge real) · UI Native Gate · UI Layout Memory (posición/tamaño de UI) · hooks de git pre/post-commit |
+| 🔨 | **Martillo** — autonomía | Ejecuta ciclos completos de desarrollo con correa: analiza, construye, prueba, aprende, y se recupera de frenazos — reportándote todo. | Pipeline `aa:` · MODO LEGIÓN (sub-agentes en paralelo solo para leer/juzgar) · QA 4 lentes · departamento `audit:` (7 auditores) · Creative Engine · protocolo RECOVERY (mecanizado) · locks multi-instancia · puente ClickUp (opt-in) |
 
 **La propiedad medida que define la armadura:** cuando Agentix duda, protege. Medido contra un parser real: de 1,989 símbolos comparados, el error de rango cae del lado seguro en el **99.75%** de los casos (del lado peligroso: 5 casos, todos ≤5 líneas).
 
@@ -97,11 +97,38 @@ audit: auditar               ← 7 auditores en paralelo; solo leen, jamás toca
 
 ---
 
+## 🆕 Puente ClickUp — que los sprints entren solos (v3.16, opt-in)
+
+Si tu equipo apunta el trabajo en **ClickUp**, Agentix puede traer las tareas de una Lista, cotejarlas contra tu proyecto y armar el "sprint sólido" — sin que copies y pegues tickets a mano. **Apagado por defecto** (como los hooks o los embeddings): no hace nada hasta que lo prendes a propósito.
+
+```bash
+akdd cu on                     # activa el puente (pide CLICKUP_API_TOKEN en tu .env, lo valida)
+akdd cu set-list <list-id>     # qué Lista de ClickUp usa este proyecto (una sola vez)
+akdd cu sprint                 # trae + clasifica + muestra (no ejecuta nada)
+akdd cu sprint --auto          # corre solo lo que pasa el filtro de bajo riesgo
+```
+
+Cada tarea se clasifica **cotejándola contra tu código y tu memoria** — no a ciegas:
+
+| | Categoría | Qué significa |
+|---|---|---|
+| 🟢 | **Relevante clara** | Hay evidencia directa en tu código de que esto ya existe |
+| 🔵 | **Relevante nueva** | No existe aún, pero encaja con el dominio del proyecto (trabajo nuevo legítimo) |
+| 🟡 | **Ambigua** | Descripción insuficiente → Modo Explore: pregunta antes de construir |
+| 🔴 | **Sin rastro** | Cero relación con el proyecto → se salta, con nota en ClickUp |
+
+**El `--auto` es pseudo-L5, no L5 ciego.** Una tarea corre sola SOLO si es *relevante clara*, no toca archivos críticos (auth/middleware), no contradice un valor de negocio de tu memoria, no toca autenticación, no es un cambio estructural grande, y trae descripción con sustancia. Todo lo demás espera tu confirmación — el flag no es "confía en todo", es "confía en lo que ya demostró ser obviamente seguro". Al cerrar limpio marca la tarea como hecha en ClickUp; ante cualquier duda, solo deja un comentario y la deja para revisión humana.
+
+> El token de ClickUp es por cuenta (uno por cliente) y se pone UNA vez en el `.env` del proyecto — el cliente que carga tareas en ClickUp nunca toca nada. Funciona igual en Claude Code y Cursor.
+
+---
+
 ## Qué pasa solo, sin que escribas nada
 
 | Cuándo | Qué corre automáticamente |
 |--------|----------------------------|
 | En cada **commit** de git | **Pre-commit** (v3.15): escáner de valores de negocio + escudo de seguridad sobre lo staged — visible, nunca bloquea. **Post-commit**: cierra el ciclo, acumula contratos, indexa el código, sincroniza el grafo. |
+| En cada **post-cycle** (v3.16) | Escaneo automático de integridad Spec/Test (valores de negocio y títulos de test que cambiaron) + UI Layout Memory (posiciones/tamaños de UI registrados que se revierten) + registro de RECOVERED cuando un gate frenado vuelve a pasar limpio — todo mecánico, sin depender de que el modelo se acuerde. |
 | Dentro de cada **`aa:`** | Brief de riesgo del Context Enricher, gates, tests, QA 4 lentes, registro de lo aprendido. |
 | Cada **5 ciclos** | Checkpoint para retomar en otro chat u otra máquina. |
 | En **init / update** | Hooks instalados solos, schema migrado solo, índice reconstruido solo si el motor cambió de versión. |
@@ -115,6 +142,8 @@ Desde v3.15, cada protección queda anotada en la libreta (`gate_events`) con su
 **🥇 Probado en batalla** (uso real repetido): pipeline `aa:`, memoria 4 capas + búsqueda híbrida, gates clásicos (Spec/TDD/Security/Regression), registro automático por commit, checkpoints, locks multi-instancia, dashboard, MCP (54 herramientas), contención por líneas, Front/Back en paralelo (confirmado con ejecución solapada real).
 
 **🥈 Verificado con fixtures/navegador** (escenarios controlados, aún sin meses de producción): Browser Gate por comportamiento, catálogo de endpoints de 10 frameworks (Express/Fastify/NestJS/Flask/FastAPI/Django/Rails/Laravel/gin/Spring), Ojos UI (forms/selects/required/CSS como nodos del grafo), telemetría + promoción de confianza por mérito, emparejamiento error→cura por anclas, medidor de cobertura, protocolo RECOVERY, hooks pre-commit, manifiesto de madurez del motor con lint mecánico de fronteras.
+
+**🥉 Nuevo en v3.16, probado contra proyecto real (aún sin meses de producción)**: puente ClickUp (pull + clasificación + `--auto` con filtro de elegibilidad — probado contra cuenta real, 13 tareas), UI Layout Memory (memoria de posición/tamaño de UI), cross-tenant agnóstico de ORM (probado contra las 28 rutas reales de Lumo, 0 falsos positivos), descripciones en lenguaje natural por archivo (`akdd describe`), visita guiada y overlay de cambios del dashboard, clasificador de cambios COSMETIC/STRUCTURAL.
 
 **🥉 Implementado sin confirmación pública**: colaboración de equipo (beta privada), escalada del Browser Gate a STOP (se gana con semanas de uso).
 
@@ -217,7 +246,17 @@ node .agentic/grafo/madurez-lint.cjs             # Fronteras de madurez del moto
 ### Motor de código
 ```bash
 akdd ast [stats|symbols <f>]   # Índice AST del proyecto (auto-migra por versión)
+akdd describe [área]           # Descripciones en lenguaje natural por archivo (panel "¡NO ENTIENDO!")
 akdd git-context               # Contexto git actual para el agente
+```
+
+### Puente ClickUp 🆕 (opt-in — apagado por defecto)
+```bash
+akdd cu on                     # Activar (pide CLICKUP_API_TOKEN en .env, lo valida)
+akdd cu set-list <list-id>     # Configurar qué Lista usa este proyecto
+akdd cu sprint [--auto]        # Traer + clasificar (con --auto: correr lo de bajo riesgo)
+akdd cu done <task-id>         # Marcar tarea completada en ClickUp
+akdd cu comment <task-id> "…"  # Dejar comentario en una tarea
 ```
 
 ### Departamento QA 🔵 (en el chat — solo audita, jamás toca código)
@@ -258,13 +297,21 @@ En vez de un benchmark que demuestra que Agentix gana, construimos uno diseñado
 
 **Las 3 grietas encontradas ya están reparadas y verificadas** (13/13 checks mecánicos, `_output/plan-8-grietas-coliseo.md`): un test que verifica un patrón de confianza ALTA ahora es intocable en silencio (`test-integrity-gate.cjs`), el Security Gate dejó de depender del idioma Prisma para detectar fugas cross-tenant, y el TDD Gate corre `typecheck` además de los tests — cerrando el hueco de "verde falso por tipos" en proyectos que usan `tsx`/`esbuild`.
 
-El playbook completo, el marcador ronda a ronda y el proyecto víctima están en la rama [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) — corre las 15 rondas tú mismo.
+### Segunda ronda (v3.16.3–3.16.5) — auditoría de maquinaria
+
+Se volvió a correr el Coliseo sobre un terreno nuevo (FLOTA360, SaaS de flotas multi-tenant con memoria pre-envenenada), esta vez midiendo específicamente **qué atrapan los gates MECÁNICOS por su cuenta**, independiente del juicio del modelo. Hallazgo honesto: los gates de dominio acotado (UI nativa, layout, locks, secretos) son hierro sólido; las trampas semánticas dependían del brief de memoria + el modelo. Se encontraron y **sellaron 3 huecos mecánicos**, cada uno probado contra el proyecto real grande (Lumo):
+
+- **Cross-tenant agnóstico de ORM y de vocabulario**: deriva la clave de tenant de tu propio JWT (`companyId`, `negocioId`, lo que sea) y marca handlers que leen colecciones sin acotarlas — 0 falsos positivos en las 28 rutas reales de Lumo.
+- **`related_files` derivado de los tests**: el Regression Guard ya no queda ciego cuando un behavior se registra con árbol limpio.
+- **Expiración de token larga**: un `expiresIn` que supera 7 días ahora es WARN visible.
+
+El playbook completo, el marcador ronda a ronda y los proyectos víctima están en la rama [`coliseo-arena`](https://github.com/Adrianlpz211/AGENTIX-KDD/tree/coliseo-arena) — corre las rondas tú mismo.
 
 ---
 
 ## Estado y transparencia
 
-Agentix es software **joven y en evolución**. Los ~50 módulos del motor fueron auditados y endurecidos (v3.15: fronteras de madurez con lint mecánico, gates movidos a hooks de git, fallback completo a `node:sqlite`, ruta de upgrade probada con simulación; v3.15.2: 3 grietas encontradas y reparadas por el Coliseo, ver arriba). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
+Agentix es software **joven y en evolución**. Los ~65 módulos del motor fueron auditados y endurecidos (v3.15: fronteras de madurez con lint mecánico, gates movidos a hooks de git, fallback completo a `node:sqlite`, ruta de upgrade probada con simulación; v3.15.2: 3 grietas del primer Coliseo reparadas; v3.16: puente ClickUp opt-in, autonomía L4 mecanizada, y 3 huecos mecánicos más sellados por la segunda ronda del Coliseo — ver arriba). Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
 
 La promesa real, sin inflar:
 
