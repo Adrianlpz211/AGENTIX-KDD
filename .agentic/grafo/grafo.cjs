@@ -203,6 +203,13 @@ function initDB() {
 }
 
 function migrateDB(db) {
+  // v3.16.8 — arreglo de RAÍZ: en vez de que cada script mantenga su propia
+  // lista dispersa de ALTER TABLE (la causa estructural del bug de
+  // biocaresoft-saas), schema-columns.cjs es la fuente única de verdad de
+  // TODAS las columnas conocidas del motor. Se corre PRIMERO acá porque
+  // migrateDB() es el camino más transitado (cada `sync`, cada `aa:`).
+  try { require('./schema-columns.cjs').ensureAllColumns(db); } catch {}
+
   const alteraciones = [
     "ALTER TABLE nodos ADD COLUMN ultima_validacion TEXT DEFAULT (datetime('now'))",
     // v3.16.7 — bug GLOBAL encontrado en biocaresoft-saas (2026-07-21): sincronizar()

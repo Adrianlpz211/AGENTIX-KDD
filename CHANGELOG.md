@@ -1,5 +1,36 @@
 # Changelog — Agentic KDD
 
+## [3.16.8] — 2026-07-21
+
+### Arreglo de RAÍZ — schema centralizado (fin de la clase de bug de v3.16.7)
+El bug de v3.16.7 no era un accidente puntual: las columnas de `nodos` se
+creaban repartidas en **4 archivos distintos**, las de `protected_behaviors`
+en 2, y **39 scripts del motor** abren su propia conexión a la DB sin pasar
+por un punto central — cualquiera podía escribir antes de que otro creara su
+columna, con el mismo resultado silencioso. Encontrado auditando el motor
+completo tras el caso de biocaresoft-saas, no esperando el próximo reporte.
+
+- **`schema-columns.cjs` (nuevo)** — fuente única de verdad de TODAS las
+  columnas `ALTER TABLE` conocidas del motor (32 en total, 7 tablas). Agregar
+  una columna nueva a futuro = una línea acá, no un archivo más disperso.
+- **`migrateDB()` de grafo.cjs la llama primero** — el camino más transitado
+  (cada `sync`, cada `aa:`) repara solo, sin que nadie tenga que acordarse.
+- **`akdd health --fix` ahora es un reparador real** — corre
+  `schema-columns.cjs` incondicionalmente antes de cualquier otro fix,
+  reportando exactamente qué columnas faltaban y cuáles se aplicaron. Es el
+  comando que un cliente con un proyecto ya dañado debe correr.
+- **Importante — qué SÍ se recupera y qué NO**: los nodos/símbolos son cachés
+  derivados de una fuente que sigue viva (`.md`, código) — al reparar el
+  schema y volver a sincronizar, se reconstruyen completos, sin pérdida. Lo
+  que NO se recupera es el HISTORIAL que nunca se registró (ciclos pasados,
+  progresión de confianza de un behavior) — no vive en ningún archivo fuente,
+  no hay de dónde reconstruirlo; el proyecto arranca sano desde ahora.
+- Verificado: reproducido el estado exacto del bug (schema roto desde cero),
+  `akdd health --fix` lo repara y el `sync` posterior persiste de verdad;
+  aplicado también al cliente real afectado (biocaresoft-saas: 8 columnas más
+  encontradas y reparadas, además de las 2 de ayer); Lumo y el proyecto propio
+  sin regresión.
+
 ## [3.16.7] — 2026-07-21
 
 ### 🔴 Bug crítico GLOBAL — proyectos nuevos con el KDD Memory vacío para siempre

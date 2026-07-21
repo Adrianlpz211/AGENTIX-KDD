@@ -366,6 +366,29 @@ function runHealthCheck(projectRoot, opts = {}) {
 // ─── AUTO-FIX ─────────────────────────────────────────────────────────────────
 
 function autoFix(projectRoot) {
+  // v3.16.8 — reparación de raíz, SIEMPRE primero: aplica todas las columnas
+  // conocidas del motor (schema-columns.cjs), sin importar qué check haya
+  // fallado. Esto es lo que convierte `akdd health --fix` en un repair real
+  // para un proyecto ya dañado por el bug de columnas dispersas — no hace
+  // falta que health-check tenga un check específico para cada combinación
+  // posible de columna faltante, cubre todas de una vez.
+  try {
+    const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+    if (fs.existsSync(dbPath)) {
+      let db;
+      try { db = new (require('better-sqlite3'))(dbPath); }
+      catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
+      const sc = require('./schema-columns.cjs');
+      const antes = sc.checkMissingColumns(db);
+      const r = sc.ensureAllColumns(db);
+      try { db.close(); } catch {}
+      if (antes.length > 0) {
+        console.log(`\n[HEALTH-CHECK] Reparando schema — ${antes.length} columna(s) faltante(s): ${antes.join(', ')}`);
+        console.log(`  ✅ Aplicadas (${r.aplicadas}/${r.total} revisadas)\n`);
+      }
+    }
+  } catch (e) { /* fail-soft — el resto del autoFix sigue igual */ }
+
   const { results } = runHealthCheck(projectRoot);
   const failed = results.filter(r => !r.ok && r.fix);
 
