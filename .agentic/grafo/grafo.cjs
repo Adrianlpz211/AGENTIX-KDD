@@ -205,6 +205,15 @@ function initDB() {
 function migrateDB(db) {
   const alteraciones = [
     "ALTER TABLE nodos ADD COLUMN ultima_validacion TEXT DEFAULT (datetime('now'))",
+    // v3.16.7 — bug GLOBAL encontrado en biocaresoft-saas (2026-07-21): sincronizar()
+    // INSERTA en archivos_aplica/hash_contexto, pero esas columnas SOLO las creaba
+    // knowledge-validator.cjs (que corre dentro del post-cycle). En un proyecto
+    // fresco donde `akdd sync` corre ANTES del primer post-cycle, el INSERT tronaba
+    // "no column named archivos_aplica", el adaptador se lo tragaba, y sync reportaba
+    // "N nodos nuevos" con 0 persistidos — dashboard vacío para siempre. El módulo
+    // que ESCRIBE la columna debe garantizar que existe, sin depender de otro.
+    "ALTER TABLE nodos ADD COLUMN archivos_aplica TEXT DEFAULT '[]'",
+    "ALTER TABLE nodos ADD COLUMN hash_contexto TEXT",
     "ALTER TABLE ciclos ADD COLUMN tipo_tarea TEXT DEFAULT 'feature'",
     "ALTER TABLE ciclos ADD COLUMN memory_trace TEXT DEFAULT '[]'",
     "ALTER TABLE ciclos ADD COLUMN snapshot_inicio TEXT",
@@ -577,8 +586,24 @@ Razón: ${ep.razon_resultado || 'ver episodio original'}`;
   } catch(e) {}
   // Forzar checkpoint WAL para que los datos queden en la DB principal
   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch(e) {}
+
+  // v3.16.7 — anti-éxito-falso: el adaptador traga errores de INSERT en
+  // try/catch, así que `total`/`nuevos` cuentan intentos, no filas reales.
+  // Si contamos 6 "nuevos" pero la tabla tiene 0, algo se tragó los writes
+  // (schema desalineado) — hay que GRITARLO, no reportar verde falso (el bug
+  // exacto de biocaresoft-saas: sync decía "6 nuevos" con 0 persistidos).
+  let realCount = null;
+  try { realCount = (db.get('SELECT COUNT(*) n FROM nodos') || {}).n; } catch {}
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch(e) {}
   db.close();
-  console.log(`\n  Grafo sincronizado — ${total} nodos (${nuevos} nuevos, ${actualizados} actualizados)`);
+
+  if (total > 0 && realCount != null && realCount === 0) {
+    console.log(`\n  ⚠️  ALERTA: sync intentó escribir ${total} nodo(s) pero la tabla nodos quedó en 0.`);
+    console.log(`  Los INSERT se están tragando en silencio — casi seguro un schema desalineado.`);
+    console.log(`  Corre:  node .agentic/grafo/grafo.cjs sync   (ya migra las columnas) o  akdd health --fix\n`);
+  } else {
+    console.log(`\n  Grafo sincronizado — ${realCount != null ? realCount : total} nodos (${nuevos} nuevos, ${actualizados} actualizados)`);
+  }
   console.log(`  Motor: ${dbAdapter === 'better-sqlite3' ? 'nativo (<5ms)' : dbAdapter === 'node-sqlite' ? 'node:sqlite (Node.js 22+)' : 'sql.js (<20ms)'}\n`);
 
   // Promoción automática de patrones estructurales (Task 5) — corre siempre,

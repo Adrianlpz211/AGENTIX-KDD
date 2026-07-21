@@ -1,5 +1,27 @@
 # Changelog — Agentic KDD
 
+## [3.16.7] — 2026-07-21
+
+### 🔴 Bug crítico GLOBAL — proyectos nuevos con el KDD Memory vacío para siempre
+Encontrado en un cliente real (biocaresoft-saas): tras días de trabajo, el
+dashboard mostraba "No nodes yet" pese a tener memoria escrita. Causa raíz:
+- `grafo.cjs sincronizar()` INSERTA en las columnas `archivos_aplica` y
+  `hash_contexto`, pero esas columnas solo las creaba `knowledge-validator.cjs`
+  (que corre DENTRO del post-cycle). En un proyecto fresco donde `akdd sync`
+  corre antes del primer post-cycle, el INSERT tronaba "no column named
+  archivos_aplica", el adaptador se lo tragaba en su try/catch, y sync reportaba
+  "N nodos nuevos" con **0 persistidos**. El KDD Memory quedaba vacío para
+  siempre, en silencio. Afectaba a CUALQUIER proyecto nuevo.
+- **Fix 1**: `migrateDB` ahora crea `archivos_aplica`/`hash_contexto` — el
+  módulo que ESCRIBE las columnas garantiza que existan, sin depender de que
+  otro haya corrido antes.
+- **Fix 2 (anti-éxito-falso)**: sync cuenta las filas REALES tras escribir; si
+  intentó escribir N nodos pero la tabla quedó en 0, lo GRITA con la causa
+  probable en vez de reportar verde falso.
+- Verificado: proyecto fresco desde cero ahora persiste nodos; el cliente
+  afectado pasó de 0 a sus 6 nodos reales con un solo `akdd sync`; Lumo (92
+  nodos) y main sin regresión.
+
 ## [3.16.6] — 2026-07-20
 
 ### Huecos #4 y #5 del Coliseo SELLADOS — descubrimiento de tests + estado ruidoso
