@@ -1035,23 +1035,48 @@ function indexFile(db, filePath, projectRoot, importResolver = null) {
   // Insertar símbolos
   // line_end incluido (v3.13): la columna existía en el schema desde v1 pero el
   // INSERT la omitía — aunque alguien la calculara, jamás se escribía.
-  const insertSym = db.prepare(`
-    INSERT OR REPLACE INTO ast_symbols
-      (file, language, symbol_name, kind, line_start, line_end, exported, signature, content_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  //
+  // v3.16.9 — db.prepare() de un INSERT contra una columna que NO existe
+  // truena FUERA del try/catch del loop (antes de que el loop siquiera
+  // empiece) — encontrado probando el peor caso: si eso pasa sin blindar,
+  // un solo archivo con schema desalineado tumba la corrida COMPLETA de
+  // indexado (cientos de archivos), no solo ese archivo. Ahora se degrada
+  // a "este archivo no se pudo indexar" en vez de crashear todo.
+  let insertSym;
+  try {
+    insertSym = db.prepare(`
+      INSERT OR REPLACE INTO ast_symbols
+        (file, language, symbol_name, kind, line_start, line_end, exported, signature, content_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+  } catch (e) {
+    return { symbols: 0, edges: 0, language, alerta: `${relPath}: no se pudo preparar el INSERT de símbolos (${e.message}) — schema desalineado, corre: node .agentic/grafo/schema-columns.cjs fix` };
+  }
 
+  // v3.16.9 — validación anti-éxito-falso generalizada: cada insertSym.run()
+  // ya estaba en su propio try/catch silencioso, y la función de arriba
+  // reportaba `symbols.length` (intentados) SIN verificar cuántos quedaron
+  // realmente en la tabla — el mismo defecto exacto que dejó el KDD Memory
+  // vacío en biocaresoft-saas (v3.16.7), esta vez sobre ast_symbols, que
+  // alimenta Code Structure y la clasificación de tenant/riesgo. Se cuenta
+  // cuántos INSERT tronaron de verdad (no solo se asume que ninguno lo hizo).
+  let symbolErrors = 0;
   for (const sym of symbols) {
     try {
       insertSym.run(relPath, language, sym.symbol_name, sym.kind, sym.line_start || 0, sym.line_end || 0, sym.exported || 0, sym.signature || null, hash);
-    } catch {}
+    } catch { symbolErrors++; }
   }
 
-  // Resolver y insertar edges
-  const insertEdge = db.prepare(`
-    INSERT INTO ast_edges (from_file, to_file, from_symbol, to_symbol, kind, weight)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+  // Resolver y insertar edges — mismo blindaje que insertSym arriba.
+  let insertEdge;
+  try {
+    insertEdge = db.prepare(`
+      INSERT INTO ast_edges (from_file, to_file, from_symbol, to_symbol, kind, weight)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+  } catch (e) {
+    return { symbols: symbols.length, edges: 0, language, alerta: `${relPath}: símbolos OK pero no se pudo preparar el INSERT de edges (${e.message})` };
+  }
 
   for (const edge of edges) {
     let toFile = null;
@@ -1099,7 +1124,23 @@ function indexFile(db, filePath, projectRoot, importResolver = null) {
     } catch {}
   }
 
-  return { symbols: symbols.length, edges: edges.length, language };
+  // Conteo REAL persistido — no el intentado. OJO: la tabla tiene UNIQUE
+  // (file, symbol_name, kind) — INSERT OR REPLACE colapsa a propósito dos
+  // símbolos del MISMO nombre+tipo en el mismo archivo (ej. dos campos de
+  // formulario llamados igual) — eso NO es pérdida, es diseño. Solo alertar
+  // por lo que ese colapso esperado no explica: errores reales de INSERT.
+  let persistidos = null;
+  try { persistidos = (db.prepare('SELECT COUNT(*) n FROM ast_symbols WHERE file = ?').get(relPath) || {}).n; } catch {}
+  const esperados = symbols.length;
+  const clavesUnicas = new Set(symbols.map(s => `${s.symbol_name}|${s.kind}`)).size;
+  const colapsoEsperado = esperados - clavesUnicas; // duplicados legítimos (file,symbol_name,kind)
+  if (persistidos != null && persistidos < esperados - symbolErrors - colapsoEsperado) {
+    return {
+      symbols: esperados, edges: edges.length, language,
+      alerta: `${relPath}: ${esperados} símbolos (${colapsoEsperado} duplicados esperados), ${symbolErrors} error(es) de insert, pero solo ${persistidos} quedaron — pérdida sin explicar`,
+    };
+  }
+  return { symbols: esperados, edges: edges.length, language, persistidos };
 }
 
 // ─── ENLACE CSS→VISTA (Plan 2, Fase A) ────────────────────────────────────────
@@ -1304,9 +1345,17 @@ function indexProject(projectRoot, targetDir = null) {
 
   let indexed = 0, skipped = 0, cached = 0, errors = 0;
   const changedFiles = [];
+  const alertas = [];
 
   for (const file of files) {
-    const result = indexFile(db, file, projectRoot, importResolver);
+    // v3.16.9 — defensa en profundidad: un archivo con algo verdaderamente
+    // inesperado (no solo el schema desalineado que indexFile ya blinda) no
+    // debe tumbar la corrida completa de cientos de archivos — se salta ESE
+    // archivo, se avisa, y sigue con el resto.
+    let result;
+    try { result = indexFile(db, file, projectRoot, importResolver); }
+    catch (e) { result = { error: true, alerta: `${path.relative(projectRoot, file)}: crash inesperado indexando (${e.message}) — archivo saltado, el resto de la corrida sigue` }; }
+    if (result.alerta) alertas.push(result.alerta);
     if (result.cached) cached++;
     else if (result.skipped) skipped++;
     else if (result.error) errors++;
@@ -1315,6 +1364,12 @@ function indexProject(projectRoot, targetDir = null) {
       changedFiles.push(path.relative(projectRoot, file));
       if (indexed % 50 === 0) process.stdout.write(`\r[AST-INDEXER] ${indexed}/${files.length}...`);
     }
+  }
+
+  if (alertas.length) {
+    console.log(`\n⚠️  ${alertas.length} archivo(s) con símbolos que no persistieron del todo (anti-éxito-falso):`);
+    alertas.slice(0, 10).forEach(a => console.log(`   ${a}`));
+    if (alertas.length > 10) console.log(`   ... y ${alertas.length - 10} más`);
   }
 
   process.stdout.write('\n');

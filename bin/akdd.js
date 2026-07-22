@@ -207,6 +207,9 @@ switch (command) {
     break;
   }
 
+  // ── v3.16.9: Doctor (reparación generalizada) ───────────────────────────
+  case 'doctor': runModule('doctor.cjs', ''); break;
+
   // ── Core memory ───────────────────────────────────────────────────────
   case 'sync':    runGrafo('sync'); break;
   case 'graph':   graph(); break;

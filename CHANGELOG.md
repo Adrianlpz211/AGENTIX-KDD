@@ -1,5 +1,46 @@
 # Changelog — Agentic KDD
 
+## [3.16.9] — 2026-07-21
+
+### Anti-éxito-falso generalizado a ast-indexer.cjs + nuevo comando `akdd doctor`
+Continuación directa de la caza de "el motor dice que sí pero no persistió"
+abierta por el bug de v3.16.7/3.16.8 — esta vez en el grafo de código, no en
+la memoria de texto.
+
+- **`ast-indexer.cjs`** — igual que `grafo.cjs sincronizar()`, indexaba
+  símbolos y reportaba éxito sin verificar que de verdad quedaran en
+  `ast_symbols`. Dos huecos reales encontrados y sellados:
+  - `db.prepare()` de los INSERT de símbolos/edges podía tronar por una
+    columna faltante ANTES de que arrancara el loop de un archivo — eso
+    mataba TODO el indexado del resto de archivos en la corrida, no solo
+    ese uno. Ahora cada `.prepare()` está en su propio try/catch con
+    degradación elegante (`alerta` + sigue con el resto).
+  - Después de insertar, se compara lo esperado contra lo que de verdad
+    quedó en la tabla (`SELECT COUNT(*)`), descontando duplicados legítimos
+    del índice `UNIQUE(file, symbol_name, kind)` — solo alerta cuando hay
+    pérdida SIN explicación.
+  - Probado exhaustivamente: Lumo con caché normal (0 alertas), Lumo con
+    reindexado forzado completo (3611 símbolos, exacto, 0 alertas tras
+    corregir el cálculo de duplicados esperados), repro sintético forzando
+    una columna rota de verdad (degrada con `alerta`, no crashea),
+    biocaresoft-saas (352→425 símbolos por cambios reales, 0 alertas).
+- **`akdd doctor` (nuevo comando)** — un solo comando que orquesta los 5
+  mecanismos de reparación que ya existían sueltos: schema-columns,
+  grafo sync, ast-indexer, graph-reviewer --fix, y purga de locks vencidos.
+  No inventa reparación nueva, une la que ya había para que un cliente con
+  un proyecto dañado no tenga que saber cuál de 5 scripts correr. Salta con
+  gracia (no crashea) los pasos que un motor viejo instalado no trae todavía
+  (ej. `graph-reviewer.cjs`), recomendando `akdd update`.
+  - Probado contra Lumo (los 5 pasos corren de verdad, sin fallos) y contra
+    biocaresoft-saas (motor más viejo, paso 4/5 se salta con gracia en vez
+    de crashear con `MODULE_NOT_FOUND`).
+- Importante — alcance real de `akdd update` + `akdd doctor`: repara el
+  MOTOR y reconstruye cachés derivados (nodos, símbolos AST) desde la fuente
+  viva (`.md`, código) sin pérdida. NO repara historial que nunca se llegó
+  a registrar (ciclos pasados, progresión de confianza ya perdida) — eso no
+  vive en ningún archivo fuente reconstruible; el proyecto queda sano desde
+  el momento de la reparación en adelante, no retroactivamente en ese punto.
+
 ## [3.16.8] — 2026-07-21
 
 ### Arreglo de RAÍZ — schema centralizado (fin de la clase de bug de v3.16.7)
