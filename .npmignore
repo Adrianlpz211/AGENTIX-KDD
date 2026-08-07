@@ -25,3 +25,25 @@ docs/superpowers/
 repomix-output.xml
 life-logbook-dashboard-agentix-10072026.md
 RECUPERADO-DE-LUMO-14-07-2026/
+
+# Documentos personales/sesión (22/07/2026) — NUNCA publicar
+*.pdf
+life-logbook-*.md
+chat-migration-*.md
+INFORME-*.md
+SESION-RESUMEN.md
+PLAN-7-PIEZAS.md
+PLAN-CLICKUP-BRIDGE.md
+
+# Estado local del propio repo (no es parte del motor que se instala)
+.agentic/diff-overlay.json
+.agentic/knowledge-graph.json
+.agentic/tour.json
+.agentic/llms.txt
+.agentic/llms-full.txt
+.agentic/specs/
+_output/
+_LOCKS.md
+.claude/
+dev.log
+dashboard-original.cjs
