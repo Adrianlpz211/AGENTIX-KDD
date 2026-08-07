@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.16.9-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.17.0-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -219,6 +219,8 @@ akdd hooks [status]            # Install / check git hooks (pre + post commit)
 akdd mcp                       # (Re)configure MCP for Cursor / Claude Code / VS Code
 akdd health [--fix]            # System diagnostics (--fix repairs what it can)
 akdd doctor                    # One command, 5 repair steps: schema, sync, AST, graph integrity, locks
+akdd tokens [files...]         # CSS Token Gate — no args: token inventory + tokenization map; with files: gate
+# Visual snapshots (front-end protected_behaviors): browser-gate.cjs <url> --snapshot=<view> / --compare=<view>
 akdd dashboard                 # Visual board at localhost:3847
 ```
 

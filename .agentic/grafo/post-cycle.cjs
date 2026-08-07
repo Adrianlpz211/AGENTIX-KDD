@@ -785,6 +785,31 @@ async function main() {
     }
   } catch { if (!silent) console.log('  2.8 UI Layout Memory... ⚠️  omitido'); }
 
+  // Step 2.9: CSS Token Gate — mitad mecánica de la NORMA CSS TOKENS de
+  // 03-front.md (v3.17.0, caso real salud360: valores visuales compartidos
+  // regados a mano en N archivos → ajustar una vista rompe otra). Corre solo
+  // sobre los CSS/HTML del último commit y solo defiende tokens que el
+  // proyecto YA definió — sin tokens, sin ruido. Fail-soft, WARN-only,
+  // misma disciplina que 2.7 y 2.8.
+  try {
+    const ctgPath = path.join(GRAFO_DIR, 'css-token-gate.cjs');
+    const cssFiles = commitFilesForScans.filter(f => /\.(css|html|htm)$/i.test(f));
+    if (fs.existsSync(ctgPath) && cssFiles.length) {
+      const ctg = require(ctgPath);
+      const ctgRes = ctg.runCssTokenGate(cssFiles, ROOT);
+      if (!silent) {
+        const n = (ctgRes.findings || []).length;
+        console.log(ctgRes.sinTokens
+          ? '  2.9 CSS Token Gate... — (proyecto sin tokens definidos)'
+          : n > 0
+            ? `  2.9 CSS Token Gate... ⚠️  ${n} valor(es) hardcodeados que ya tienen token — ver libreta (gate_events)`
+            : '  2.9 CSS Token Gate... ✅ sin hallazgos');
+      }
+    } else if (!silent) {
+      console.log('  2.9 CSS Token Gate... — (sin archivos CSS/HTML en este commit)');
+    }
+  } catch { if (!silent) console.log('  2.9 CSS Token Gate... ⚠️  omitido'); }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);

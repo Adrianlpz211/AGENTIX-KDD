@@ -19,8 +19,21 @@
  * no la instala solo (evita una descarga de 100-300MB sin que el dev la
  * pida) — devuelve un mensaje accionable con el comando exacto.
  *
+ * Snapshots visuales (v3.17.0): el equivalente front de protected_behaviors.
+ * Una vista que ya está bien se "fotografía" como referencia; después de
+ * cualquier cambio, --compare vuelve a fotografiar y compara píxel a píxel
+ * (con tolerancia de antialiasing, vía png-diff.cjs — cero dependencias
+ * nuevas). Si una vista vieja cambió sin que nadie la tocara a propósito,
+ * el gate lo GRITA con el % exacto y una imagen de diff marcando dónde.
+ * Referencias en .agentic/snapshots/ · diffs en _output/. WARN-only, como
+ * todo el gate — el juicio de "¿este cambio visual es intencional?" sigue
+ * siendo del dev; si lo es, se re-corre --snapshot y la referencia se
+ * actualiza.
+ *
  * Uso:
  *   node .agentic/grafo/browser-gate.cjs <url> [--own] [--out=_output]
+ *   node .agentic/grafo/browser-gate.cjs <url> --snapshot=<vista>            → guardar referencia
+ *   node .agentic/grafo/browser-gate.cjs <url> --compare=<vista> [--threshold=0.5]  → comparar contra referencia
  */
 
 const fs = require('fs');
@@ -214,6 +227,146 @@ async function runBrowserGate(url, opts) {
   }
 }
 
+// ─── SNAPSHOTS VISUALES (v3.17.0) ────────────────────────────────────────────
+
+const SNAPSHOT_VIEWPORT = { width: 1280, height: 800 };
+const SNAPSHOT_SETTLE_MS = 500;
+
+function snapshotDir(projectRoot) {
+  const dir = path.join(projectRoot, '.agentic', 'snapshots');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function sanitizarNombre(name) {
+  return String(name || 'vista').replace(/[^a-z0-9-_]/gi, '_').slice(0, 80);
+}
+
+/** Captura reproducible: viewport fijo, animaciones reducidas, settle corto.
+ *  Sin esto, dos capturas de la MISMA página darían diffs de ruido. */
+async function capturarPagina(browser, url) {
+  const page = await browser.newPage({ viewport: SNAPSHOT_VIEWPORT });
+  const consoleErrors = [];
+  page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 200)); });
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+  } catch { /* playwright viejo sin emulateMedia — la captura sigue */ }
+  await page.goto(url, { timeout: NAV_TIMEOUT_MS, waitUntil: 'load' });
+  await page.waitForTimeout(SNAPSHOT_SETTLE_MS);
+  const buf = await page.screenshot({ fullPage: true });
+  await page.close();
+  return { buf, consoleErrors };
+}
+
+/** Guarda la referencia visual de una vista. Re-correrlo la actualiza
+ *  (eso es lo correcto cuando el cambio visual fue intencional). */
+async function runSnapshot(url, name, opts) {
+  opts = opts || {};
+  const projectRoot = opts.projectRoot || process.cwd();
+  const nombre = sanitizarNombre(name);
+  let browser = null;
+  try {
+    browser = await launchBrowser(opts.mode === 'own' ? 'own' : 'system');
+    const { buf } = await capturarPagina(browser, url);
+    const dest = path.join(snapshotDir(projectRoot), `${nombre}.png`);
+    const existia = fs.existsSync(dest);
+    fs.writeFileSync(dest, buf);
+    return {
+      passed: true,
+      snapshot: dest,
+      message: `✅ SNAPSHOT ${existia ? 'actualizado' : 'guardado'} — "${nombre}" (${SNAPSHOT_VIEWPORT.width}x${SNAPSHOT_VIEWPORT.height}, página completa)\n   Referencia: ${dest}`,
+    };
+  } catch (err) {
+    return { passed: false, warn: true, message: `⚠️  SNAPSHOT WARN — no se pudo capturar "${nombre}": ${err.message.split('\n')[0]}` };
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+/** Compara el estado actual de una vista contra su referencia guardada.
+ *  WARN si el % de píxeles distintos supera el umbral (default 0.5%). */
+async function runCompare(url, name, opts) {
+  opts = opts || {};
+  const projectRoot = opts.projectRoot || process.cwd();
+  const threshold = opts.threshold != null ? opts.threshold : 0.5;
+  const nombre = sanitizarNombre(name);
+  const refPath = path.join(snapshotDir(projectRoot), `${nombre}.png`);
+
+  if (!fs.existsSync(refPath)) {
+    return {
+      passed: false, warn: true, sinReferencia: true,
+      message: `⚠️  SNAPSHOT COMPARE — no hay referencia para "${nombre}". Créala primero:\n   node .agentic/grafo/browser-gate.cjs ${url} --snapshot=${nombre}`,
+    };
+  }
+
+  let browser = null;
+  try {
+    browser = await launchBrowser(opts.mode === 'own' ? 'own' : 'system');
+    const { buf } = await capturarPagina(browser, url);
+    const refBuf = fs.readFileSync(refPath);
+
+    const pngDiff = require(path.join(__dirname, 'png-diff.cjs'));
+    const d = pngDiff.diffPNG(refBuf, buf, { tolerance: opts.tolerance });
+
+    // Fail-soft: PNG no decodificable (formato inesperado) → comparación de bytes
+    if (!d.supported) {
+      const igual = refBuf.equals(buf);
+      return igual
+        ? { passed: true, message: `✅ SNAPSHOT COMPARE PASS — "${nombre}" idéntico byte a byte (comparación de píxeles no disponible para este formato)` }
+        : { passed: false, warn: true, message: `⚠️  SNAPSHOT COMPARE WARN — "${nombre}" difiere de la referencia (bytes distintos; comparación de píxeles no disponible para este formato). Si el cambio es intencional: re-correr con --snapshot=${nombre}` };
+    }
+
+    const registrar = (verdict, detalle) => {
+      try {
+        const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
+        if (!fs.existsSync(dbPath)) return;
+        const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
+        let db; try { db = new (require('better-sqlite3'))(dbPath); } catch { db = new (require('node:sqlite').DatabaseSync)(dbPath); }
+        gt.recordGateEvent(db, { gate: 'snapshot', verdict, file: nombre, detalle });
+        try { db.close(); } catch {}
+      } catch { /* nunca bloquea */ }
+    };
+
+    if (d.dimsMismatch) {
+      registrar('WARN', { motivo: 'dims', ref: d.dimsA, actual: d.dimsB });
+      return {
+        passed: false, warn: true, dims: { ref: d.dimsA, actual: d.dimsB },
+        message: `⚠️  SNAPSHOT COMPARE WARN — "${nombre}" cambió de TAMAÑO: referencia ${d.dimsA} vs actual ${d.dimsB}.\n` +
+          `   El alto de página completa cambió — se agregó/quitó contenido, o la vista creció/encogió.\n` +
+          `   Si es intencional: node .agentic/grafo/browser-gate.cjs ${url} --snapshot=${nombre}`,
+      };
+    }
+
+    if (d.diffPct <= threshold) {
+      registrar('PASS', { diffPct: d.diffPct });
+      return {
+        passed: true, diffPct: d.diffPct,
+        message: `✅ SNAPSHOT COMPARE PASS — "${nombre}": ${d.diffPct}% de píxeles distintos (umbral ${threshold}%)`,
+      };
+    }
+
+    // Guardar imagen de diff como evidencia visual
+    let diffPath = null;
+    if (d.diffImage) {
+      const outDir = resolveOutputDir(projectRoot, opts.outDir || '_output');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      diffPath = path.join(outDir, `snapshot-diff-${nombre}-${stamp}.png`);
+      try { fs.writeFileSync(diffPath, d.diffImage); } catch { diffPath = null; }
+    }
+    registrar('WARN', { diffPct: d.diffPct, diffPixels: d.diffPixels });
+    return {
+      passed: false, warn: true, diffPct: d.diffPct, diffImage: diffPath,
+      message: `⚠️  SNAPSHOT COMPARE WARN — "${nombre}" cambió visualmente: ${d.diffPct}% de píxeles distintos (${d.diffPixels.toLocaleString()} px, umbral ${threshold}%)\n` +
+        (diffPath ? `   Diff visual (rojo = lo que cambió): ${diffPath}\n` : '') +
+        `   Si el cambio es intencional: node .agentic/grafo/browser-gate.cjs ${url} --snapshot=${nombre}`,
+    };
+  } catch (err) {
+    return { passed: false, warn: true, message: `⚠️  SNAPSHOT COMPARE WARN — no se pudo comparar "${nombre}": ${err.message.split('\n')[0]}` };
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
 // ─── DERIVACIÓN DE CHECKS DESDE LA MEMORIA (Plan 2, Fase C) ───────────────────
 
 // symbol_name del índice → selector CSS del navegador. Los nombres @L<n>
@@ -297,10 +450,31 @@ if (require.main === module) {
 
   if (!url) {
     console.log('Uso: node browser-gate.cjs <url> [--own] [--out=_output] [--view=<archivo-vista>] [--checks-file=checks.json]');
+    console.log('     node browser-gate.cjs <url> --snapshot=<vista>                    → guardar/actualizar referencia visual');
+    console.log('     node browser-gate.cjs <url> --compare=<vista> [--threshold=0.5]   → comparar contra la referencia');
     console.log('Por defecto usa Chrome/Edge instalado (modo system). --own usa la copia de Playwright si está instalada.');
     console.log('--view deriva checks UI (element-exists/required-attr/select-usable) de los behaviors protegidos de esa vista.');
     console.log('Con .agentic/browser-gate.json ({port, routes}) la URL puede omitirse si --view está mapeada.');
     process.exit(0);
+  }
+
+  // Modos snapshot/compare (v3.17.0) — referencias visuales por vista
+  const snapArg = args.find(a => a.startsWith('--snapshot='));
+  const compareArg = args.find(a => a.startsWith('--compare='));
+  if (snapArg || compareArg) {
+    const thresholdArg = args.find(a => a.startsWith('--threshold='));
+    const threshold = thresholdArg ? parseFloat(thresholdArg.split('=')[1]) : 0.5;
+    const fn = snapArg
+      ? runSnapshot(url, snapArg.split('=')[1], { mode, outDir })
+      : runCompare(url, compareArg.split('=')[1], { mode, outDir, threshold });
+    fn.then(result => {
+      console.log(result.message);
+      process.exit(0); // WARN, no STOP — mismo criterio que el resto del gate
+    }).catch(err => {
+      console.error('SNAPSHOT ERROR:', err.message);
+      process.exit(0);
+    });
+    return;
   }
 
   let checks = [];
@@ -318,4 +492,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runBrowserGate, deriveChecksForView, symbolToSelector };
+module.exports = { runBrowserGate, runSnapshot, runCompare, deriveChecksForView, symbolToSelector };

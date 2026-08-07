@@ -210,6 +210,12 @@ switch (command) {
   // ── v3.16.9: Doctor (reparación generalizada) ───────────────────────────
   case 'doctor': runModule('doctor.cjs', ''); break;
 
+  // ── v3.17.0: CSS Token Gate ──────────────────────────────────────────────
+  // Sin args → scan (inventario de tokens + oportunidades de tokenización).
+  // Con archivos → gate sobre esos archivos (WARN si hay valores hardcodeados
+  // que ya existen como token).
+  case 'tokens': runModule('css-token-gate.cjs', args.slice(1).map(f => `"${f}"`).join(' ')); break;
+
   // ── Core memory ───────────────────────────────────────────────────────
   case 'sync':    runGrafo('sync'); break;
   case 'graph':   graph(); break;

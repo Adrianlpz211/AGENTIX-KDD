@@ -1,5 +1,40 @@
 # Changelog — Agentic KDD
 
+## [3.17.0] — 2026-07-22
+
+### NORMA CSS TOKENS + Snapshots visuales — el front por fin tiene armadura
+Caso real que lo motiva (salud360): valores visuales compartidos (tamaño del
+combo estándar, anchos de campos, colores) copiados a mano en 24 archivos CSS
+— una vista nueva se hace "a su manera", se ajusta, y se rompen campos de
+otras vistas que llevaban 15 rondas bien. El Regression Guard protege backend
+con tests; NADA protegía la apariencia del front. Tres piezas nuevas:
+
+- **NORMA CSS TOKENS (03-front.md)** — intrínseca para el agente Front: todo
+  valor visual repetible vive UNA vez como token (variable CSS en :root) y
+  las vistas solo referencian `var(--token)`. Valores únicos genuinos pueden
+  ir a mano — la norma es para lo repetible, no para todo.
+- **`css-token-gate.cjs` (nuevo)** — la mitad mecánica de la norma, mismo
+  patrón que UI Native Gate: descubre los tokens REALES del proyecto (no una
+  lista inventada) y marca en el changeset valores escritos a mano que YA
+  existen como token, con el token exacto a usar. Con afinidad propiedad↔token
+  (un `width: 8px` no sugiere un token de border-radius — refinado contra el
+  CSS real de salud360). Modo scan: inventario + mapa de tokenización para
+  migrar proyectos existentes. Corre solo en post-cycle (Step 2.9). CLI:
+  `akdd tokens`. WARN-only.
+- **Snapshots visuales (browser-gate.cjs `--snapshot`/`--compare`)** — el
+  equivalente front de protected_behaviors: foto de referencia por vista
+  estable (viewport fijo, página completa, animaciones reducidas), y
+  comparación píxel a píxel con tolerancia de antialiasing que GRITA con el
+  % exacto y una imagen de diff (rojo = lo que cambió). `png-diff.cjs`
+  (nuevo): decodificador/codificador PNG mínimo + diff — cero dependencias
+  nuevas (PNG es zlib, que Node trae). Referencias en `.agentic/snapshots/`.
+- Probado contra el CSS real de salud360 (130 tokens descubiertos; detectó
+  `#ffffff` a mano 103 veces teniendo `--as-surface`, `0.8125rem` 73 veces
+  teniendo su token) y con navegador real end-to-end: PASS 0% sin cambios,
+  WARN 0.761% al romper el combo de prueba, imagen de diff marcando SOLO el
+  combo roto, referencia faltante con mensaje accionable, sin crash en
+  ningún camino.
+
 ## [3.16.9] — 2026-07-21
 
 ### Anti-éxito-falso generalizado a ast-indexer.cjs + nuevo comando `akdd doctor`

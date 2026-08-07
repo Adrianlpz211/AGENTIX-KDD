@@ -143,6 +143,8 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd cu sprint --auto` | correr `node .agentic/grafo/clickup-bridge.cjs pull --auto` y seguir el protocolo CLICKUP AUTO (ver sección abajo) |
 | `akdd cu done <task-id>` | correr `node .agentic/grafo/clickup-bridge.cjs done <task-id>` (marca la tarea completada en ClickUp — resuelve solo el estado de cierre de la Lista) |
 | `akdd cu comment <task-id> "texto"` | correr `node .agentic/grafo/clickup-bridge.cjs comment <task-id> "texto"` |
+| `akdd doctor` | correr `node .agentic/grafo/doctor.cjs` (reparación generalizada: schema, sync, AST, integridad, locks) |
+| `akdd tokens [archivos...]` | correr `node .agentic/grafo/css-token-gate.cjs [archivos...]` (sin args: scan de tokens + oportunidades; con archivos: gate) |
 
 Los comandos que SÍ requieren terminal (solo estos dos):
 - `npm install -g agentic-kdd` → instalar el CLI por primera vez
@@ -385,6 +387,43 @@ Solo WARN, nunca STOP — no bloquea el pipeline, pero deja el hallazgo
 visible en vez de que pase desapercibido. Agregar una regla nueva (otro
 elemento nativo con reemplazo real ya construido) es una entrada más en
 `NATIVE_RULES` dentro del archivo, nada más.
+
+### CSS Token Gate — norma de tokens CSS, verificada mecánicamente (v3.17.0)
+La NORMA (03-front.md): todo valor visual repetible (tamaños, colores,
+espaciados) vive UNA vez como token (variable CSS en :root) y las vistas
+solo referencian `var(--token)`. Causa raíz que ataca (caso real salud360):
+valores compartidos regados a mano en N archivos CSS → ajustar una vista
+rompe otra.
+
+Este gate es su mitad mecánica — mismo patrón que UI Native Gate: descubre
+los tokens REALES del proyecto (no una lista inventada) y detecta en el
+changeset valores escritos a mano que YA existen como token, con el token
+exacto a usar en el mensaje. Solo defiende tokens que el proyecto definió —
+sin tokens, sin ruido.
+
+Comandos:
+  node .agentic/grafo/css-token-gate.cjs                  → scan: inventario + oportunidades de tokenización
+  node .agentic/grafo/css-token-gate.cjs <archivos...>    → gate sobre el changeset
+Corre solo en post-cycle (Step 2.9) sobre los CSS/HTML del último commit.
+Solo WARN, nunca STOP — misma disciplina que UI Native Gate.
+
+### Snapshots visuales — protected_behaviors para el FRONT (v3.17.0)
+El Regression Guard protege backend con tests; nada protegía la APARIENCIA
+de una vista que llevaba 15 rondas bien. Los snapshots cierran eso: una
+foto de referencia por vista estable (viewport fijo 1280x800, página
+completa, animaciones reducidas — reproducible), y comparación píxel a
+píxel con tolerancia de antialiasing (png-diff.cjs, cero dependencias
+nuevas) que GRITA con el % exacto y una imagen de diff (rojo = lo que
+cambió) cuando una vista cambia.
+
+  node .agentic/grafo/browser-gate.cjs <url> --snapshot=<vista>   → guardar/actualizar referencia
+  node .agentic/grafo/browser-gate.cjs <url> --compare=<vista>    → comparar (--threshold=0.5 por defecto)
+
+Protocolo (03-front.md, Revisión interna): vistas TOCADAS en la fase →
+actualizar referencia; vistas NO tocadas con referencia → comparar, y si
+WARN es que el cambio rompió una vista ajena — arreglar antes de seguir.
+Referencias en .agentic/snapshots/ · diffs en _output/. WARN-only: el
+juicio de "¿este cambio visual es intencional?" es del dev/modelo.
 
 ### Browser Gate — verificación mecánica en navegador real
 Hasta ahora "el QA navega y revisa visualmente" era solo una instrucción
