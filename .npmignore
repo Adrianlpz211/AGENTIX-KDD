@@ -1,6 +1,25 @@
 # Datos del proyecto y caché de modelos — NUNCA publicar
 .agentic/memoria.db
+.agentic/memoria.db-wal
+.agentic/memoria.db-shm
 .agentic/.model_cache/
+.agentic/collab.json
+
+# Estado de la MÁQUINA desde la que se publica, no del producto.
+#
+# `_instance_id` lleva el hostname dentro (formato inst_<máquina>_<hash>) y se
+# coló en el paquete de la 3.18.0 antes de subirla: .gitignore ya lo declaraba
+# "no publicar", pero npm usa .npmignore cuando existe y aquí no estaba. Es la
+# misma clase de fuga que la ruta absoluta de cliente que costó un commit
+# entero, solo que por el otro canal.
+#
+# Guardia repetible para que no vuelva a pasar — ningún archivo del paquete
+# debería estar ignorado por git:
+#   npm pack --dry-run 2>&1 | grep -oE '^npm notice [0-9.]+[kMG]?B (.+)$' \
+#     | sed -E 's/^npm notice [0-9.]+[kMG]?B //' \
+#     | while read -r f; do git check-ignore -q "$f" && echo "FUGA: $f"; done
+.agentic/_instance_id
+.agentic/grafo/post-cycle.log
 
 # Documentos internos de auditoría / archivos rotos renombrados
 _AUDITORIA-COMPLETA.md
