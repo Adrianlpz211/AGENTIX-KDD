@@ -1,6 +1,6 @@
 # SPEC — general
 Generado: 2026-07-14
-Última actualización: 2026-07-16
+Última actualización: 2026-07-20
 Estado: IMPLEMENTADO
 
 ## Qué hace
