@@ -12,6 +12,10 @@ vendor/
 
 # Datos del proyecto (memoria del grafo) y caché de modelos — NO publicar
 .agentic/memoria.db
+# Sidecars de SQLite en modo WAL: los crea cualquier lectura (arrancar el
+# dashboard basta) y son estado transitorio, nunca fuente.
+.agentic/memoria.db-wal
+.agentic/memoria.db-shm
 .agentic/.model_cache/
 
 # Credenciales del modo colaborativo (URL + token de Turso) — NUNCA subir
@@ -20,3 +24,35 @@ vendor/
 # Artefactos de auditoría / archivos rotos renombrados — internos, NO publicar
 *.ROTO*
 .agentic/_instance_id
+.agentic/_tarea_en_curso.json
+
+# ── Estado generado del propio repo ─────────────────────────────────────────
+# Lo escribe el motor en cada ciclo y se regenera solo: no es fuente, y
+# versionarlo produce conflictos en cada post-commit. Ya estaba en .npmignore.
+.agentic/diff-overlay.json
+.agentic/knowledge-graph.json
+.agentic/tour.json
+.agentic/llms.txt
+.agentic/llms-full.txt
+
+# ── Configuración de máquina ────────────────────────────────────────────────
+# launch.json filtró una ruta absoluta de cliente (C:\lumo) al repo público.
+# Es configuración local, no del producto: no vuelve a viajar.
+.claude/launch.json
+.claude/settings.local.json
+scripts/preview-lumo-dashboard.cjs
+
+# ── Evidencia interna y empaquetados de trabajo ─────────────────────────────
+repomix-output.xml
+docs/benchmarks/
+docs/benchmarks$dest/
+docs/superpowers/
+
+# ── Documentos personales y de sesión ───────────────────────────────────────
+*.pdf
+life-logbook-*.md
+chat-migration-*.md
+INFORME-*.md
+SESION-RESUMEN.md
+PLAN-7-PIEZAS.md
+PLAN-CLICKUP-BRIDGE.md

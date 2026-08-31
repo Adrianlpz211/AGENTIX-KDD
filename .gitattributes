@@ -1,3 +1,53 @@
-# Shell scripts y git hooks: mantener LF (CRLF los rompe en Mac/Linux)
-*.sh text eol=lf
+# ── Finales de línea ────────────────────────────────────────────────────────
+#
+# Por qué esto importa: Windows termina las líneas con dos caracteres (CRLF) y
+# Linux/Mac con uno (LF). El código es idéntico, pero para cualquier herramienta
+# que compare archivos son distintos: hay un byte de más por línea.
+#
+# Sin esta normalización, comparar el repo con una instalación da decenas de
+# falsos positivos. Caso real (30/08/2026): al cotejar main con la instalación
+# de un proyecto, 21 de 69 herramientas aparecían como "distintas" — y 18 de
+# ellas solo diferían en los finales de línea. Solo 3 tenían cambios reales.
+#
+# La regla: en el repositorio todo se guarda con LF. Cada quien trabaja con lo
+# que su editor use; git normaliza al guardar.
+
+* text=auto eol=lf
+
+# ── Código y configuración: LF explícito ────────────────────────────────────
+*.js      text eol=lf
+*.cjs     text eol=lf
+*.mjs     text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.sql     text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.txt     text eol=lf
+
+# ── Shell y hooks: LF obligatorio, CRLF los rompe ───────────────────────────
+*.sh      text eol=lf
 .agentic/grafo/git-hooks/post-commit text eol=lf
+
+# ── Scripts de Windows: CRLF obligatorio, LF los rompe ──────────────────────
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# ── Binarios: git no los toca ───────────────────────────────────────────────
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.svg     text eol=lf
+*.ico     binary
+*.woff    binary
+*.woff2   binary
+*.db      binary
+*.sqlite  binary
+*.zip     binary
+*.vsix    binary
