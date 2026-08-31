@@ -345,6 +345,26 @@ const patrones = parseEntries(readMemoria('patrones.md')).filter(p => p.estado =
 const decisiones = parseEntries(readMemoria('decisiones.md'));
 const errores = parseEntries(readMemoria('errores.md'));
 
+/**
+ * Serializa un valor para incrustarlo DENTRO de un <script> del HTML.
+ *
+ * `JSON.stringify` a secas no basta: si un dato contiene la cadena `</script`,
+ * el navegador cierra la etiqueta ahí mismo y vuelca el resto del JSON como
+ * texto visible en la página. Es el fallo de "el dashboard escupe el grafo
+ * entero en pantalla" — la memoria guarda patrones de front, y esos patrones
+ * citan HTML.
+ *
+ * Se escapa `<` como `<` (JavaScript lo lee igual, el parser de HTML ya
+ * no ve una etiqueta) y los separadores de línea U+2028/U+2029, que son JSON
+ * válido pero rompen un literal de JavaScript.
+ */
+function jsonSafe(valor) {
+  return JSON.stringify(valor)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 // Adjunta a cada nodo de memoria los símbolos de código que menciona de verdad
 // (Bloque B + cruce del 15/07/2026) — relaciones_semanticas usa nombres de
 // entidad en texto (desde_entidad/hacia_entidad), no ids como la tabla
@@ -358,6 +378,11 @@ function attachSymbolMentions(nodes, mencionesRaw) {
   });
   nodes.forEach(n => {
     n.simbolosMencionados = porNodo[`nodo:${n.tipo}:${n.titulo}`] || [];
+    // El embedding es un vector de 768 números que solo sirve en el servidor para
+    // la búsqueda semántica. El `SELECT *` lo arrastraba hasta el navegador: medido
+    // sobre una memoria real de 178 nodos, el payload pasaba de 0,20 MB a 1,47 MB
+    // — el 87 % era esto. No se muestra en ninguna parte; solo pesa.
+    delete n.embedding;
   });
   return nodes;
 }
@@ -1496,7 +1521,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>` : ''}
       <div>
         <div style="font-size:10px;color:var(--pl);font-weight:600;margin-bottom:6px">💡 Suggested Questions</div>
-        ${suggestedQuestions.map(q => `<div style="padding:5px 7px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.15);border-radius:5px;margin-bottom:3px;font-size:10px;color:var(--text2);line-height:1.4">${q}</div>`).join('')}
+        ${suggestedQuestions.map(q => `<div style="padding:5px 7px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.15);border-radius:5px;margin-bottom:3px;font-size:10px;color:var(--text2);line-height:1.4">${escHtml(q)}</div>`).join('')}
       </div>
     </div>
 
@@ -2631,28 +2656,28 @@ function closeGlossary(){
   document.getElementById('glossary-modal').classList.remove('visible');
 }
 
-const NODES = ${JSON.stringify(nodes)};
-const CODE_NODES = ${JSON.stringify(codeStructure.nodes)};
-const CODE_EDGES = ${JSON.stringify(codeStructure.edges)};
-const ENDPOINT_HEURISTIC_EDGES = ${JSON.stringify(endpointHeuristicEdges)};
+const NODES = ${jsonSafe(nodes)};
+const CODE_NODES = ${jsonSafe(codeStructure.nodes)};
+const CODE_EDGES = ${jsonSafe(codeStructure.edges)};
+const ENDPOINT_HEURISTIC_EDGES = ${jsonSafe(endpointHeuristicEdges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
 // Color por lenguaje — FUENTE ÚNICA: se inyecta desde LANG_COLORS_SERVER (arriba,
 // server-side). Antes el cliente tenía su PROPIA copia del mapa y cualquier color
 // nuevo había que agregarlo en dos lugares o divergían en silencio.
-const LANG_COLORS = ${JSON.stringify(LANG_COLORS_SERVER)};
-const MOD_COLORS = ${JSON.stringify(MOD_COLORS_SERVER)};
+const LANG_COLORS = ${jsonSafe(LANG_COLORS_SERVER)};
+const MOD_COLORS = ${jsonSafe(MOD_COLORS_SERVER)};
 // PIEZA 4: diff overlay generado por akdd overlay (null si nunca se corrió)
-const DIFF_OVERLAY = ${JSON.stringify(diffOverlayData)};
+const DIFF_OVERLAY = ${jsonSafe(diffOverlayData)};
 // PIEZA 5: visita guiada generada por akdd tour (null si nunca se corrió)
-const TOUR_DATA = ${JSON.stringify(tourData)};
+const TOUR_DATA = ${jsonSafe(tourData)};
 function codeNodeColor(d){ return MOD_COLORS[d.modulo] || LANG_COLORS[d.language] || CODE_COLORS[d.tipo] || '#00e5ff'; }
 const LANGS_PRESENT = [...new Set(CODE_NODES.map(n=>n.language).filter(Boolean))].sort();
 const codeNodeMap={};
 CODE_NODES.forEach(n=>codeNodeMap[n.id]=n);
-const EDGES = ${JSON.stringify(edges)};
-const M_NODES = ${JSON.stringify(mNodes)};
-const M_EDGES = ${JSON.stringify(mEdges)};
-const DEGREE_MAP = ${JSON.stringify(degreeMap)};
+const EDGES = ${jsonSafe(edges)};
+const M_NODES = ${jsonSafe(mNodes)};
+const M_EDGES = ${jsonSafe(mEdges)};
+const DEGREE_MAP = ${jsonSafe(degreeMap)};
 const MAX_DEGREE = ${maxDegree};
 const GOD_THRESHOLD = ${godThreshold};
 const COLORS = {error:'#ef4444',patron:'#10b981',decision:'#3b82f6'};
@@ -3143,7 +3168,7 @@ function forceRadialShell(strength,getTargetRadius){
 // la ruta del archivo — con perfil del proyecto (Plan 4: FRONT_DIRS inyectado
 // server-side desde stack-profile) o, sin perfil, la heurística de siempre:
 // public/ (la carpeta real del panel de este proyecto) o .jsx/.tsx.
-const FRONT_DIRS=${JSON.stringify((__stackProfile && Array.isArray(__stackProfile.front_dirs)) ? __stackProfile.front_dirs : [])};
+const FRONT_DIRS=${jsonSafe((__stackProfile && Array.isArray(__stackProfile.front_dirs)) ? __stackProfile.front_dirs : [])};
 function esNodoFrontend(d){
   // Nodo de código: siempre tiene .file (KDD nunca lo tiene) — se clasifica
   // por ruta. Nodo KDD: se clasifica por el área ya calculada (Feature 2).
@@ -4414,7 +4439,7 @@ function centerModGraph(){
 // que sale es autocontenido: se manda por correo y se abre sin conexion, que es
 // el caso real (la persona no tiene como entrar al dashboard).
 // La barra escapada evita que un dato que contenga un cierre de script rompa la pagina.
-const TIEMPOS_DATA = JSON.parse(${JSON.stringify(JSON.stringify({proyecto: config.nombre || 'Proyecto', modulos: tiemposDB || [], friccion: friccionDB || [], ritmo: ritmoDB || []})).split('<').join('\\u003c')});
+const TIEMPOS_DATA = JSON.parse(${jsonSafe(JSON.stringify({proyecto: config.nombre || 'Proyecto', modulos: tiemposDB || [], friccion: friccionDB || [], ritmo: ritmoDB || []}))});
 
 /** Escapa para HTML. El reporte lleva rutas de archivo y nombres de módulo. */
 

@@ -1,5 +1,52 @@
 # Changelog — Agentic KDD
 
+## [3.18.1] — 2026-08-31
+
+### El dashboard escupía el grafo entero como texto en pantalla
+Reportado desde un proyecto real tras actualizar a 3.18.0: la página se dibujaba
+bien hasta un punto y a partir de ahí volcaba el JSON de la memoria —embeddings
+incluidos— como texto visible. Dos causas distintas, y conviene no confundirlas:
+la que ROMPÍA la página es el escape, no el peso.
+
+- **Escape de la inyección al `<script>` (la causa del fallo).** El HTML se arma
+  con `const NODES = ${JSON.stringify(nodes)}` dentro de un `<script>`. Si un
+  dato contiene la cadena `</script>`, el navegador cierra la etiqueta ahí mismo
+  y vuelca el resto del JSON como texto. La memoria está llena de patrones de
+  front que citan HTML, así que era cuestión de tiempo. Nueva función
+  `jsonSafe()`: escapa `<` como `<` (JavaScript lo lee igual, el parser de
+  HTML ya no ve una etiqueta) y los separadores U+2028/U+2029, que son JSON
+  válido pero rompen un literal de JavaScript. Migradas las 14 inyecciones.
+- **Segundo punto de inyección, en el cuerpo HTML.** Las «preguntas sugeridas»
+  del panel se renderizaban en DOS sitios con el mismo dato —el título de un
+  nodo divino, es decir, contenido de memoria—: uno escapaba con `escHtml` y el
+  otro lo interpolaba crudo. Ese no rompía el bloque `<script>`, pero inyectaba
+  HTML arbitrario en la página. Ahora escapa también.
+- **Los embeddings ya no viajan al navegador.** `SELECT *` arrastraba la columna
+  `embedding` —768 números por nodo— que solo sirve en el servidor para la
+  búsqueda semántica y no se muestra en ninguna parte. Medido sobre una memoria
+  real de 178 nodos: 1,47 MB con ellos, 0,20 MB sin ellos — el 86,6 % era peso
+  muerto. Se descartan en `attachSymbolMentions()`, el único embudo por el que
+  pasan los nodos en los dos caminos de acceso a la base.
+
+Verificado con un canario, no leyendo el diff: se insertó un nodo con
+`<script>alert(1)</script>` y un `</script>` suelto, y se comprobó en un
+navegador real que las etiquetas quedan balanceadas (5 aperturas, 5 cierres),
+que el dato llega íntegro a JavaScript, que no aparece HTML inyectado en el DOM
+y que ningún nodo lleva `embedding`. Sin el canario el conteo también cuadra,
+pero eso no prueba nada: esta memoria tiene 7 nodos y ninguno contiene la
+cadena. El canario y sus aristas quedaron retirados.
+
+Al escribir el arreglo se puso el carácter U+2028 literal en el código fuente y
+rompió el propio `dashboard.cjs` — es un terminador de línea en JavaScript. El
+mismo fallo que se está arreglando, dentro del arreglo. Por eso las dos líneas
+usan la secuencia de escape y no el carácter.
+
+**Por qué una versión y no solo un push.** `dashboard.cjs` le llega a los
+clientes por dos vías: `akdd update` lo baja de GitHub —esos quedan arreglados
+con el push— pero `akdd init` lo copia del paquete npm (`src/init.js`,
+`rootFiles`), así que quien instalara desde cero se llevaba el dashboard roto
+hasta que saliera versión nueva.
+
 ## [3.18.0] — 2026-08-31
 
 ### Línea de tiempo — cuánto tomó cada cosa, medido y no estimado
