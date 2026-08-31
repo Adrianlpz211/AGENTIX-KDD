@@ -216,6 +216,24 @@ switch (command) {
   // que ya existen como token).
   case 'tokens': runModule('css-token-gate.cjs', args.slice(1).map(f => `"${f}"`).join(' ')); break;
 
+  // ── v3.18.0: Línea de tiempo (cuánto tomó cada tarea) ───────────────────
+  // El CLAUDE.md ya rutea estos nombres desde el chat; aquí existen también en
+  // terminal, que es donde el CHANGELOG los anuncia. El texto de la tarea se
+  // vuelve a entrecomillar: el shell ya se comió las comillas originales y sin
+  // esto "arreglar el login" llegaría como tres argumentos sueltos.
+  case 'tiempo':
+    runModule('linea-tiempo.cjs', args.slice(1).map(a => /\s/.test(a) ? `"${a}"` : a).join(' '));
+    break;
+  case 'tiempos':
+    runModule('linea-tiempo.cjs', 'tiempos', args[1] ? `"${args.slice(1).join(' ')}"` : '');
+    break;
+  case 'rebobina':
+    runModule('linea-tiempo.cjs', 'ventana', args.slice(1).join(' '));
+    break;
+  case 'orden':
+    runModule('linea-tiempo.cjs', 'orden');
+    break;
+
   // ── Core memory ───────────────────────────────────────────────────────
   case 'sync':    runGrafo('sync'); break;
   case 'graph':   graph(); break;

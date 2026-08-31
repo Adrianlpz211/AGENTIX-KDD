@@ -67,7 +67,10 @@ Consulta del grafo (en terminal):
 ## CUANDO VES aa:
 
 ```
-0. Correr: node .agentic/grafo/context-enricher.cjs "[tarea tal cual la escribió el usuario]"
+0. Correr: node .agentic/grafo/linea-tiempo.cjs inicio --actor=<quién eres> "[tarea tal cual la escribió el usuario]"
+   → marca el arranque. Sin esto, al cerrar no hay con qué medir y la duración sale 0.
+   → fail-soft: si falla, seguir igual (se pierde la medición, no el trabajo)
+0.1 Correr: node .agentic/grafo/context-enricher.cjs "[tarea tal cual la escribió el usuario]"
    → leer el brief que imprime (riesgo estimado, avisos, contratos, alertas activas)
    → nunca bloquea: si falla, no encuentra nada, o da error — seguir igual, es un plus
 1. Leer .agentic/config.md
@@ -80,10 +83,132 @@ Consulta del grafo (en terminal):
      lado → secuencial, un solo autor, como siempre.
 5. No pedir confirmación al usuario entre fases
 6. Detener SOLO ante STOP genuino
+7. Al cerrar (después del paso Memoria y del post-cycle):
+   node .agentic/grafo/linea-tiempo.cjs fin --actor=<quién eres>
+   → SIEMPRE, sin que el usuario lo pida. Es la última línea del ciclo.
+   → Si el ciclo se abandona a medias: `fin --parcial` (queda marcado como no
+     comparable — una tarea que se paró a medias no mide nada útil)
 ```
 
 Flujo completo:
 Context Enricher → Orquestador (.agentic/agentes/01-orquestador.md) → Analista → Front/Back (paralelo si aplica, ver MODO LEGIÓN) → QA → Memoria
+
+## MEDICIÓN DE TIEMPO — siempre, al terminar
+
+Toda tarea reporta cuánto tomó. No es opcional ni hay que pedirlo: es el último
+paso del ciclo, igual que el post-cycle.
+
+### Una tarea sola
+Al cerrar, `linea-tiempo.cjs fin` imprime su duración. Si abarcó varias sesiones
+o varios días, además desglosa las sesiones.
+
+### Un sprint, unos bloques, unos módulos o unas fases
+Cuando el trabajo son varias tareas de corrido, **no se cierra el lote en cada
+una**: se marca el arranque de cada tarea con `inicio "<tarea>"` (eso cierra
+automáticamente la anterior y la acumula) y se llama `fin` **una sola vez al
+terminar la última**. Ahí sale la tabla completa: una fila por tarea, con desde,
+hasta, trabajado, número de sesiones, y el total abajo.
+
+### Los dos números, y por qué no son el mismo
+Un dev no trabaja del tirón hasta terminar: trabaja en tandas de horas a lo largo
+de varios días. Por eso se reportan dos cosas distintas y nunca se confunden:
+
+  · **TRABAJADO** — la suma de las sesiones reales. Es el esfuerzo.
+  · **transcurrido** — del primer arranque al último cierre. Incluye noches,
+    fines de semana y pausas.
+
+Una tarea abierta el lunes y cerrada el jueves puede haber sido 4 h de trabajo.
+Decir "3 días" sería falso; decir "4 h repartidas en 3 días" es la verdad. Por eso
+todos los sellos llevan fecha y no solo hora.
+
+### Lo que estos números NO dicen
+Miden cuánto tomó, no si quedó bien. Una tarea rápida con un defecto que se
+descubre después costó más que una lenta que quedó cerrada. El tiempo se reporta
+junto al veredicto de QA, nunca en su lugar.
+
+### Cuando hay más de un agente en la misma carpeta
+
+`--actor=<nombre>` separa la medición de cada agente o dev. **Es obligatorio si
+más de uno trabaja el mismo proyecto**, aunque sea a horas distintas.
+
+Sin esto la marca es un archivo compartido y el `inicio` de uno **cierra la tarea
+abierta del otro** y se la lleva a su lote. No falla ruidosamente: produce un
+reporte que atribuye el trabajo de alguien a otra persona.
+
+Pasó de verdad el 30/08/2026 entre Cursor y Claude Code en la misma carpeta: un
+reporte contó 2 minutos de Cursor como propios. Por eso la regla existe.
+
+```
+linea-tiempo.cjs inicio --actor=cursor "<tarea>"
+linea-tiempo.cjs fin    --actor=cursor
+```
+
+Alternativa: exportar `AKDD_ACTOR` en el entorno de cada agente. Si no se declara
+ninguno, todos comparten el actor `default` — que es el comportamiento anterior y
+solo es seguro con un único agente.
+
+El `_instance_id` del lock-manager **no sirve** para esto: es un archivo por
+carpeta, así que dos agentes en el mismo proyecto leen el mismo identificador.
+
+---
+
+### PREGUNTAS DE TIEMPO DESDE EL CHAT
+
+Cuando el usuario pregunta cuánto tomó algo **en lenguaje natural**, se CORRE la
+herramienta y se pega lo que devuelve. Nunca se estima, ni se calcula a ojo, ni se
+deduce del historial de la conversación.
+
+Esto es una excepción explícita a la regla de "si es una pregunta, respóndela
+conversando": una pregunta de tiempo se contesta con una medición, no con una
+impresión.
+
+**Frases que la disparan** (la lista es orientativa, no exhaustiva):
+
+> "¿cuánto tomó...?" · "¿cuánto tardó...?" · "¿cuánto costó...?" · "dame los
+> tiempos de..." · "¿cuánto llevamos en...?" · "¿cuánto se tardó en hacer los
+> tableros?" · "¿cuánto tomó todo lo de requisición?"
+
+**Qué hacer:**
+
+```
+1. Extraer de la frase el módulo o el tema: "todo lo de requisición" → requisicion
+2. Correr: node .agentic/grafo/linea-tiempo.cjs tiempos "<eso>"
+3. Pegar la salida TAL CUAL, incluidos sus avisos
+4. Si devuelve 0 resultados: probar un término más corto o un sinónimo
+   ("tableros" → "kanban", "OC" → "orden"), y si sigue vacío, decirlo
+   y mostrar la lista de módulos que sí tienen ciclos
+5. Si la pregunta abarca varias cosas ("todo lo nuevo"), correr el comando
+   una vez por cada una y presentarlas juntas — no inventar un agregado
+```
+
+**Sin argumento** (`tiempos` a secas) compara todos los módulos entre sí: es la
+respuesta a "¿cómo va cada módulo?" o "¿por qué compras no ha terminado?".
+
+**Lo que NO se hace, nunca:**
+
+- Estimar un número porque el usuario espera uno. Si un ciclo no tiene duración
+  registrada, la respuesta correcta es *"no hay dato"*, no un cálculo aproximado.
+  Un ciclo sin duración **no es un ciclo de 0 minutos**.
+- Sumar las duraciones que faltan a partir de las fechas de cierre de ciclos
+  consecutivos. Entre un cierre y el siguiente hay noches, otras tareas y pausas.
+- Redondear "a más o menos una hora" para que el reporte quede más presentable.
+  Estos números los ven los jefes: uno inventado es peor que no tener ninguno.
+
+**Y siempre junto al número, el límite del número:** mide cuánto tomó, no si quedó
+bien. Una tarea rápida con un defecto que aparece después costó más que una lenta
+que quedó cerrada.
+
+---
+
+### Comandos
+```
+akdd tiempo inicio "<tarea>"   marca el arranque (sin texto: retoma la abierta)
+akdd tiempo pausa              pausa la sesión — se retoma con `inicio`
+akdd tiempo fin                cierra y reporta (una duración, o la tabla del lote)
+akdd tiempo resumen [n]        duración de los últimos ciclos registrados
+```
+
+---
 
 ## CUANDO VES audit:
 
@@ -136,6 +261,14 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd describe [área]` | protocolo DESCRIBE (ver sección AKDD DESCRIBE abajo) |
 | `akdd overlay [base]` | correr `node .agentic/grafo/diff-overlay.cjs [base]` (blast radius visual — botón 🔥 Cambios del dashboard) |
 | `akdd tour [área]` | correr `node .agentic/grafo/tour-builder.cjs [área]` (visita guiada — botón 🧭 del dashboard) |
+| `akdd tiempo inicio "<tarea>"` | correr `node .agentic/grafo/linea-tiempo.cjs inicio "<tarea>"` (marca el arranque — sin texto, retoma la tarea abierta en una sesión nueva) |
+| `akdd tiempo pausa` | correr `node .agentic/grafo/linea-tiempo.cjs pausa` (pausa la sesión; el trabajo se mide en tandas, no de corrido) |
+| `akdd tiempo fin` | correr `node .agentic/grafo/linea-tiempo.cjs fin` (cierra y reporta cuánto tomó — una tarea da su duración, varias dan una tabla) |
+| `akdd tiempo resumen [n]` | correr `node .agentic/grafo/linea-tiempo.cjs resumen [n]` (duración de los últimos ciclos) |
+| `akdd tiempos` | correr `node .agentic/grafo/linea-tiempo.cjs tiempos` (compara todos los módulos: ciclos, días, STOPs, trabajado — la vista de "tres entregaron y uno no") |
+| `akdd tiempos <módulo\|texto>` | correr `node .agentic/grafo/linea-tiempo.cjs tiempos "<x>"` (cuánto costó un módulo, o todo lo que coincida con un texto: `tiempos compras`, `tiempos cotizacion`) |
+| `akdd rebobina [desde] [hasta]` | correr `node .agentic/grafo/linea-tiempo.cjs ventana [desde] [hasta]` (qué pasó en ese rango y en qué orden) |
+| `akdd orden` | correr `node .agentic/grafo/linea-tiempo.cjs orden` (busca cosas hechas en el orden equivocado) |
 | `akdd cu on` / `akdd clickup on` | correr `node .agentic/grafo/clickup-bridge.cjs on` (activa el puente de ClickUp — opt-in, apagado por defecto, pide `CLICKUP_API_TOKEN` en `.env`) |
 | `akdd cu set-list <id>` | correr `node .agentic/grafo/clickup-bridge.cjs set-list <id>` (configura qué Lista de ClickUp usa este proyecto) |
 | `akdd cu status` | correr `node .agentic/grafo/clickup-bridge.cjs status` |
@@ -670,6 +803,11 @@ trátalo exactamente como si tuviera `aa:` — ejecuta el pipeline completo.
 - Empieza con: "explícame", "qué es", "cómo funciona", "cuándo", "por qué", "dónde", "muéstrame", "dame", "qué piensas"
 - Es una consulta de estado: `akdd buscar`, `akdd health`, `akdd metrics`, `akdd trail`
 - Es una conversación sobre el proyecto, no una acción sobre él
+
+> **Excepción — preguntas de tiempo.** "¿cuánto tomó X?" es una pregunta y no
+> dispara el pipeline, pero **tampoco se responde de memoria**: se corre
+> `linea-tiempo.cjs tiempos` y se pega la salida. Ver la sección PREGUNTAS DE
+> TIEMPO DESDE EL CHAT.
 
 ### Comportamiento al detectar tarea sin aa:
 Antes de ejecutar, mostrar exactamente:

@@ -23,6 +23,52 @@
  *   node .agentic/grafo/post-cycle.cjs auth --tests=24 --task="JWT multi-tenant auth"
  */
 
+
+/**
+ * Arranque real de la tarea, si alguien lo marcó.
+ *
+ * Lo escribe `linea-tiempo.cjs inicio "<tarea>"`. Si no existe la marca, se
+ * devuelve null y el ciclo se registra como siempre —sin duración— en lugar de
+ * inventar un número. Un dato ausente es mejor que uno falso.
+ *
+ * Se suman las SESIONES, no el rango completo: un dev trabaja en tandas a lo
+ * largo de varios días, y decir "3 días" cuando fueron 4 horas engaña.
+ */
+function leerArranqueTarea() {
+  try {
+    const ruta = require('path').join(process.cwd(), '.agentic', '_tarea_en_curso.json');
+    const m = JSON.parse(require('fs').readFileSync(ruta, 'utf8'));
+    // La marca separa por actor desde que Cursor y Claude Code comparten carpeta.
+    // Se busca el propio; si no hay actores (formato viejo), se usa la raíz.
+    let t = null;
+    if (m && m.actores) {
+      const yo = (process.env.AKDD_ACTOR || '').trim();
+      const abiertos = Object.entries(m.actores).filter(([, v]) => v && v.abierta);
+      const mio = yo && m.actores[yo] && m.actores[yo].abierta ? m.actores[yo] : null;
+      // Sin actor declarado solo se puede atribuir si hay UNA sola medición abierta:
+      // con varias, adivinar sería atribuir el tiempo de otro.
+      t = mio ? mio.abierta : (abiertos.length === 1 ? abiertos[0][1].abierta : null);
+    } else {
+      t = m && m.abierta;
+    }
+    if (!t || !Array.isArray(t.sesiones) || !t.sesiones.length) return null;
+    const ahora = Date.now();
+    let trabajado = 0;
+    for (const s of t.sesiones) {
+      const a = new Date(s.inicio).getTime();
+      const b = s.fin ? new Date(s.fin).getTime() : ahora;
+      if (isFinite(a) && isFinite(b) && b > a) trabajado += b - a;
+    }
+    const primera = new Date(t.sesiones[0].inicio);
+    if (isNaN(primera)) return null;
+    // SQLite guarda datetime('now') en UTC: el formato debe coincidir.
+    const utc = primera.toISOString().replace('T', ' ').slice(0, 19);
+    return { fecha_inicio: utc, duracion_ms: trabajado, tarea: t.tarea, sesiones: t.sesiones.length };
+  } catch {
+    return null;
+  }
+}
+
 const fs   = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -129,6 +175,9 @@ function ensureSchema(db) {
 
 function registrarCiclo(db, cycleData) {
   try {
+    // Cuánto tomó de verdad, si alguien marcó el arranque. Sin marca: null,
+    // y el ciclo se registra como siempre en lugar de inventar un número.
+    const arranqueTarea = leerArranqueTarea();
     const cicloPath = path.join(AGENTIC_DIR, '_ciclo_tmp.json');
 
     // Use existing _ciclo_tmp.json if available (written by memory agent)
@@ -160,7 +209,8 @@ function registrarCiclo(db, cycleData) {
       review_required:    0,
       stops_count:        0,
       sync_grafo:         true,
-      duracion_ms:        datos.duracion_ms || 0,
+      duracion_ms:        (arranqueTarea && arranqueTarea.duracion_ms) || datos.duracion_ms || 0,
+      fecha_inicio:       (arranqueTarea && arranqueTarea.fecha_inicio) || null,
       modules_touched:    JSON.stringify(modules),
       post_cycle_ran:     'true',
       fases: modules.map((m, i) => ({

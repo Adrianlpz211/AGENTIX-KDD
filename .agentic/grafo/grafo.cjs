@@ -764,8 +764,9 @@ function registrarCiclo(datos) {
     db.run(`INSERT INTO ciclos (ciclo_id,tarea,tipo_tarea,modulo,area,estado,context_guard,
       fases_total,fases_completadas,patrones_aplicados,errores_evitados,decisiones_usadas,
       memory_trace,tests_generados,tests_pasando,review_blockers,review_required,stops_count,
-      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,fecha_fin)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
+      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,fecha_inicio,fecha_fin)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+              COALESCE(?, datetime('now')), datetime('now'))`,
       ciclo_id,
       datos.tarea||'',
       datos.tipo_tarea||'feature',
@@ -787,7 +788,8 @@ function registrarCiclo(datos) {
       datos.sync_grafo?1:0,
       datos.duracion_ms||0,
       snap?JSON.stringify(snap):null,
-      snap?JSON.stringify(snap):null
+      snap?JSON.stringify(snap):null,
+      datos.fecha_inicio || null
     );
     if (datos.fases && Array.isArray(datos.fases)) {
       datos.fases.forEach(f => {

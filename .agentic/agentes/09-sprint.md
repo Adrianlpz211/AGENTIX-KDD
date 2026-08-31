@@ -93,6 +93,11 @@ Para cada tarea en orden:
    Usando resultado de tarea anterior: [sí/no]
    ────────────────────────────────────────
 
+1.5 Marcar el arranque de ESTA tarea:
+   node .agentic/grafo/linea-tiempo.cjs inicio --actor=<quién eres> "[descripción de la tarea]"
+   → cierra automáticamente la tarea anterior y la acumula en el lote
+   → NO llamar `fin` entre tareas: eso cerraría el lote y se perdería la tabla
+
 2. Ejecutar el pipeline completo de aa::
    Context Guard → Analista → Front/Back → ag:test → QA → ag:review → Memoria
 
@@ -168,15 +173,28 @@ Sin transferencia de contexto esto no es posible. Con sprint sí.
 
 ### FASE 5 — Cierre del sprint
 
-Al completar todas las tareas:
+Al completar todas las tareas, primero cerrar el lote de medición — una sola vez,
+no una por tarea:
+
+```
+node .agentic/grafo/linea-tiempo.cjs fin --actor=<quién eres>
+```
+
+Eso imprime la tabla real: una fila por tarea con desde, hasta, trabajado y
+sesiones, más el total. **Se pega tal cual sale.** Nunca estimar el tiempo a ojo
+ni redondear "a más o menos una hora": si la medición falló, se dice que falló.
+Un número inventado en un reporte que ven los jefes es peor que no tener número.
+
+Después, el reporte del sprint con esa tabla dentro:
 
 ```
 ✅ SPRINT COMPLETADO — [objetivo general]
 
 ════════════════════════════════════════════════════
 Tareas completadas: N/N
-Tiempo total: [aproximado]
 ════════════════════════════════════════════════════
+
+[aquí va la tabla de tiempos, pegada tal cual]
 
 RESUMEN POR TAREA:
   ✓ Tarea 1: [qué se hizo] — [archivos clave]

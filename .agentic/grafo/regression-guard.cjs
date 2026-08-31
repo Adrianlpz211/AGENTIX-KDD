@@ -617,13 +617,24 @@ function registerBehavior(db, params) {
   const cambiosFuente = changedFiles.filter(esFuente);
   const inferidos     = inferSourceFromTests(tests, root);
   let relatedFiles    = [...new Set([...cambiosFuente, ...inferidos])].slice(0, 10);
-  if (relatedFiles.length === 0) relatedFiles = changedFiles.slice(0, 10); // último recurso
+  if (relatedFiles.length === 0) relatedFiles = changedFiles.filter(esFuente).slice(0, 10);
 
-  if (module_ === 'global' && changedFiles.length === 0) return null;
+  // Sin changeset Y sin tests → nada que proteger
+  if (changedFiles.length === 0 && tests.length === 0) return null;
 
-  const description = `${module_} module — ${flows.length > 0
-    ? flows.slice(0, 3).join(', ')
-    : `${changedFiles.length} files`} functioning correctly`;
+  // Evitar ruido de FORMs HTML genéricos cuando el suite es global/_output
+  const flowsUseful = flows.filter((f) =>
+    !/^(FORM form#|REQUIRED (input|select)|SELECT select\[)/i.test(f)
+  );
+  const flowsFinal = flowsUseful.length > 0 ? flowsUseful : (
+    tests.length > 0
+      ? tests.slice(0, 8).map((t) => `TEST ${path.basename(String(t))}`)
+      : flows.slice(0, 5)
+  );
+
+  const description = `${module_} module — ${flowsFinal.length > 0
+    ? flowsFinal.slice(0, 3).join(', ')
+    : `${relatedFiles.length || changedFiles.length} files`} functioning correctly`;
 
   // Check if behavior for this module already exists
   const existing = safe(() =>
@@ -665,7 +676,7 @@ function registerBehavior(db, params) {
         newCount,
         newConfidence,
         description,
-        JSON.stringify(flows),
+        JSON.stringify(flowsFinal),
         JSON.stringify(tests),
         JSON.stringify(relatedFiles),
         JSON.stringify(mergedAnchors.slice(0, 50)),
@@ -685,7 +696,7 @@ function registerBehavior(db, params) {
       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'MEDIA')
     `).run(
       id, module_, description,
-      JSON.stringify(flows),
+      JSON.stringify(flowsFinal),
       JSON.stringify(tests),
       JSON.stringify(relatedFiles),
       JSON.stringify(anchors.slice(0, 50))

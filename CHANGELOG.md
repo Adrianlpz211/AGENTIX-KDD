@@ -1,5 +1,73 @@
 # Changelog — Agentic KDD
 
+## [3.18.0] — 2026-08-31
+
+### Línea de tiempo — cuánto tomó cada cosa, medido y no estimado
+Defecto de raíz que lo habilita: la tabla `ciclos` tenía `fecha_inicio`,
+`fecha_fin` y `duracion_ms` desde el principio —el esquema estaba diseñado
+para medir— pero el `INSERT` de `registrarCiclo()` no nombraba `fecha_inicio`,
+así que su valor por defecto se disparaba en el momento del CIERRE. Inicio y
+fin quedaban iguales y la duración salía **0 en todos los ciclos, de todos los
+proyectos, desde siempre**. Nadie lo vio porque el número existía: era cero.
+
+- **`linea-tiempo.cjs` (nuevo)** — marca el arranque de una tarea, acumula
+  SESIONES (un dev trabaja en tandas, no del tirón) y reporta al cerrar.
+  Distingue dos números que nunca se confunden: **trabajado** (la suma de las
+  sesiones — el esfuerzo) y **transcurrido** (que incluye noches y pausas).
+  Una tarea abierta el lunes y cerrada el jueves puede haber sido 4 h.
+  Comandos: `inicio` · `pausa` · `fin` · `resumen` · `tiempos` · `ventana` ·
+  `orden` · `ciclo` · `backfill`.
+- **Separación por actor (`--actor=` / `$AKDD_ACTOR`)** — obligatorio cuando
+  más de un agente comparte carpeta. Sin esto la marca es un archivo común y
+  el `inicio` de uno cierra la tarea abierta del otro y se la lleva a su lote:
+  no falla ruidosamente, produce un reporte que atribuye el trabajo de alguien
+  a otra persona. Ocurrió de verdad entre Cursor y Claude Code el 30/08.
+  El `_instance_id` del lock-manager no sirve para esto (es por carpeta, no
+  por agente).
+- **`grafo.cjs`** — el `INSERT` de `ciclos` acepta `fecha_inicio` con
+  `COALESCE(?, datetime('now'))`: sin marca, el comportamiento es idéntico al
+  anterior. Cambio compatible hacia atrás.
+- **`post-cycle.cjs`** — lee la marca y calcula la duración real. Si no hay
+  marca, registra el ciclo como siempre, sin duración, en lugar de inventar un
+  número.
+- **Dashboard, pestaña «⏱ Tiempos y avance»** — por módulo: ciclos,
+  retrabajo (qué parte fueron arreglos en vez de construcción), frenos (gates
+  que pararon o avisaron), días activos, trabajado y última vez que se tocó.
+  Ordenada por lo último tocado, no por tamaño: en un proyecto de semanas la
+  noticia es quién lleva 21 días sin cerrar nada. Debajo, dónde se atascó el
+  trabajo por archivo y un calendario de actividad. Exportación a reporte HTML
+  autocontenido (se abre sin servidor ni conexión) y a PDF vía el diálogo del
+  navegador.
+- **`regression-guard.cjs`** — `registerBehavior()` deriva los archivos
+  relacionados filtrando por fuente y descarta el ruido de formularios HTML
+  genéricos, que ensuciaban la descripción del comportamiento protegido.
+- **`09-sprint.md`** — mide cada tarea del sprint y cierra el lote UNA sola
+  vez al final; el reporte de cierre pega la tabla medida en lugar del
+  «Tiempo total: [aproximado]» que llevaba antes.
+- **Un dato ausente no se rellena con un cero.** Un ciclo sin duración no es
+  un ciclo de 0 minutos: las tablas muestran un guion y dicen cuántos ciclos
+  tienen medición real. `backfill` permite meter una medición tomada fuera de
+  la herramienta, pero exige `--motivo`, deja rastro en `gate_events` y sale
+  marcada con asterisco — un número que puso una persona no puede presentarse
+  igual que uno que midió la máquina.
+
+### `.gitattributes` — normalización de finales de línea
+Al cotejar main con la instalación de un proyecto real, 21 de 69 herramientas
+aparecían como distintas y **18 solo diferían en CRLF vs LF**. Solo 3 tenían
+cambios reales. Ahora el repositorio guarda todo con LF; `.ps1`/`.bat`/`.cmd`
+se fuerzan a CRLF (el problema simétrico: LF los rompe en Windows) y
+`.db`/`.sqlite` se marcan binarios, que la normalización corrompería.
+
+### Limitaciones conocidas
+- Los ciclos anteriores a esta versión no se recuperan: su hora de arranque
+  real no se guardó en ninguna parte. La medición empieza a existir desde que
+  se instala.
+- `fases.duracion_ms` sigue en cero — el mismo defecto que tenía `ciclos`, sin
+  arreglar todavía. Por eso no hay desglose por fase.
+- No hay concepto de entregable ni de sprint en la base, así que no se puede
+  responder «el entregable 3 lleva 5 días, debía llevar 2». Es dato nuevo: no
+  se puede reconstruir hacia atrás.
+
 ## [3.17.0] — 2026-07-22
 
 ### NORMA CSS TOKENS + Snapshots visuales — el front por fin tiene armadura

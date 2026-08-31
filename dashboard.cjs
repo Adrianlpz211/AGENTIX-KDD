@@ -364,7 +364,7 @@ function attachSymbolMentions(nodes, mencionesRaw) {
 
 function getGraphData() {
   try {
-    if (!fs.existsSync(dbPath)) return { nodes: [], edges: [], ciclos: [], fases: [] };
+    if (!fs.existsSync(dbPath)) return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] };
     let db = null, usingSqlJs = false;
     // Intentar better-sqlite3 primero, fallback a sql.js
     try {
@@ -376,9 +376,13 @@ function getGraphData() {
       let ciclos = [], fases = [], menciones = [];
       try { ciclos = _db.prepare('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30').all(); } catch(e) {}
       try { fases  = _db.prepare('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100').all(); } catch(e) {}
+      let tiemposPorModulo = [], friccionPorArchivo = [], ritmoPorDia = [];
+      try { tiemposPorModulo  = _db.prepare("SELECT IFNULL(NULLIF(modulo,''),'(sin módulo)') m, COUNT(*) ciclos, SUM(CASE WHEN tipo_tarea='fix' THEN 1 ELSE 0 END) fixes, SUM(CASE WHEN duracion_ms > 0 THEN 1 ELSE 0 END) con_dur, SUM(CASE WHEN duracion_ms > 0 THEN duracion_ms ELSE 0 END) ms, MAX(tests_pasando) tests, MIN(fecha_fin) desde, MAX(fecha_fin) hasta, COUNT(DISTINCT substr(fecha_fin,1,10)) dias_activos FROM ciclos GROUP BY m ORDER BY ciclos DESC").all(); } catch(e) {}
+      try { friccionPorArchivo = _db.prepare("SELECT IFNULL(file,'(sin archivo)') archivo, gate, verdict, COUNT(*) n, MAX(ts) ultimo FROM gate_events WHERE verdict IN ('STOP','WARN','DOUBT') GROUP BY archivo, gate, verdict ORDER BY n DESC LIMIT 40").all(); } catch(e) {}
+      try { ritmoPorDia       = _db.prepare("SELECT substr(fecha_fin,1,10) dia, COUNT(*) n FROM ciclos WHERE fecha_fin IS NOT NULL GROUP BY dia ORDER BY dia").all(); } catch(e) {}
       try { menciones = _db.prepare("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'").all(); } catch(e) {}
       _db.close();
-      return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases };
+      return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases, tiemposPorModulo, friccionPorArchivo, ritmoPorDia };
     } catch(e) {
       // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
       try {
@@ -391,14 +395,17 @@ function getGraphData() {
         const edges  = allSQL('SELECT * FROM relaciones');
         const ciclos = allSQL('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30');
         const fases  = allSQL('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100');
+        const tiemposPorModulo = allSQL("SELECT IFNULL(NULLIF(modulo,''),'(sin módulo)') m, COUNT(*) ciclos, SUM(CASE WHEN tipo_tarea='fix' THEN 1 ELSE 0 END) fixes, SUM(CASE WHEN duracion_ms > 0 THEN 1 ELSE 0 END) con_dur, SUM(CASE WHEN duracion_ms > 0 THEN duracion_ms ELSE 0 END) ms, MAX(tests_pasando) tests, MIN(fecha_fin) desde, MAX(fecha_fin) hasta, COUNT(DISTINCT substr(fecha_fin,1,10)) dias_activos FROM ciclos GROUP BY m ORDER BY ciclos DESC");
+        const friccionPorArchivo = allSQL("SELECT IFNULL(file,'(sin archivo)') archivo, gate, verdict, COUNT(*) n, MAX(ts) ultimo FROM gate_events WHERE verdict IN ('STOP','WARN','DOUBT') GROUP BY archivo, gate, verdict ORDER BY n DESC LIMIT 40");
+        const ritmoPorDia = allSQL("SELECT substr(fecha_fin,1,10) dia, COUNT(*) n FROM ciclos WHERE fecha_fin IS NOT NULL GROUP BY dia ORDER BY dia");
         const menciones = allSQL("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'");
         try { _db.close(); } catch {}
-        return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases };
+        return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases, tiemposPorModulo, friccionPorArchivo, ritmoPorDia };
       } catch(e2) {
-        return { nodes: [], edges: [], ciclos: [], fases: [] };
+        return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] };
       }
     }
-  } catch { return { nodes: [], edges: [], ciclos: [], fases: [] }; }
+  } catch { return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] }; }
 }
 
 // Agrupa un archivo en un "módulo" visual a partir de su ruta — más útil que el
@@ -819,7 +826,7 @@ function getEndpointHeuristicEdgesLegacy(codeNodes, root) {
   return result;
 }
 
-const { nodes, edges, ciclos: ciclosDB, fases: fasesDB } = getGraphData();
+const { nodes, edges, ciclos: ciclosDB, fases: fasesDB, tiemposPorModulo: tiemposDB, friccionPorArchivo: friccionDB, ritmoPorDia: ritmoDB } = getGraphData();
 const codeStructure = getCodeStructureGraph();
 const endpointHeuristicEdges = getEndpointHeuristicEdges(codeStructure.nodes, projectPath);
 
@@ -1646,6 +1653,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="nav-item" onclick="showDoc('errors',this)">🔴 <span data-i="nav_errors">Errors</span> <span class="nav-count">${errores.length}</span></div>
         <div class="nav-item" onclick="showDoc('questions',this)">💡 <span data-i="nav_questions">For New Devs</span></div>
         <div class="nav-item" onclick="showDoc('metrics',this)">📊 <span>Metrics</span></div>
+        <div class="nav-item" onclick="showDoc('tiempos',this)">⏱ <span>Tiempos</span></div>
         <div class="nav-item" onclick="showDoc('timeline',this)">🕐 <span>Timeline</span></div>
         <div class="nav-item" onclick="showDoc('onboarding',this)">🚀 <span>Onboarding</span> <span class="nav-count">${onboardingData.pct}%</span></div>
       </div>
@@ -1803,6 +1811,165 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>
 
       <!-- FOR NEW DEVS -->
+      <div class="docs-section" id="doc-tiempos">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <div class="docs-h1" style="margin:0">⏱ Tiempos y avance</div>
+          <select onchange="exportarTiempos(this)" title="Descargar este tablero como reporte"
+            style="background:var(--bg2);color:var(--text2);border:1px solid var(--border);border-radius:6px;
+                   padding:6px 10px;font-size:12px;cursor:pointer">
+            <option value="">⤓ Exportar…</option>
+            <option value="html">Reporte HTML — se abre solo, se manda por correo</option>
+            <option value="pdf">PDF — vía «Guardar como PDF» del navegador</option>
+          </select>
+        </div>
+        <div class="docs-sub">Cuánto costó cada módulo, cuál se movió y cuál lleva días parado, y dónde se atascó el trabajo. Cuando cada módulo lo lleva una persona distinta, esta pantalla es la que muestra dónde mirar.</div>
+      
+        ${(() => {
+          const T = tiemposDB || [], F = friccionDB || [], R = ritmoDB || [];
+          if (!T.length) return '<div class="empty-state" style="padding:40px">Sin ciclos registrados todavía — aparecen solos al cerrar cada tarea.</div>';
+      
+          const fecha = (x) => x ? new Date(String(x).replace(' ','T')+'Z') : null;
+          const dias = (a,b) => (a&&b&&!isNaN(a)&&!isNaN(b))
+            ? Math.round((new Date(b.getFullYear(),b.getMonth(),b.getDate())-new Date(a.getFullYear(),a.getMonth(),a.getDate()))/86400000)+1 : 0;
+          const hoy = new Date();
+          const durTxt = (ms) => { if(!ms) return '—'; const m=Math.round(ms/60000);
+            return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min'; };
+      
+          // La fricción se atribuye a un módulo cuando su nombre aparece en la ruta del
+          // archivo. Es una heurística: lo que no case queda "sin atribuir", nunca se
+          // reparte a ojo entre los módulos.
+          const frPorMod = {};
+          let frSinAtribuir = 0;
+          for (const f of F) {
+            const ruta = String(f.archivo || '').toLowerCase();
+            const m = T.map(t=>String(t.m)).find(n => n !== '(sin módulo)' && ruta.includes(n.toLowerCase()));
+            if (m) frPorMod[m] = (frPorMod[m]||0) + f.n; else frSinAtribuir += f.n;
+          }
+      
+          const totCiclos = T.reduce((a,t)=>a+(t.ciclos||0),0);
+          const totFixes  = T.reduce((a,t)=>a+(t.fixes||0),0);
+          const totConDur = T.reduce((a,t)=>a+(t.con_dur||0),0);
+          const totMs     = T.reduce((a,t)=>a+(t.ms||0),0);
+          const totFric   = F.reduce((a,f)=>a+(f.n||0),0);
+          const stops     = F.filter(f=>f.verdict==='STOP').reduce((a,f)=>a+f.n,0);
+          const retrabajo = totCiclos ? Math.round((totFixes/totCiclos)*100) : 0;
+          const cobertura = totCiclos ? Math.round((totConDur/totCiclos)*100) : 0;
+      
+          // Estancado = tres semanas sin cerrar un ciclo. Es el umbral que hace que un
+          // proyecto de tres semanas tenga sentido: por debajo, todo parecería activo.
+          const conEdad = T.map(t => {
+            const u = fecha(t.hasta);
+            const edad = u && !isNaN(u) ? Math.floor((hoy-u)/86400000) : null;
+            return {...t, edad};
+          });
+          const estancados = conEdad.filter(t => t.edad != null && t.edad >= 21).length;
+      
+          const kpi = (val,lab,col,nota) => `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+            <div style="font-size:22px;font-weight:600;color:${col}">${val}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${lab}</div>
+            ${nota?`<div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">${nota}</div>`:''}</div>`;
+      
+          let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">';
+          h += kpi(totCiclos, 'ciclos cerrados', 'var(--text)', T.length+' módulos');
+          h += kpi(retrabajo+'%', 'retrabajo', retrabajo>30?'#f87171':retrabajo>15?'#fbbf24':'#34d399', totFixes+' de '+totCiclos+' fueron arreglos');
+          h += kpi(stops||totFric, stops?'veces que un gate frenó':'avisos de gate', (stops>0)?'#f87171':'var(--text2)', stops?totFric+' eventos en total':'ningún STOP');
+          h += kpi(estancados, 'módulos parados', estancados>0?'#fbbf24':'#34d399', '21 días o más sin cerrar nada');
+          h += kpi(durTxt(totMs), 'tiempo medido', 'var(--text)', cobertura+'% de los ciclos lo tiene');
+          h += '</div>';
+      
+          // ── Tabla por módulo ──
+          h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+          h += '<thead><tr style="color:var(--text3);font-size:11px">'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left">Módulo</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Ciclos</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Retrabajo</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Frenos</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Días activos</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Trabajado</th>'
+            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Última vez</th>'
+            + '</tr></thead><tbody>';
+      
+          const maxC = Math.max(...T.map(t=>t.ciclos||0), 1);
+          const orden = [...conEdad].sort((a,b) => (a.edad??9e9)-(b.edad??9e9));
+          for (const t of orden) {
+            const rt = t.ciclos ? Math.round((t.fixes/t.ciclos)*100) : 0;
+            const fr = frPorMod[String(t.m)] || 0;
+            const pct = Math.round(((t.ciclos||0)/maxC)*100);
+            const edadTxt = t.edad == null ? '—' : t.edad === 0 ? 'hoy' : t.edad === 1 ? 'ayer' : 'hace '+t.edad+' d';
+            const edadCol = t.edad == null ? 'var(--text3)' : t.edad >= 21 ? '#f87171' : t.edad >= 7 ? '#fbbf24' : '#34d399';
+            const rtCol = rt > 30 ? '#f87171' : rt > 15 ? '#fbbf24' : 'var(--text2)';
+            h += '<tr>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border)"><div style="color:var(--text);margin-bottom:3px">'+escHtml(String(t.m))+'</div>'
+              + '<div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--blue)"></div></div></td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text)">'+(t.ciclos||0)+'</td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+rtCol+'">'+(t.fixes?rt+'%':'—')+'</td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+(fr?'#f87171':'var(--text3)')+'">'+(fr||'—')+'</td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+(t.dias_activos||'—')+'</td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+durTxt(t.ms)+(t.con_dur&&t.con_dur<t.ciclos?'<span style="color:var(--text3);font-size:10px"> ('+t.con_dur+'/'+t.ciclos+')</span>':'')+'</td>'
+              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+edadCol+'">'+edadTxt+'</td>'
+              + '</tr>';
+          }
+          h += '</tbody></table>';
+      
+          // ── Dónde se atascó ──
+          // Igual que en el reporte: la seccion existe siempre, con o sin eventos.
+          h += '<div class="docs-h2" style="margin-top:26px">Dónde se atascó el trabajo</div>';
+          if (!F.length) {
+            h += '<div style="font-size:12px;color:var(--text3)">Ningún control frenó ni avisó en este '
+              + 'proyecto. No es que falte el dato: no hubo eventos que registrar.</div>';
+          } else {
+            h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cada fila es un archivo que hizo saltar un control. Un archivo con muchos frenos es donde de verdad se fue el tiempo — no aparece en ninguna estimación.</div>';
+            h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
+            for (const f of F.slice(0,10)) {
+              const col = f.verdict==='STOP' ? '#f87171' : f.verdict==='DOUBT' ? '#fbbf24' : 'var(--text3)';
+              h += '<tr>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-family:ui-monospace,monospace;font-size:11px">'+escHtml(String(f.archivo))+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text3);white-space:nowrap">'+escHtml(String(f.gate))+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+col+';white-space:nowrap">'+escHtml(String(f.verdict))+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);width:50px">'+f.n+'</td>'
+                + '</tr>';
+            }
+            h += '</tbody></table>';
+            if (frSinAtribuir) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">'+frSinAtribuir+' evento(s) no se pudieron atribuir a un módulo: su archivo no lleva el nombre de ninguno. Se cuentan aquí pero no en la columna «Frenos».</div>';
+          }
+      
+          // ── Ritmo ──
+          if (R.length > 1) {
+            h += '<div class="docs-h2" style="margin-top:26px">Ritmo</div>';
+            h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cuándo se trabajó de verdad. '
+              + 'Cada casilla es un día; cuanto más intenso el color, más ciclos se cerraron ese día.</div>';
+            h += '<div id="ritmo-cal"></div>';
+          }
+      
+          return h;
+        })()}
+      
+        <div class="docs-h2" style="margin-top:28px">Cómo leer esto</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.8">
+          <b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar
+          simplemente que es más grande — por sí solos no acusan a nadie.
+          <br><br>
+          <b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción.
+          Es la métrica que más habla: un módulo que construye avanza, uno que repara gira
+          en el sitio. Si sube, suele ser que algo se cerró antes de estar listo.
+          <br><br>
+          <b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la
+          fricción real, la que no aparece en ninguna estimación porque nadie la planifica.
+          <br><br>
+          <b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un
+          módulo en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, puede
+          estar terminado, o puede que nadie lo esté tocando. La tabla no lo sabe — dice
+          dónde preguntar.
+          <br><br>
+          <b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si
+          dice (2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el
+          total real. Un guion no es cero minutos, es un ciclo sin dato.
+          <br><br>
+          Y lo que ninguna columna dice: <b>si quedó bien</b>. Una tarea rápida con un
+          defecto que aparece después costó más que una lenta que quedó cerrada.
+        </div>
+      </div>
+      
       <div class="docs-section" id="doc-questions">
         <div class="docs-h1">For New Developers</div>
         <div class="docs-sub">Everything a new team member needs to get up to speed.</div>
@@ -1869,8 +2036,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <!-- Métrica extra: tiempo por ciclo y reintentos -->
         ${metricsData.avg_duracion_ms > 0 || metricsData.reintento_rate > 0 ? `
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
-          ${metricsData.avg_duracion_ms>0?`<div class="info-card"><div class="ic-label">Avg cycle time</div><div class="ic-val" style="color:var(--text2);font-size:13px">${metricsData.avg_duracion_ms>60000?Math.round(metricsData.avg_duracion_ms/60000)+'m':metricsData.avg_duracion_ms+'ms'}</div></div>`:''}
-          ${metricsData.avg_fase_ms>0?`<div class="info-card"><div class="ic-label">Avg phase time</div><div class="ic-val" style="color:var(--text2);font-size:13px">${metricsData.avg_fase_ms>60000?Math.round(metricsData.avg_fase_ms/60000)+'m':metricsData.avg_fase_ms+'ms'}</div></div>`:''}
+          ${metricsData.avg_duracion_ms>0?`<div class="info-card"><div class="ic-label">Avg cycle time</div><div class="ic-val" style="color:var(--text2);font-size:13px">${metricsData.avg_duracion_ms>=60000?Math.round(metricsData.avg_duracion_ms/60000)+'m':metricsData.avg_duracion_ms>=1000?Math.round(metricsData.avg_duracion_ms/1000)+'s':metricsData.avg_duracion_ms+'ms'}</div></div>`:''}
+          ${metricsData.avg_fase_ms>0?`<div class="info-card"><div class="ic-label">Avg phase time</div><div class="ic-val" style="color:var(--text2);font-size:13px">${metricsData.avg_fase_ms>=60000?Math.round(metricsData.avg_fase_ms/60000)+'m':metricsData.avg_fase_ms>=1000?Math.round(metricsData.avg_fase_ms/1000)+'s':metricsData.avg_fase_ms+'ms'}</div></div>`:''}
           ${metricsData.reintento_rate>0?`<div class="info-card"><div class="ic-label">Retry rate</div><div class="ic-val" style="color:${metricsData.reintento_rate>30?'#f87171':'#fbbf24'};font-size:16px">${metricsData.reintento_rate}%</div></div>`:''}
         </div>` : ''}
 
@@ -4243,12 +4410,359 @@ function centerModGraph(){
   // noop — static graph
 }
 
+// Datos del tablero para armar el reporte exportable en el cliente. El archivo
+// que sale es autocontenido: se manda por correo y se abre sin conexion, que es
+// el caso real (la persona no tiene como entrar al dashboard).
+// La barra escapada evita que un dato que contenga un cierre de script rompa la pagina.
+const TIEMPOS_DATA = JSON.parse(${JSON.stringify(JSON.stringify({proyecto: config.nombre || 'Proyecto', modulos: tiemposDB || [], friccion: friccionDB || [], ritmo: ritmoDB || []})).split('<').join('\\u003c')});
+
+/** Escapa para HTML. El reporte lleva rutas de archivo y nombres de módulo. */
+
+/**
+ * Calendario de actividad: una celda por dia, el color dice cuantos ciclos se
+ * cerraron. Sustituye a un grafico de barras que no llevaba ni escala ni
+ * numeros, donde un dia de 23 ciclos y uno de 2 se veian casi igual.
+ *
+ * Se usa tal cual en la pantalla y en el reporte exportado: una sola
+ * implementacion, porque dos copias de lo mismo acaban divergiendo.
+ *
+ * @param R    filas {dia:'YYYY-MM-DD', n:<ciclos>}, ordenadas
+ * @param opt  {vacio, escala:[c1..c4], texto, tenue} colores segun el destino
+ */
+function calendarioActividad(R, opt){
+  if(!R || R.length < 2) return '';
+  var o = opt || {};
+  var cVacio = o.vacio || '#eef1f6';
+  var esc = o.escala || ['#bfdbfe','#93c5fd','#60a5fa','#2563eb'];
+  var cTexto = o.texto || '#1a2233';
+  var cTenue = o.tenue || '#8a95a8';
+  var MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+  var porDia = {};
+  for(var a=0;a<R.length;a++) porDia[String(R[a].dia)] = R[a].n || 0;
+
+  // La rejilla empieza en el lunes de la primera semana para que las filas sean
+  // dias de la semana de verdad y se pueda leer si se trabaja en fin de semana.
+  var ini = new Date(String(R[0].dia) + 'T00:00:00Z');
+  var fin = new Date(String(R[R.length-1].dia) + 'T00:00:00Z');
+  var desplaza = (ini.getUTCDay() + 6) % 7;
+  var cursor = new Date(ini); cursor.setUTCDate(cursor.getUTCDate() - desplaza);
+
+  var semanas = [], sem = [];
+  var maxN = 1, activos = 0, total = 0, dias = 0;
+  var mejorDia = null, mejorN = 0;
+  var rachaAct = 0, peorRacha = 0, finRacha = null;
+
+  while(cursor <= fin){
+    var k = cursor.toISOString().slice(0,10);
+    var dentro = (cursor >= ini);
+    var n = dentro ? (porDia[k] || 0) : null;
+    if(n !== null){
+      dias++; total += n;
+      if(n > 0){ activos++; if(n > maxN) maxN = n; if(n > mejorN){ mejorN = n; mejorDia = k; } 
+        if(rachaAct > peorRacha){ peorRacha = rachaAct; finRacha = k; } rachaAct = 0; }
+      else rachaAct++;
+    }
+    sem.push({ k: k, n: n, mes: cursor.getUTCMonth(), dia: cursor.getUTCDate() });
+    if(sem.length === 7){ semanas.push(sem); sem = []; }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  if(sem.length){ while(sem.length < 7) sem.push({ k:null, n:null }); semanas.push(sem); }
+  if(rachaAct > peorRacha) peorRacha = rachaAct;
+
+  // Cuatro tramos de intensidad. Con un maximo de 23 y dias de 2, una escala
+  // lineal aplastaria casi todo en el tramo bajo.
+  var tramo = function(n){
+    if(!n) return -1;
+    var r = n / maxN;
+    return r <= 0.25 ? 0 : r <= 0.5 ? 1 : r <= 0.75 ? 2 : 3;
+  };
+
+  var C = 18, G = 4;
+  var h = '<div style="overflow-x:auto"><div style="display:inline-block;min-width:100%">';
+
+  // Meses arriba: sin esto no se puede ubicar una racha en el calendario.
+  h += '<div style="display:flex;gap:' + G + 'px;margin-left:28px;margin-bottom:3px">';
+  var mesPrev = -1;
+  for(var s=0;s<semanas.length;s++){
+    var pri = semanas[s][0];
+    var et = (pri && pri.mes !== mesPrev) ? MESES[pri.mes] : '';
+    if(pri && pri.mes !== mesPrev) mesPrev = pri.mes;
+    h += '<div style="width:' + C + 'px;font-size:9px;color:' + cTenue + ';white-space:nowrap">' + et + '</div>';
+  }
+  h += '</div>';
+
+  var DS = ['L','M','X','J','V','S','D'];
+  h += '<div style="display:flex;gap:' + G + 'px">';
+  h += '<div style="display:flex;flex-direction:column;gap:' + G + 'px;width:24px">';
+  for(var d=0;d<7;d++)
+    h += '<div style="height:' + C + 'px;font-size:10px;line-height:' + C + 'px;color:' + cTenue + '">' + (d%2===0?DS[d]:'') + '</div>';
+  h += '</div>';
+
+  for(var w=0;w<semanas.length;w++){
+    h += '<div style="display:flex;flex-direction:column;gap:' + G + 'px">';
+    for(var q=0;q<7;q++){
+      var c = semanas[w][q];
+      if(!c || c.n === null){
+        h += '<div style="width:' + C + 'px;height:' + C + 'px"></div>';
+      } else {
+        var t = tramo(c.n);
+        var col = t < 0 ? cVacio : esc[t];
+        var tip = c.k + ': ' + c.n + (c.n === 1 ? ' ciclo' : ' ciclos');
+        h += '<div title="' + tip + '" style="width:' + C + 'px;height:' + C + 'px;background:' + col + ';border-radius:2px"></div>';
+      }
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+
+  // Leyenda CON numeros: sin el maximo escrito, el color no dice cuanto es mucho.
+  h += '<div style="display:flex;align-items:center;gap:5px;margin-top:8px;font-size:10px;color:' + cTenue + '">';
+  h += '<span>sin actividad</span>';
+  h += '<div style="width:11px;height:11px;background:' + cVacio + ';border-radius:2px"></div>';
+  for(var e2=0;e2<4;e2++)
+    h += '<div style="width:11px;height:11px;background:' + esc[e2] + ';border-radius:2px"></div>';
+  h += '<span>hasta ' + maxN + ' ciclos en un dia</span>';
+  h += '</div>';
+  h += '</div></div>';
+
+  // Las frases que se leen primero. El numero suelto no dice nada; el numero
+  // con su comparacion, si.
+  var fFecha = function(k){
+    if(!k) return '';
+    var d2 = new Date(k + 'T00:00:00Z');
+    return d2.getUTCDate() + ' ' + MESES[d2.getUTCMonth()];
+  };
+  h += '<div style="margin-top:10px;font-size:11.5px;color:' + cTexto + ';line-height:1.75">';
+  h += '<b>' + total + ' ciclos</b> repartidos en <b>' + activos + ' dias de trabajo</b> sobre ' + dias + ' de calendario';
+  h += ' — o sea que en ' + (dias - activos) + ' dias no se cerro nada.';
+  if(mejorDia) h += '<br>Dia mas cargado: <b>' + mejorN + ' ciclos</b> el ' + fFecha(mejorDia) + '.';
+  if(peorRacha > 1) h += '<br>Parada mas larga: <b>' + peorRacha + ' dias seguidos</b> sin cerrar nada.';
+  h += '</div>';
+
+  return h;
+}
+
+function repEsc(x){
+  return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/** Duracion legible. Un guion NO es cero: es un ciclo sin dato. */
+function repDur(ms){
+  if(!ms) return '—';
+  var m=Math.round(ms/60000);
+  return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min';
+}
+
+function repFecha(x){
+  if(!x) return null;
+  var d=new Date(String(x).replace(' ','T')+'Z');
+  return isNaN(d)?null:d;
+}
+
+/**
+ * Arma el reporte completo como documento HTML independiente.
+ * Mismos numeros que la pantalla, mismas advertencias: si un dato no esta, el
+ * reporte lo dice. Un reporte que redondea para verse mejor es peor que ninguno.
+ */
+function reporteTiemposHTML(){
+  var D=TIEMPOS_DATA||{}, T=D.modulos||[], F=D.friccion||[], R=D.ritmo||[];
+  var hoy=new Date();
+  var fmtF=function(d){ return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear(); };
+
+  var totCiclos=0, totFixes=0, totConDur=0, totMs=0;
+  for(var a=0;a<T.length;a++){
+    totCiclos+=T[a].ciclos||0; totFixes+=T[a].fixes||0;
+    totConDur+=T[a].con_dur||0; totMs+=T[a].ms||0;
+  }
+  var totFric=0, stops=0;
+  for(var b=0;b<F.length;b++){ totFric+=F[b].n||0; if(F[b].verdict==='STOP') stops+=F[b].n||0; }
+  var retrabajo=totCiclos?Math.round((totFixes/totCiclos)*100):0;
+  var cobertura=totCiclos?Math.round((totConDur/totCiclos)*100):0;
+
+  // Friccion atribuida por nombre de archivo. Lo que no case queda fuera: no se
+  // reparte a ojo entre modulos.
+  var frPorMod={}, frSuelta=0;
+  for(var c=0;c<F.length;c++){
+    var ruta=String(F[c].archivo||'').toLowerCase(), hit=null;
+    for(var d2=0;d2<T.length;d2++){
+      var nm=String(T[d2].m); 
+      if(nm!=='(sin módulo)' && ruta.indexOf(nm.toLowerCase())>=0){ hit=nm; break; }
+    }
+    if(hit) frPorMod[hit]=(frPorMod[hit]||0)+(F[c].n||0); else frSuelta+=F[c].n||0;
+  }
+
+  var conEdad=T.map(function(t){
+    var u=repFecha(t.hasta);
+    return Object.assign({}, t, { edad: u?Math.floor((hoy-u)/86400000):null });
+  }).sort(function(x,y){ return (x.edad==null?9e9:x.edad)-(y.edad==null?9e9:y.edad); });
+  var parados=conEdad.filter(function(t){ return t.edad!=null && t.edad>=21; }).length;
+
+  var css='body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+    +'color:#1a2233;background:#fff;margin:0;padding:38px 44px;line-height:1.55;font-size:13px}'
+    +'h1{font-size:22px;margin:0 0 4px;font-weight:650}'
+    +'h2{font-size:14px;margin:30px 0 8px;font-weight:650;color:#1a2233;'
+    +'border-bottom:1px solid #e3e8ef;padding-bottom:5px}'
+    +'.sub{color:#5b6880;font-size:12px;margin-bottom:26px}'
+    +'.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}'
+    +'.kpi{flex:1;min-width:120px;border:1px solid #e3e8ef;border-radius:7px;padding:11px 13px;background:#fafbfd}'
+    +'.kv{font-size:20px;font-weight:650}.kl{font-size:10.5px;color:#5b6880;margin-top:1px}'
+    +'.kn{font-size:9.5px;color:#8a95a8;margin-top:3px}'
+    +'table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}'
+    +'th{text-align:left;font-size:10.5px;color:#5b6880;font-weight:600;'
+    +'padding:7px 9px;border-bottom:1.5px solid #d8dfea}'
+    +'td{padding:7px 9px;border-bottom:1px solid #eef1f6}'
+    +'.r{text-align:right}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}'
+    +'.rojo{color:#c0392b}.ambar{color:#b7791f}.verde{color:#1f7a4d}.gris{color:#8a95a8}'
+    +'.nota{font-size:11.5px;color:#5b6880;margin-top:9px}'
+    +'.leer{font-size:11.5px;color:#3d4a60;line-height:1.85}'
+    +'.pie{margin-top:34px;padding-top:12px;border-top:1px solid #e3e8ef;'
+    +'font-size:10.5px;color:#8a95a8}'
+    +'.ritmo{display:flex;align-items:flex-end;gap:2px;height:56px;margin-top:6px}'
+    +'.ritmo i{flex:1;min-width:2px;background:#3b82f6;border-radius:1px}'
+    +'.ritmo i.v{background:#e3e8ef}'
+    +'@media print{body{padding:0}h2{page-break-after:avoid}table{page-break-inside:auto}'
+    +'tr{page-break-inside:avoid}.pie{page-break-before:avoid}}';
+
+  var h='<h1>'+repEsc(D.proyecto)+' — Tiempos y avance</h1>';
+  h+='<div class="sub">Reporte generado el '+fmtF(hoy)+' · Agentix KDD</div>';
+
+  h+='<div class="kpis">';
+  var kpi=function(v,l,cl,n){ return '<div class="kpi"><div class="kv '+(cl||'')+'">'+v+'</div>'
+    +'<div class="kl">'+l+'</div>'+(n?'<div class="kn">'+n+'</div>':'')+'</div>'; };
+  h+=kpi(totCiclos,'ciclos cerrados','',T.length+' módulos');
+  h+=kpi(retrabajo+'%','retrabajo',retrabajo>30?'rojo':retrabajo>15?'ambar':'verde',
+        totFixes+' de '+totCiclos+' fueron arreglos');
+  h+=kpi(stops||totFric,stops?'veces que un control frenó':'avisos de control',stops?'rojo':'',
+        stops?totFric+' eventos en total':'ningún freno');
+  h+=kpi(parados,'módulos parados',parados?'ambar':'verde','21 días o más sin cerrar nada');
+  h+=kpi(repDur(totMs),'tiempo medido','',cobertura+'% de los ciclos lo tiene');
+  h+='</div>';
+
+  h+='<h2>Por módulo</h2>';
+  h+='<table><thead><tr><th>Módulo</th><th class="r">Ciclos</th><th class="r">Retrabajo</th>'
+    +'<th class="r">Frenos</th><th class="r">Días activos</th><th class="r">Trabajado</th>'
+    +'<th class="r">Última vez</th></tr></thead><tbody>';
+  for(var e=0;e<conEdad.length;e++){
+    var t=conEdad[e];
+    var rt=t.ciclos?Math.round((t.fixes/t.ciclos)*100):0;
+    var fr=frPorMod[String(t.m)]||0;
+    var ed=t.edad==null?'—':t.edad===0?'hoy':t.edad===1?'ayer':'hace '+t.edad+' d';
+    var edCl=t.edad==null?'gris':t.edad>=21?'rojo':t.edad>=7?'ambar':'verde';
+    var parcial=(t.con_dur&&t.con_dur<t.ciclos)?' <span class="gris">('+t.con_dur+'/'+t.ciclos+')</span>':'';
+    h+='<tr><td>'+repEsc(t.m)+'</td>'
+      +'<td class="r">'+(t.ciclos||0)+'</td>'
+      +'<td class="r '+(rt>30?'rojo':rt>15?'ambar':'')+'">'+(t.fixes?rt+'%':'—')+'</td>'
+      +'<td class="r '+(fr?'rojo':'gris')+'">'+(fr||'—')+'</td>'
+      +'<td class="r">'+(t.dias_activos||'—')+'</td>'
+      +'<td class="r">'+repDur(t.ms)+parcial+'</td>'
+      +'<td class="r '+edCl+'">'+ed+'</td></tr>';
+  }
+  h+='</tbody></table>';
+
+  // La seccion se pinta SIEMPRE: si desaparece, quien lee cree que falta algo.
+  h+='<h2>Donde se atasco el trabajo</h2>';
+  if(!F.length){
+    h+='<div class="nota" style="margin-top:0">Ningun control freno ni aviso en este proyecto. '
+      +'No es que falte el dato: no hubo eventos que registrar.</div>';
+  } else {
+    h+='<table><thead><tr><th>Archivo</th><th>Control</th><th class="r">Veredicto</th>'
+      +'<th class="r">Veces</th></tr></thead><tbody>';
+    for(var g=0;g<Math.min(F.length,12);g++){
+      var f=F[g];
+      var vc=f.verdict==='STOP'?'rojo':f.verdict==='DOUBT'?'ambar':'gris';
+      h+='<tr><td class="mono">'+repEsc(f.archivo)+'</td><td class="gris">'+repEsc(f.gate)+'</td>'
+        +'<td class="r '+vc+'">'+repEsc(f.verdict)+'</td><td class="r">'+(f.n||0)+'</td></tr>';
+    }
+    h+='</tbody></table>';
+    if(frSuelta) h+='<div class="nota">'+frSuelta+' evento(s) no se pudieron atribuir a un módulo: '
+      +'su archivo no lleva el nombre de ninguno. Se cuentan aquí pero no en la columna Frenos.</div>';
+  }
+
+  if(R.length>1){
+    h+='<h2>Ritmo</h2>';
+    h+='<div class="nota" style="margin-top:0">Cuando se trabajo de verdad. Cada casilla es un dia; '
+      +'cuanto mas intenso el color, mas ciclos se cerraron ese dia.</div>';
+    h+=calendarioActividad(R,{vacio:'#eef1f6',escala:['#bfdbfe','#93c5fd','#60a5fa','#2563eb'],texto:'#3d4a60',tenue:'#8a95a8'});
+  }
+
+  h+='<h2>Cómo leer esto</h2><div class="leer">'
+    +'<b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar '
+    +'simplemente que es más grande — por sí solos no acusan a nadie.<br><br>'
+    +'<b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción. '
+    +'Es la métrica que más habla: un módulo que construye avanza, uno que repara gira en '
+    +'el sitio.<br><br>'
+    +'<b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la '
+    +'fricción real, la que no aparece en ninguna estimación porque nadie la planifica.<br><br>'
+    +'<b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un módulo '
+    +'en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, terminado, o sin '
+    +'nadie encima. El reporte no lo sabe — dice dónde preguntar.<br><br>'
+    +'<b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si dice '
+    +'(2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el total real. '
+    +'Un guion no es cero minutos, es un ciclo sin dato.<br><br>'
+    +'Y lo que ninguna columna dice: <b>si quedó bien</b>. Una tarea rápida con un defecto '
+    +'que aparece después costó más que una lenta que quedó cerrada.</div>';
+
+  h+='<div class="pie">Generado por Agentix KDD el '+fmtF(hoy)+'. '
+    +'Las cifras salen de los ciclos registrados en el proyecto, no de estimaciones. '
+    +(cobertura<100?('Solo el '+cobertura+'% de los ciclos tiene tiempo medido: los demás se '
+    +'cerraron antes de que existiera la medición y su arranque no se guardó.'):'')+'</div>';
+
+  return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+    +'<title>'+repEsc(D.proyecto)+' — Tiempos y avance</title>'
+    +'<style>'+css+'</style></head><body>'+h+'</body></html>';
+}
+
+/** Descarga el reporte como archivo .html autocontenido. */
+function exportarTiemposHTML(){
+  var blob=new Blob([reporteTiemposHTML()],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a');
+  var f=new Date().toISOString().slice(0,10);
+  a.href=url; a.download='tiempos-'+String(TIEMPOS_DATA.proyecto||'proyecto')
+    .toLowerCase().replace(/[^a-z0-9]+/g,'-')+'-'+f+'.html';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+}
+
+/**
+ * Abre el reporte en una ventana y lanza el dialogo de impresion, donde el
+ * navegador ofrece Guardar como PDF. Sale texto seleccionable, no una captura,
+ * y no hace falta meter una libreria de PDF en el dashboard.
+ */
+function exportarTiemposPDF(){
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana. Permite las ventanas emergentes de este sitio y vuelve a intentarlo.'); return; }
+  w.document.open(); w.document.write(reporteTiemposHTML()); w.document.close();
+  // Se espera al render: imprimir antes deja paginas en blanco.
+  w.onload=function(){ setTimeout(function(){ w.focus(); w.print(); }, 250); };
+  setTimeout(function(){ if(w.document.readyState==='complete'){ w.focus(); w.print(); } }, 700);
+}
+
+function exportarTiempos(sel){
+  var v=sel.value; sel.selectedIndex=0;
+  if(v==='html') exportarTiemposHTML();
+  else if(v==='pdf') exportarTiemposPDF();
+}
+
+
 function copyMarkdown(){
   const t='# '+('${config.nombre}')+'\\n\\nGenerated by Agentix KDD Dashboard\\n';
   navigator.clipboard?.writeText(t).then(()=>alert('Copied!')).catch(()=>alert('Copy manually'));
 }
 
 // Init
+// El calendario se pinta aqui, no en el servidor, para que la pantalla y el
+// reporte exportado compartan una sola implementacion.
+(function(){
+  var c = document.getElementById('ritmo-cal');
+  if(!c || typeof TIEMPOS_DATA === 'undefined') return;
+  c.innerHTML = calendarioActividad(TIEMPOS_DATA.ritmo || [], {
+    vacio:'rgba(255,255,255,.07)',
+    escala:['#1e3a8a','#1d4ed8','#3b82f6','#60a5fa'],
+    texto:'var(--text2)', tenue:'var(--text3)'
+  });
+})();
 renderNodeList();
 renderGraph();
 </script>
