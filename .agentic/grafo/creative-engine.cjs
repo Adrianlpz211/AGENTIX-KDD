@@ -60,19 +60,42 @@ const LEVEL_NAMES = {
 const LEVEL_2_MIN_CONTRACTS   = 10;  // contratos protegidos mínimos para auto-elevar a nivel 2
 const MAX_SUGGESTIONS_STORED  = 50;  // máx sugerencias pendientes en DB
 
-// Tipos de sugerencia con metadata
+/* Tipos de sugerencia. SOLO los que tienen un detector que de verdad produce.
+ *
+ * Se midió el 03/09/2026: de once tipos declarados, CUATRO no tenían ni una
+ * línea de código que los generara — SIMPLIFICATION, PATTERN, DEAD_CODE y
+ * ARCHITECTURE. Eran etiquetas. Un menú con cuatro platos que no existen enseña
+ * a desconfiar de la carta entera, así que se quitan.
+ *
+ * DEAD_CODE se descartó tras intentarlo, no por pereza: el índice AST tiene
+ * 5.000 símbolos y 28.198 aristas, y da 207 candidatos a "función sin
+ * referencias". La muestra son `main`, `loadEnvFile`, `stubModuleRoot` — todas
+ * SÍ se llaman, en su propio archivo, y las aristas no registran las llamadas
+ * internas. Un detector con 200 falsos positivos no se corrige: se apaga, y con
+ * él se pierde la confianza en los demás.
+ *
+ * SIMPLIFICATION, PATTERN y ARCHITECTURE son juicios, no medidas. Un modelo los
+ * puede proponer durante un ciclo; no necesitan una fila en una tabla.
+ */
 const SUGGESTION_TYPES = {
-  SIMPLIFICATION:   { label: 'Simplification',   risk: 'LOW',    auto_apply_at: 2 },
+  /* Su patrón se aplicó 5+ veces: candidato a abstraerse. */
   ABSTRACTION:      { label: 'Abstraction',       risk: 'MEDIUM', auto_apply_at: 3 },
+  /* Lo rompen los cambios ajenos 2+ veces: está acoplado a demasiado.
+     Se alimenta de las aristas `regressed_by` que ahora crea el post-cycle. */
   REFACTOR:         { label: 'Refactor',          risk: 'MEDIUM', auto_apply_at: 3 },
-  PATTERN:          { label: 'Pattern',           risk: 'LOW',    auto_apply_at: 2 },
-  FRAGILITY:        { label: 'Fragility warning', risk: 'HIGH',   auto_apply_at: null }, // nunca auto-aplica
-  DEAD_CODE:        { label: 'Dead code',         risk: 'LOW',    auto_apply_at: 2 },
+  /* Un módulo con 2+ contratos que fallan: se rompe solo, repetidamente.
+     Lee `failure_count`, que ahora llena el Preservation Gate en el post-cycle. */
+  FRAGILITY:        { label: 'Fragility warning', risk: 'HIGH',   auto_apply_at: null },
+  /* Un error confirmado sin ningún contrato que lo proteja. */
   MISSING_TEST:     { label: 'Missing test',      risk: 'MEDIUM', auto_apply_at: null },
+  /* Tarea que el motor de decisión autónoma aplazó (la produce grafo.cjs). */
   OPPORTUNITY:      { label: 'Opportunity',       risk: 'LOW',    auto_apply_at: 2 },
-  ARCHITECTURE:     { label: 'Architecture',      risk: 'HIGH',   auto_apply_at: null },
-  ROOT_CAUSE:       { label: 'Root cause',        risk: 'HIGH',   auto_apply_at: null }, // nunca auto-aplica
-  ERROR_LIKELY_FIXED: { label: 'Error likely fixed', risk: 'MEDIUM', auto_apply_at: null }, // nunca auto-aplica — cambia estado en memoria, siempre requiere confirmación
+  /* 3+ errores activos en la misma área: mirar si comparten causa. */
+  ROOT_CAUSE:       { label: 'Root cause',        risk: 'HIGH',   auto_apply_at: null },
+  /* Nunca auto-aplica: cambia el estado de un error en memoria, que es de las
+     cosas menos reversibles que hay. Exige evidencia comprobable, no palabras
+     compartidas — ver el detector. */
+  ERROR_LIKELY_FIXED: { label: 'Error likely fixed', risk: 'MEDIUM', auto_apply_at: null },
 };
 
 // Mismo criterio de "palabras clave compartidas" que reasoning-bank.cjs usa para
@@ -408,39 +431,104 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
   // estrategias parecidas. Nunca marca nada solo: crea una sugerencia que hay
   // que confirmar con `creative-engine.cjs apply <id>`.
   try {
+    /* EVIDENCIA, NO COINCIDENCIA DE PALABRAS.
+       La primera versión cruzaba "palabras clave compartidas" entre la tarea del
+       ciclo y el título del error, con umbral de DOS palabras. En un caso real
+       de D:ð las dos palabras fueron ["compras", "como"]: el nombre del
+       módulo —que comparten todas las tareas del área— y una palabra vacía que
+       se olvidó filtrar. O sea que cualquier tarea de compras "resolvía"
+       cualquier error de compras. Es el mismo ruido que hundió los 397 enlaces
+       `resuelto_por`.
+
+       Ahora se exige una de estas dos, y las dos son hechos comprobables:
+
+         A · el ciclo TOCÓ un archivo que el error declara como suyo
+             (nodos.archivos_aplica ∩ ciclos.modules_touched)
+         B · el contrato que protege ese error pasa y lleva rachas verdes
+             (verified_contracts.consecutive_passes > 0 y sin fallos recientes)
+
+       B es la más fuerte que existe: si el test que detecta ese error pasa, el
+       error está cerrado — no "probablemente". A es fuerte y siempre disponible.
+       Las palabras compartidas se conservan solo para ORDENAR los candidatos que
+       ya entraron por A o por B; no admiten a nadie. */
     const recentCycles = db.prepare(`
-      SELECT id, tarea, area FROM ciclos
+      SELECT id, tarea, area, modules_touched FROM ciclos
       WHERE estado = 'COMPLETADO' AND tarea IS NOT NULL
       ORDER BY fecha_inicio DESC LIMIT 5
     `).all();
 
     const activeErrors = db.prepare(`
-      SELECT id, titulo, area FROM nodos
+      SELECT id, titulo, area, archivos_aplica FROM nodos
       WHERE tipo = 'error' AND estado = 'ACTIVO'
       ORDER BY fecha_creacion DESC LIMIT 200
     `).all();
 
+    /* Nombre de archivo suelto, en minúsculas: comparar rutas completas falla
+       porque cada tabla las guarda con su propia forma. */
+    const base = (x) => String(x || '').split(/[\/]/).pop().toLowerCase();
+    const listaDe = (raw) => {
+      if (!raw) return [];
+      try {
+        const a = JSON.parse(raw);
+        return Array.isArray(a) ? a.map(base).filter((f) => f.length >= 5) : [];
+      } catch { return String(raw).split(/[,\r\n]/).map(base).filter((f) => f.length >= 5); }
+    };
+
     for (const cycle of recentCycles) {
+      const tocados = listaDe(cycle.modules_touched);
       const cTerms = significantTokens(cycle.tarea);
-      if (cTerms.length < MIN_SHARED_TOKENS) continue;
 
-      const matches = [];
+      const candidatos = [];
       for (const node of activeErrors) {
-        const nTerms = significantTokens(node.titulo);
-        const shared = cTerms.filter(t => nTerms.includes(t));
-        if (shared.length >= MIN_SHARED_TOKENS) matches.push({ node, shared });
-      }
-      matches.sort((a, b) => b.shared.length - a.shared.length);
+        const suyos = listaDe(node.archivos_aplica);
 
-      for (const { node, shared } of matches.slice(0, 3)) {
+        /* A · ¿el ciclo tocó un archivo del error? */
+        const comunes = suyos.filter((f) => tocados.includes(f));
+
+        /* B · ¿el contrato que cubre ese área está verde con racha? */
+        let contrato = null;
+        if (!comunes.length) {
+          contrato = db.prepare(`
+            SELECT name, consecutive_passes FROM verified_contracts
+             WHERE module = ? AND status IN ('verified', 'protected')
+               AND consecutive_passes > 0 AND failure_count = 0
+             ORDER BY consecutive_passes DESC LIMIT 1
+          `).get(node.area) || null;
+        }
+
+        if (!comunes.length && !contrato) continue;   // sin hecho, no entra
+
+        candidatos.push({
+          node,
+          archivos: comunes,
+          contrato,
+          orden: comunes.length * 10 + (contrato ? contrato.consecutive_passes : 0)
+            + cTerms.filter((t) => significantTokens(node.titulo).includes(t)).length,
+        });
+      }
+
+      candidatos.sort((a, b) => b.orden - a.orden);
+
+      for (const c of candidatos.slice(0, 3)) {
+        const porque = c.archivos.length
+          ? `el ciclo tocó ${c.archivos.join(', ')}, que este error declara como suyos`
+          : `el contrato "${c.contrato.name}" que cubre "${c.node.area}" lleva ${c.contrato.consecutive_passes} verificación(es) seguidas en verde y ningún fallo`;
+
         const s = addSuggestion(db, {
           type: 'ERROR_LIKELY_FIXED',
-          title: `Ciclo #${cycle.id} parece resolver el error activo #${node.id}: "${node.titulo.slice(0, 70)}"`,
-          description: `La tarea del ciclo #${cycle.id} ("${cycle.tarea.slice(0, 140)}") comparte palabras clave (${shared.join(', ')}) con un error que sigue marcado ACTIVO en memoria. Si el fix realmente lo cubrió, aplica esta sugerencia para marcarlo RESUELTO — si no, descártala y no vuelve a aparecer.`,
-          module: node.area,
-          area: node.area,
+          title: `Ciclo #${cycle.id} parece resolver el error activo #${c.node.id}: "${c.node.titulo.slice(0, 70)}"`,
+          description: `${porque}. Si el arreglo de verdad lo cubrió, aplica esta sugerencia para marcarlo RESUELTO — si no, descártala y no vuelve a aparecer.`,
+          module: c.node.area,
+          area: c.node.area,
           risk_level: 'MEDIUM',
-          evidence: [{ type: 'cycle_fix_match', ciclo_id: cycle.id, error_node_id: node.id, shared_tokens: shared, area_ciclo: cycle.area, area_error: node.area }],
+          evidence: [{
+            type: 'cycle_fix_match',
+            ciclo_id: cycle.id,
+            error_node_id: c.node.id,
+            archivos_compartidos: c.archivos,
+            contrato_verde: c.contrato ? c.contrato.name : null,
+            rachas_verdes: c.contrato ? c.contrato.consecutive_passes : 0,
+          }],
         }, cicloId);
         if (s) suggestions.push(s);
       }
@@ -631,8 +719,24 @@ function autoConfirmStaleErrorFixes(db, projectRoot, maxAgeDays) {
 
       if (recurred) continue;
 
-      const result = applySuggestion(db, s.id, projectRoot, 'auto-confirm-stale', { manual: true });
-      if (result.applied) confirmed.push({ id: s.id, title: s.title });
+      /* CADUCA, NO EJECUTA.
+         Antes esta línea llamaba a `applySuggestion(..., { manual: true })`:
+         se hacía pasar por manual para saltarse el veto que el propio motor
+         declara sobre este tipo — `auto_apply_at: null`, "nunca auto-aplica,
+         siempre requiere confirmación". Y aplicar aquí CAMBIA el estado de un
+         error en memoria, que es de las cosas menos reversibles que hay.
+
+         Una sugerencia que nadie confirmó en tres días no gana razón por
+         esperar: pierde vigencia. Se descarta y deja de estorbar. Si el error
+         de verdad está resuelto, el detector volverá a proponerlo la próxima vez
+         que haya un hecho que lo respalde — y ahora los hechos son de verdad. */
+      db.prepare(
+        `UPDATE creative_suggestions
+            SET dismissed = 1,
+                result = 'caducada sin confirmar tras ' || ? || ' día(s)'
+          WHERE id = ?`
+      ).run(maxAgeDays, s.id);
+      confirmed.push({ id: s.id, title: s.title, caducada: true });
     }
   } catch {}
   return confirmed;

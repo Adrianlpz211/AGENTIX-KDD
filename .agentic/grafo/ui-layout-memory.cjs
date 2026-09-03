@@ -69,6 +69,11 @@ const PROPS = new Set([
 
 const ES_FRONT = /\.(html?|css|scss|js|jsx|ts|tsx|cjs|mjs|vue|svelte)$/i;
 
+/* Los tests NO llevan decisiones de diseño: sus fixtures son falsos por
+   definición. Escanearlos metió `#tour-panel { font-size: 15px }` de un fixture
+   como si fuera una decisión real del proyecto, y luego la echó de menos. */
+const ES_TEST = /(^|[\/])(test|tests|spec|__tests__|e2e|__mocks__|fixtures?)[\/]|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
 /* ── base de datos ─────────────────────────────────────────────────────────── */
 
 function openDB(projectRoot, { write = false } = {}) {
@@ -121,11 +126,27 @@ const tablaExiste = (db) => !!safe(() => db.prepare(
    Un solo extractor para las dos caras del trabajo: capturar lo nuevo y
    comparar lo que hay. Si fueran dos, se desincronizarían. */
 
-/** `tour-panel` y `#tour-panel` son el mismo elemento. */
+/**
+ * `tour-panel` y `#tour-panel` son el mismo elemento.
+ *
+ * OJO: solo se prefija un identificador DESNUDO. La primera version prefijaba
+ * todo lo que no empezara por `.` o `#`, y al añadir anclas nuevas convirtio
+ * `[panel-kpi]` en `#[panel-kpi]` y `body` en `#body`. En la pasada siguiente el
+ * extractor devolvia `body`, la memoria vigilaba `#body`, no coincidian, y se
+ * reportaban como "propiedad desaparecida": 37 falsos positivos de golpe.
+ *
+ * Un control que fabrica falsas alarmas se desactiva. Este es exactamente el
+ * fallo del que llevo advirtiendo, cometido por mi.
+ */
 function normSel(s) {
   const t = String(s || '').trim();
   if (!t) return t;
-  return /^[.#]/.test(t) ? t : '#' + t;
+  /* Ya es un selector con forma propia: clase, id, atributo, pseudo-clase o
+     etiqueta conocida. Se deja intacto. */
+  if (/^[.#\[:]/.test(t)) return t;
+  if (/^(html|body|:root)$/i.test(t)) return t.toLowerCase();
+  if (t.startsWith('tailwind:')) return t;
+  return '#' + t;
 }
 
 /* Separador de clave del mapa. No aparece jamás dentro de un selector
@@ -289,6 +310,16 @@ function extraerValores(contenido) {
   }
 
   for (const clave of ambiguos) encontrados.delete(clave);
+
+  /* Se adjunta lo DESCARTADO, no solo lo encontrado.
+     Sin esto, quien compara no puede distinguir "esta propiedad ya no existe"
+     de "esta propiedad se declara de tres formas distintas y no sé cuál manda".
+     Caso real: `#tour-tabs display` vale `flex` en el atributo y `none`/`flex`
+     desde JavaScript. Es ambiguo de verdad, se descarta con razón — y se
+     reportaba como desaparecido en cada corrida, para siempre. */
+  Object.defineProperty(encontrados, 'ambiguos', {
+    value: ambiguos, enumerable: false,
+  });
   return encontrados;
 }
 
@@ -443,7 +474,7 @@ function motivoDelCommit(projectRoot) {
  */
 function guard(projectRoot, { files = null, capturar = true, motivo = null } = {}) {
   const lista = (files && files.length ? files : archivosDelCommit(projectRoot))
-    .filter((f) => ES_FRONT.test(f));
+    .filter((f) => ES_FRONT.test(f) && !ES_TEST.test(f));
   if (!lista.length) return { findings: [], capturados: 0, revisados: 0, scanned: false, reason: 'sin archivos de front' };
 
   const db = openDB(projectRoot, { write: true });
@@ -469,7 +500,8 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
      (no se puede saber cuál es la decisión) pero SÍ se reporta, porque un mismo
      selector peleándose consigo mismo en ocho archivos es la causa raíz del
      clásico "toco algo aquí y se rompe allá". */
-  const lecturas = new Map();     // clave -> [{rel, valor, dato}]
+  const lecturas = new Map();          // clave -> [{rel, valor, dato}]
+  const ambiguosEnArchivo = new Set(); // claves con varios valores en un mismo archivo
   for (const rel of lista) {
     const abs = path.isAbsolute(rel) ? rel : path.join(projectRoot, rel);
     const contenido = safe(() => fs.readFileSync(abs, 'utf8'), null);
@@ -480,6 +512,7 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
       vals = new Map([...vals, ...extraerTokensTailwind(contenido)]);
     }
     revisados += vals.size;
+    for (const clave of (vals.ambiguos || [])) ambiguosEnArchivo.add(clave);
     for (const [clave, dato] of vals) {
       if (!lecturas.has(clave)) lecturas.set(clave, []);
       lecturas.get(clave).push({ rel, valor: dato.valor, dato });
@@ -512,13 +545,34 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
 
     /* (a) Lo que la memoria vigila para ESTE archivo y ya no aparece. */
     const vigilados = safe(() => db.prepare(
-      `SELECT element_id, property, value, reason FROM ui_layout_decisions
+      `SELECT element_id, property, value, reason, origen FROM ui_layout_decisions
         WHERE superseded = 0 AND archivo = ?`
     ).all(rel), []) || [];
+
+    /* NO SABER LEER UN VALOR NO ES PRUEBA DE QUE SE HAYA BORRADO.
+       Dos precauciones, las dos aprendidas a golpes en esta sesión:
+
+       1 · Solo se avisa si el SELECTOR sigue apareciendo en el archivo y lo que
+           falta es la propiedad. Ese es el fallo real que motivó el módulo
+           (`right` reemplazado por `left`). Si el selector no se ve, no se sabe
+           nada: puede que el archivo se reorganizara, o que el extractor no
+           llegara. "No lo encuentro" no es "lo borraron".
+
+       2 · En archivos MIXTOS (un .cjs o .js con CSS dentro de plantillas), las
+           reglas CSS se leen de forma inestable: los miles de `${...}` desalinean
+           el emparejado de llaves y el barrido se desplaza. Ahí no se avisa de
+           reglas ausentes — solo de estilos en línea, clases y asignaciones
+           desde JS, que se leen por etiqueta y no dependen de las llaves.
+           dashboard.cjs generó 8 avisos falsos por esto. */
+    const esHojaPura = /\.(css|scss|sass|less)$/i.test(rel);
+    const selectoresVistos = new Set([...actuales.values()].map((c) => c.selector));
 
     for (const v of vigilados) {
       const clave = claveDe(v.element_id, v.property);
       if (actuales.has(clave)) continue;
+      if (ambiguosEnArchivo.has(clave) || enDisputa.has(clave)) continue;  // precaución 0
+      if (!selectoresVistos.has(v.element_id)) continue;                    // precaución 1
+      if (!esHojaPura && v.origen === 'css') continue;                       // precaución 2
       findings.push({
         elementId: v.element_id, property: v.property,
         nuevoValor: '(ausente)', decidido: v.value, razon: v.reason,

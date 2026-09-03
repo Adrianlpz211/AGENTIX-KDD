@@ -315,6 +315,72 @@ function registrarContratos() {
   }
 }
 
+/**
+ * Deja constancia de que un cambio rompió algo que estaba verde.
+ *
+ * POR QUE HACE FALTA
+ * ------------------
+ * El detector REFACTOR del Creative Engine busca entidades con dos o más
+ * aristas `regressed_by` para decir "esto lo rompen los cambios ajenos una y
+ * otra vez, está acoplado a demasiado". Es una de las señales más útiles que
+ * puede dar el sistema, y estaba a CERO: la arista no la creaba nadie.
+ *
+ * El dato ya pasaba por delante — el Preservation Gate sabe exactamente qué
+ * contrato se rompió y qué archivos se tocaron — y se tiraba.
+ *
+ * DIRECCION DE LA ARISTA
+ * ----------------------
+ * `desde` = el archivo que cambió · `hacia` = el contrato que se rompió.
+ * Se lee "el cambio en A regresionó a B", que es el orden en que se pregunta:
+ * "¿qué rompe este archivo cuando lo toco?".
+ */
+function registrarRegresiones(db, violations, archivosDelCambio) {
+  if (!db || !violations || !violations.length) return 0;
+
+  /* Solo los archivos de código: un cambio de documentación no rompe un test,
+     y meterlo enturbiaría la señal justo cuando más falta hace que sea limpia. */
+  const culpables = (archivosDelCambio || [])
+    .filter((f) => /\.(js|jsx|ts|tsx|cjs|mjs|py|rb|go|java|php|sql)$/i.test(f))
+    .slice(0, 12);
+  if (!culpables.length) return 0;
+
+  let creadas = 0;
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS relaciones_semanticas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      desde_entidad TEXT NOT NULL,
+      hacia_entidad TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      descripcion TEXT,
+      fecha TEXT DEFAULT (datetime('now'))
+    )`);
+
+    for (const v of violations) {
+      const hacia = `contrato:${v.contract_name || v.contract_id}`;
+      for (const archivo of culpables) {
+        /* Sin duplicar: la misma pareja archivo→contrato rota dos veces en el
+           mismo ciclo es un solo hecho. Entre ciclos distintos SI cuenta dos
+           veces — que es justo lo que el detector necesita contar. */
+        const ya = db.prepare(
+          `SELECT 1 AS x FROM relaciones_semanticas
+            WHERE tipo = 'regressed_by' AND desde_entidad = ? AND hacia_entidad = ?
+              AND fecha > datetime('now', '-2 minutes')`
+        ).get(archivo, hacia);
+        if (ya) continue;
+
+        db.prepare(
+          `INSERT INTO relaciones_semanticas
+             (desde_entidad, hacia_entidad, tipo, descripcion)
+           VALUES (?, ?, 'regressed_by', ?)`
+        ).run(archivo, hacia,
+          `${v.severity || 'HIGH'} · ${(v.message || 'contrato roto').slice(0, 200)}`);
+        creadas++;
+      }
+    }
+  } catch { /* la arista es un plus: si falla, el gate ya hizo su trabajo */ }
+  return creadas;
+}
+
 // ── Step 3: Registrar módulos en BD y config.md ───────────────────────────────
 
 function registrarModulos(db) {
@@ -909,10 +975,23 @@ async function main() {
         capturar: true,
       });
       if (!silent) {
-        const n = (uiRes.findings || []).length;
-        console.log(n > 0
-          ? `  2.8 UI Layout Memory... ⚠️  ${n} posible(s) regresión(es) — ${uiRes.capturados} valor(es) registrado(s)`
-          : `  2.8 UI Layout Memory... ✅ ${uiRes.capturados} valor(es) de diseño registrado(s), sin regresiones`);
+        const todos = uiRes.findings || [];
+        /* Los conflictos NO son regresiones: son decisiones que nunca se
+           cerraron (el mismo selector con valores distintos en varios
+           archivos). Contarlos juntos hacia que el paso dijera "39 posibles
+           regresiones" cuando eran 39 disputas y CERO regresiones — un numero
+           alarmante por un problema distinto, que es la forma mas rapida de
+           que alguien deje de leer los avisos. */
+        const conflictos = todos.filter((f) => f.conflicto).length;
+        const regresiones = todos.length - conflictos;
+        const partes = [];
+        if (regresiones) partes.push(regresiones + ' posible(s) regresion(es)');
+        if (conflictos) partes.push(conflictos + ' decision(es) de diseno en disputa');
+        console.log(partes.length
+          ? '  2.8 UI Layout Memory... ⚠️  ' + partes.join('  ·  ') +
+            '  —  ' + uiRes.capturados + ' valor(es) registrado(s)'
+          : '  2.8 UI Layout Memory... ✅ ' + uiRes.capturados +
+            ' valor(es) de diseño registrado(s), sin regresiones');
       }
     } else if (!silent) {
       console.log('  2.8 UI Layout Memory... — (sin archivos de front en este commit)');
@@ -996,7 +1075,11 @@ async function main() {
       const cgRes = cg.revisar(ROOT, {
         files: commitFilesForScans.length ? commitFilesForScans : null,
         commit: !commitFilesForScans.length,
-        tipo: (datos && datos.tipo_tarea) || null,
+        /* `datos` vive en otro ambito y aqui era undefined: el paso entero
+           caia por el catch y se veia como "omitido", sin decir por que.
+           Sin tipo declarado el canario usa el mensaje del commit, que es
+           la mejor senal disponible en este punto y ya la tiene delante. */
+        tipo: null,
       });
       if (!silent) {
         console.log(cgRes.veredicto === 'STOP'
@@ -1009,6 +1092,61 @@ async function main() {
       console.log('  2.10 Canario Gate... — (no instalado)');
     }
   } catch { if (!silent) console.log('  2.10 Canario Gate... ⚠️  omitido'); }
+
+  // Step 2.11: Preservation Gate — el que dice si algo que estaba verde se rompió.
+  //
+  // ESTO NO CORRIA. NUNCA. Y es la pieza que alimenta a casi todo lo demas.
+  //
+  // `runPreservationGate` corre los tests de los contratos en riesgo, detecta
+  // cuales se rompieron y es la UNICA funcion que incrementa `failure_count` y
+  // escribe en `contract_violations`. Esta bien escrita y solo se invocaba a
+  // mano desde la terminal o desde el MCP.
+  //
+  // Consecuencia medida en D:ð tras 155 ciclos: los 102 contratos con
+  // failure_count = 0, la tabla de violaciones vacia, y el detector FRAGILITY
+  // del Creative Engine ciego — porque lee justo ese campo. Un gate que existe,
+  // funciona y nadie llama protege cero, igual que la memoria de diseño de la v1.
+  //
+  // Corre ACOTADO a los archivos del commit (solo los tests de los contratos en
+  // riesgo, no la suite entera) y es WARN-only: informa, no frena. El freno ya
+  // lo pone el TDD Gate antes de llegar aqui.
+  try {
+    const cgPath = path.join(GRAFO_DIR, 'contract-guard.cjs');
+    if (fs.existsSync(cgPath)) {
+      const cg = require(cgPath);
+      /* contract-guard NO exporta su initDB: se abre la base con el helper de
+         este archivo. Llamar a `cg.initDB` daba undefined y el gate caía por el
+         camino silencioso de "sin base" — un fallo que no se habría notado
+         nunca, porque el mensaje era idéntico al de un proyecto sin memoria. */
+      const dbPG = openDB();
+      if (dbPG && typeof cg.runPreservationGate === 'function') {
+        if (typeof cg.migrateSchema === 'function') { try { cg.migrateSchema(dbPG); } catch {} }
+        const pg = cg.runPreservationGate(dbPG, ROOT, (results && results.ciclo) || `post-${Date.now()}`,
+          commitFilesForScans || []);
+        const roturas = (pg.violations || []).length;
+
+        /* Cada rotura deja su arista causal: "este cambio rompio aquello".
+           Es lo que el detector REFACTOR lee para decir "esto lo rompen los
+           cambios ajenos una y otra vez" — y estaba a cero porque nadie creaba
+           la arista. */
+        if (roturas) registrarRegresiones(dbPG, pg.violations, commitFilesForScans || []);
+
+        if (!silent) {
+          console.log(roturas
+            ? `  2.11 Preservation Gate... ⚠️  ${roturas} contrato(s) roto(s) — ver contract_violations`
+            : '  2.11 Preservation Gate... ✅ nada de lo que estaba verde se rompio');
+        }
+        try { dbPG.close(); } catch {}
+      } else if (!silent) {
+        console.log('  2.11 Preservation Gate... — (sin base o sin la funcion)');
+      }
+    } else if (!silent) {
+      console.log('  2.11 Preservation Gate... — (no instalado)');
+    }
+  } catch (e) {
+    if (!silent) console.log('  2.11 Preservation Gate... ⚠️  omitido' +
+      (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
+  }
 
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
@@ -1118,4 +1256,4 @@ if (require.main === module) {
   main().catch(e => { console.error('❌ post-cycle falló:', e.message); process.exit(1); });
 }
 
-module.exports = { main, detectPatterns, registrarModulos, generarSpec };
+module.exports = { main, detectPatterns, registrarModulos, generarSpec, registrarRegresiones };
