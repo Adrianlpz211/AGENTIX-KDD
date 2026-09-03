@@ -153,3 +153,93 @@ test('post-cycle captura de verdad y mira css y js, no solo html', () => {
       `el filtro debe incluir .${ext}: el front real vive ahí, no solo en .html`);
   }
 });
+
+/* ── las cinco formas de diseño que la v2 no veía ──────────────────────────
+   Se midieron antes de escribir el código: en un proyecto real el diseño vive
+   en siete formas y el extractor solo cubría dos. Estos tests fijan las otras. */
+
+test('captura la LISTA DE CLASES de un elemento — el caso de la grilla', () => {
+  /* El caso que pidió el dev: una grilla que pasa de tres columnas a dos
+     cambiando solo su lista de clases. No hay ni una declaración CSS de por
+     medio, y reordena una pantalla entera. */
+  const v = extraerValores('<div id="tablero" class="cmp-grid cmp-grid-3 cmp-pad">x</div>');
+  assert.equal(v.get('#tablero class').valor, 'cmp-grid cmp-grid-3 cmp-pad');
+});
+
+test('reordenar clases NO cuenta como cambio de diseño', () => {
+  /* Si la lista se guardara tal cual, mover una clase de sitio saltaría como
+     regresión. Se guarda ordenada para que solo cuente qué clases hay. */
+  const a = extraerValores('<div id="x" class="uno dos tres">a</div>');
+  const b = extraerValores('<div id="x" class="tres uno dos">a</div>');
+  assert.equal(a.get('#x class').valor, b.get('#x class').valor);
+});
+
+test('las clases de estado no se vigilan: cambian solas', () => {
+  const v = extraerValores('<div id="p" class="cmp-card is-active js-hook cmp-pad">x</div>');
+  const clases = v.get('#p class').valor;
+  assert.ok(!clases.includes('is-active'), 'is-active es estado, no diseño');
+  assert.ok(!clases.includes('js-hook'), 'js- es un gancho de código');
+  assert.ok(clases.includes('cmp-card') && clases.includes('cmp-pad'));
+});
+
+test('captura las variables CSS: son el sistema de diseño', () => {
+  /* Un token cambiado repinta la aplicación entera. Es la señal de más valor y
+     la lista blanca de propiedades la descartaba por no ser CSS "normal". */
+  const v = extraerValores(':root { --color-marca: #26706e; --radio: 10px; }');
+  assert.equal(v.get(':root --color-marca').valor, '#26706e');
+  assert.equal(v.get(':root --radio').valor, '10px');
+});
+
+test('captura el estilo asignado desde JavaScript', () => {
+  /* El caso del panel de la visita guiada: no hay CSS ni atributo que mirar. */
+  const v = extraerValores(
+    "document.getElementById('tour-panel').style.right = '12px';\n" +
+    "document.getElementById('tour-panel').style.width = '380px';"
+  );
+  assert.equal(v.get('#tour-panel right').valor, '12px');
+  assert.equal(v.get('#tour-panel width').valor, '380px');
+});
+
+test('un elemento sin ancla estable no se vigila', () => {
+  /* `flex mt-4` no identifica nada: vigilar `.flex` sería vigilar media
+     aplicación bajo un mismo nombre y dar avisos sin sentido. */
+  const v = extraerValores('<div class="flex items-center gap-4">x</div>');
+  assert.equal(v.size, 0);
+});
+
+test('data-testid vale como ancla', () => {
+  /* En React casi nada lleva id, pero un testid lo puso alguien a propósito
+     para referirse a ese elemento. */
+  const v = extraerValores('<div data-testid="panel-kpi" class="cmp-card cmp-pad">x</div>');
+  assert.equal(v.get('[panel-kpi] class').valor, 'cmp-card cmp-pad');
+});
+
+test('dos elementos con la misma primera clase y distinto contenido no se vigilan', () => {
+  /* Ambigüedad: no se puede saber cuál es "la" decisión. Mejor no vigilar que
+     dar una regresión falsa, porque una falsa enseña a ignorar los avisos. */
+  const v = extraerValores(
+    '<div class="cmp-card cmp-pad">a</div><div class="cmp-card cmp-ancho">b</div>'
+  );
+  assert.ok(!v.has('.cmp-card class'));
+});
+
+test('los tokens de tailwind.config SÍ se capturan', () => {
+  /* En un proyecto de clases utilitarias esto es el sistema de diseño: las
+     clases por elemento no se pueden vigilar, la paleta sí. Sin esto, la
+     captura daba CERO en todo proyecto Tailwind. */
+  const v = uilm.extraerTokensTailwind(`
+    colors: {
+      marca: { 600: '#26706e', 700: '#215a59' },
+      tinta: { 900: '#3a3e40' },
+    },
+    fontSize: { base: '15px' },
+  `);
+  assert.equal(v.get('tailwind:marca 600').valor, '#26706e');
+  assert.equal(v.get('tailwind:tinta 900').valor, '#3a3e40');
+  assert.equal(v.get('tailwind:fontSize base').valor, '15px');
+});
+
+test('del tailwind.config no se captura lo que no es diseño', () => {
+  const v = uilm.extraerTokensTailwind("content: './src/**/*.tsx',\n  prefix: 'tw-',");
+  assert.equal(v.size, 0, 'una ruta de archivos no es una decisión visual');
+});

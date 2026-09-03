@@ -345,6 +345,45 @@ const patrones = parseEntries(readMemoria('patrones.md')).filter(p => p.estado =
 const decisiones = parseEntries(readMemoria('decisiones.md'));
 const errores = parseEntries(readMemoria('errores.md'));
 
+/* ── CURAS: los errores que de verdad pueden ayudar ─────────────────────────
+   Un error con su `Solución:` escrita es una cura: el motor la entrega sola en
+   el brief la próxima vez que alguien toque esa zona. Un error SIN solución
+   escrita no cura nada — es un susto anotado.
+   La distinción es la que importa y hasta ahora no se veía en ningún sitio:
+   contar "29 errores" da una sensación de memoria rica; ver que solo 25 sirven
+   dice qué falta por escribir. */
+const seccionesDeNodo = (contenido) => {
+  const txt = String(contenido || '');
+  /* Se busca el encabezado al principio de una línea. `[^\S\r\n]` es "espacio
+     que no es salto de línea": equivale a `[ \t]` y se escribe así para no
+     tener que escapar nada — este archivo ha pasado ya por varias capas de
+     comillas y un `\n` mal escapado rompe la expresión sin decir dónde. */
+  const campos = {
+    sintoma:    /(?:^|[\r\n])[^\S\r\n]*S[íi]ntoma:[^\S\r\n]*/i,
+    causa:      /(?:^|[\r\n])[^\S\r\n]*Causa:[^\S\r\n]*/i,
+    solucion:   /(?:^|[\r\n])[^\S\r\n]*Soluci[óo]n:[^\S\r\n]*/i,
+    prevencion: /(?:^|[\r\n])[^\S\r\n]*(?:Prevenci[óo]n|Evitar):[^\S\r\n]*/i,
+    aplicar:    /(?:^|[\r\n])[^\S\r\n]*Aplicar cuando:[^\S\r\n]*/i,
+  };
+  const marcas = [];
+  for (const [clave, re] of Object.entries(campos)) {
+    const m = txt.match(re);
+    if (m) marcas.push({ clave, ini: m.index + m[0].length, cab: m.index });
+  }
+  marcas.sort((a, b) => a.cab - b.cab);
+  const out = {};
+  marcas.forEach((m, i) => {
+    out[m.clave] = txt.slice(m.ini, i + 1 < marcas.length ? marcas[i + 1].cab : txt.length).trim();
+  });
+  return out;
+};
+
+const erroresConSecciones = errores
+  .filter((e) => e.titulo && e.titulo.length > 5)
+  .map((e) => ({ ...e, sec: seccionesDeNodo(e.contenido) }));
+const curasDisponibles = erroresConSecciones.filter((e) => e.sec.solucion && e.sec.solucion.length > 8);
+const erroresSinCura   = erroresConSecciones.filter((e) => !(e.sec.solucion && e.sec.solucion.length > 8));
+
 /**
  * Serializa un valor para incrustarlo DENTRO de un <script> del HTML.
  *
@@ -1678,6 +1717,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="nav-item" onclick="showDoc('patterns',this)">🟢 <span data-i="nav_patterns">Patterns</span> <span class="nav-count">${patrones.length}</span></div>
         <div class="nav-item" onclick="showDoc('decisions',this)">🔵 <span data-i="nav_decisions">Decisions</span> <span class="nav-count">${decisiones.length}</span></div>
         <div class="nav-item" onclick="showDoc('errors',this)">🔴 <span data-i="nav_errors">Errors</span> <span class="nav-count">${errores.length}</span></div>
+        <div class="nav-item" onclick="showDoc('curas',this)">💊 <span>Curas</span> <span class="nav-count">${curasDisponibles.length}</span></div>
         <div class="nav-item" onclick="showDoc('questions',this)">💡 <span data-i="nav_questions">For New Devs</span></div>
         <div class="nav-item" onclick="showDoc('metrics',this)">📊 <span>Metrics</span></div>
         <div class="nav-item" onclick="showDoc('timeline',this)">🕐 <span>Timeline</span></div>
@@ -1834,6 +1874,71 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           <div class="pc-top"><div class="pc-title">${escHtml(e.titulo)}</div><span class="mb c${e.confianza}">${e.confianza}</span><span class="ab">${escHtml(e.area)}</span></div>
           ${e.aplicado > 0 ? `<div style="font-size:10px;color:var(--text3)">Resolved ${e.aplicado} times</div>` : ''}
         </div>`).join('') : '<div class="empty-state">No errors recorded yet</div>'}
+      </div>
+
+      <!-- CURAS -->
+      <div class="docs-section" id="doc-curas">
+        <div class="docs-h1">💊 Curas — la solución que llega sola</div>
+        <div class="docs-sub">
+          Un error con su solución escrita es una cura: el sistema la entrega sola en
+          el brief la próxima vez que alguien toque esa zona, sin que nadie la busque.
+          Un error sin solución escrita no cura nada — es un susto anotado.
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0">
+          <div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+            <div style="font-size:22px;font-weight:600;color:#34d399">${curasDisponibles.length}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">curas listas</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">se entregan solas en el brief</div>
+          </div>
+          <div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+            <div style="font-size:22px;font-weight:600;color:${erroresSinCura.length ? '#fbbf24' : 'var(--text2)'}">${erroresSinCura.length}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">errores sin cura</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">les falta escribir la solución</div>
+          </div>
+          <div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+            <div style="font-size:22px;font-weight:600;color:var(--text)">${erroresConSecciones.length ? Math.round(curasDisponibles.length * 100 / erroresConSecciones.length) : 0}%</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">de la memoria sirve</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">contar errores no basta</div>
+          </div>
+        </div>
+
+        <div class="docs-h2">Cómo se comprueba a mano</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:20px">
+          En la terminal del proyecto:
+          <code style="background:var(--bg2);padding:2px 6px;border-radius:4px;font-size:11px">node .agentic/grafo/error-cure.cjs "descripción de tu tarea"</code>
+          <br>Si sale una cura, funciona. En el trabajo normal no hay que pedirlo:
+          aparece solo al arrancar cualquier ciclo.
+        </div>
+
+        <div class="docs-h2">Las ${curasDisponibles.length} curas disponibles</div>
+        ${curasDisponibles.length ? curasDisponibles
+          .sort((a, b) => (b.confianza === 'ALTA' ? 1 : 0) - (a.confianza === 'ALTA' ? 1 : 0))
+          .map((e) => `<div class="pattern-card" style="border-left:3px solid #34d399">
+            <div class="pc-top">
+              <div class="pc-title">${escHtml(e.titulo)}</div>
+              <span class="mb c${e.confianza}">${e.confianza}</span>
+              <span class="ab">${escHtml(e.area)}</span>
+            </div>
+            ${e.sec.sintoma ? `<div style="font-size:11px;color:var(--text3);margin-top:6px"><b>Se nota así:</b> ${escHtml(String(e.sec.sintoma).slice(0, 170))}</div>` : ''}
+            <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.6">
+              <b style="color:#34d399">Solución que funcionó:</b> ${escHtml(String(e.sec.solucion).slice(0, 320))}
+            </div>
+            ${e.sec.prevencion ? `<div style="font-size:11px;color:var(--text3);margin-top:5px"><b>Para que no vuelva:</b> ${escHtml(String(e.sec.prevencion).slice(0, 170))}</div>` : ''}
+          </div>`).join('')
+          : '<div class="empty-state">Ninguna cura todavía — a los errores registrados les falta la línea "Solución:".</div>'}
+
+        ${erroresSinCura.length ? `
+        <div class="docs-h2" style="margin-top:28px">Estos ${erroresSinCura.length} no curan nada todavía</div>
+        <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:12px">
+          Están anotados pero sin la línea <code style="background:var(--bg2);padding:1px 5px;border-radius:3px">Solución:</code>,
+          así que el sistema no puede ofrecer nada cuando vuelvan. Escribirla es lo
+          que los convierte en cura.
+        </div>
+        ${erroresSinCura.map((e) => `<div class="pattern-card" style="border-left:3px solid #fbbf24">
+          <div class="pc-top"><div class="pc-title">${escHtml(e.titulo)}</div><span class="ab">${escHtml(e.area)}</span></div>
+          ${e.sec.sintoma ? `<div style="font-size:11px;color:var(--text3);margin-top:5px">${escHtml(String(e.sec.sintoma).slice(0, 150))}</div>` : ''}
+        </div>`).join('')}` : ''}
       </div>
 
       <!-- FOR NEW DEVS -->
@@ -2419,6 +2524,7 @@ const FIELD_LABELS={
   evitar:'🚫 Qué no volver a hacer', 'aplicar cuando':'📌 Cuándo aplica esto', regla:'📏 La regla que quedó',
   error:'💥 El error tal cual salió', origen:'🔎 Cómo se detectó', 'ubicación':'📂 Dónde está en el código',
   ubicacion:'📂 Dónde está en el código', 'razón':'💡 La razón', razon:'💡 La razón',
+  'prevención':'🛡️ Para que no vuelva', prevencion:'🛡️ Para que no vuelva',
 };
 const SKIP_FIELD_LABELS=new Set(['área','area','confianza','aplicado','útil','util','estado','última validación','ultima validacion','creado','tipo','raw']);
 
