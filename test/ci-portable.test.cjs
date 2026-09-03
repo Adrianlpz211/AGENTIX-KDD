@@ -61,3 +61,25 @@ test('el workflow instala dependencias y corre la suite', () => {
   assert.match(ci, /npm test|npm run test/,
     'el workflow debe correr la suite');
 });
+
+/* ── la versión no puede vivir en dos sitios y divergir ────────────────────── */
+
+test('package.json y config.md declaran la misma versión', () => {
+  /* `config.md` decía 3.11.7 con `package.json` en 3.18.1 — siete versiones de
+     diferencia. Nadie lo notó porque nada las comparaba, y el número de
+     config.md es el que ve quien abre el proyecto. */
+  const cfg = fs.readFileSync(path.join(RAIZ, '.agentic', 'config.md'), 'utf8');
+  const m = cfg.match(/^\s*VERSION:\s*(\S+)/m);
+  assert.ok(m, 'config.md debe declarar VERSION');
+  assert.equal(m[1], pkg.version,
+    `config.md dice ${m[1]} y package.json dice ${pkg.version} — el número que ve ` +
+    'quien abre el proyecto es el de config.md, y estaba siete versiones atrás');
+});
+
+test('la versión sube antes de publicar', () => {
+  /* npm rechaza publicar dos veces el mismo número, y el workflow de publish
+     fallaba en silencio por eso. Este test no puede consultar npm desde el CI,
+     pero sí exigir que la versión tenga forma válida y no sea la de un parche
+     olvidado. */
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'versión con forma semántica');
+});

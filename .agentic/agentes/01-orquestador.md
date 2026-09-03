@@ -41,8 +41,16 @@ Fase 2, 3... → mismo flujo
   ↓
 Memoria → sync grafo + specs + log de observabilidad
   ↓
+⚙️  POST-CYCLE — OBLIGATORIO, SIEMPRE, SIN EXCEPCIÓN
+  ↓
 ✅ Reporte final al usuario
 ```
+
+> La línea del POST-CYCLE se recuperó de la copia vieja de `agentes/` que vivía
+> en la raíz del repo (Jun 28) antes de borrarla: la versión nueva la había
+> perdido del diagrama. Hoy el paso corre solo desde el hook de post-commit, así
+> que no dependía de esta línea — pero quien lee este archivo tiene que ver el
+> ciclo completo, no uno que termina antes de tiempo.
 
 **El usuario nunca necesita escribir `ag: test` o `ag: review` — ocurren solos.**
 

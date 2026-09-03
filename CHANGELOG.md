@@ -1,5 +1,113 @@
 # Changelog — Agentic KDD
 
+## [3.19.0] — 2026-09-03
+
+**Versión de las promesas cumplidas.** Nada de lo que hay aquí es funcionalidad
+nueva inventada: es maquinaria que ya estaba escrita, que el proyecto prometía en
+su documentación, y que **no se ejecutaba nunca**. Se midió una por una sobre un
+proyecto real con 155 ciclos cerrados antes de tocar nada.
+
+### La cura conocida por fin llega
+El mensaje `💊 Cura conocida` estaba escrito en el enricher y no se imprimió ni
+una vez. Tres cortocircuitos a la vez: exigía "ancla de símbolo" (0 de 29 errores
+la tenían), consultaba `relaciones_semanticas.was_fixed_by` (0 filas) y solo
+corría con riesgo ALTO.
+
+Y la trampa: los 397 enlaces `resuelto_por` que sí existían eran **ruido** — cada
+error enlazado a los ~27 patrones de su área, todos con peso 1. Conectar esa
+tubería habría inundado el brief con 27 curas falsas por error.
+
+`error-cure.cjs` lee la sección `Solución:` del propio nodo, que es donde alguien
+escribió de verdad qué lo arregló, y puntúa por evidencia propia: **el área y la
+confianza ordenan, no admiten.**
+
+### La memoria de diseño se llena sola, y cubre las siete formas
+Solo vigilaba lo registrado a mano. Cero registros en meses; la tabla ni existía.
+
+Ahora captura sola. Y se midió cómo vive el diseño en un proyecto real antes de
+decidir qué capturar: reglas CSS, variables `--token`, estilos en línea, **lista
+de clases de un elemento** (el caso de la grilla que cambia de 3 a 2 columnas sin
+una sola línea de CSS), estilos asignados desde JS, y tokens de
+`tailwind.config` — que en un proyecto de clases utilitarias **es** el sistema de
+diseño.
+
+Solo avisa de REGRESIONES, nunca de cambios nuevos. Y reporta aparte las
+**decisiones en disputa**: el mismo selector con valores distintos en varios
+archivos, que es la causa raíz del clásico "toco algo aquí y se rompe allá".
+
+### Un arreglo no cierra sin un test que lo detecte
+`canario-gate.cjs`. La disciplina estaba escrita en el protocolo y no ocurría: 29
+errores registrados y 3 comportamientos protegidos. Frena el arreglo sin canario,
+solo avisa en funcionalidad nueva.
+
+### El reloj no depende de que nadie lo marque
+96 de 155 ciclos tenían `fecha_inicio` y `fecha_fin` en el mismo segundo: la
+duración nunca se tomó. `reloj-derivado.cjs` la deduce de cuatro huellas
+mecánicas y **no la inventa** cuando no hay rastro.
+
+### El Creative Engine deja de estar ciego
+Declaraba once tipos de sugerencia. Cuatro no tenían ni una línea que los
+generara. Cuatro con detector nunca disparaban — y no por su lógica: los campos
+que leen nadie los llenaba.
+
+La raíz estaba dos capas más abajo: **`runPreservationGate` es la única función
+que incrementa `failure_count`, y el post-cycle nunca la llamaba.** Ahora corre
+en cada ciclo, acotada a los archivos del commit, y cada rotura deja su arista
+`regressed_by`. Tipos: 11 → 7, solo los que producen.
+
+`ERROR_LIKELY_FIXED` exige ahora un hecho comprobable en vez de dos palabras
+compartidas — que en el caso real fueron `["compras", "como"]`. Y la
+auto-confirmación **caduca** en vez de aplicarse a escondidas saltándose el veto
+que el propio tipo declara.
+
+### El registro de contratos abortaba por la basura del propio sistema
+«61 ciclos y 0 contratos» con 99 tests verdes. Dos causas encadenadas: el scope
+venía de git y el único archivo modificado era `_output/log-2026-09.md` —el
+registro que el propio post-cycle escribe—, y `config.md` seguía declarando
+`test: node bin/akdd.js --version`, el print de versión disfrazado de suite, que
+el gate lee **antes** que `package.json`.
+
+El filtro del scope pasa a lista blanca por extensión: la lista negra por carpeta
+ya había fallado dos veces y siempre aparece una carpeta que nadie pensó.
+
+### La predicción se apunta y se califica
+`prediction_log` existía desde el principio, con una columna llamada
+`fue_correcto`, y tenía cero filas. El sistema predecía y nadie sabía si acertaba.
+
+El enricher apunta antes de tocar nada; el post-cycle califica al cerrar. Y la
+decisión difícil: **"predijo ALTO y no pasó nada" NO se cuenta como falsa
+alarma** — un aviso atendido previene el problema, y penalizarlo empuja a bajar
+la sensibilidad hasta que la alerta no avisa de nada. El único número que se
+puede exigir que baje es el **falso negativo**.
+
+### Hierro o papel
+`hierro-papel.cjs` lee `CLAUDE.md` y falla el CI si una sección promete un script
+que nadie ejecuta. Es lo que impide que esta lista vuelva a llenarse.
+
+### El CI dejó de ser un adorno
+`npm test` era `akdd --version`. Meses en verde sin ejecutar una aserción. Ahora
+corre la suite de verdad, en Node 20 y 22, con un corredor que no depende de que
+Node expanda comodines. **De 4 a 107 tests.**
+
+### `akdd init` se puede automatizar
+Era 100% interactivo; con una tubería reventaba y dejaba el proyecto a medias.
+Banderas nuevas: `--yes`, `--name=`, `--nuevo/--existente`, `--con-docs`.
+
+### Limpieza
+- Borrados `dashboard-original.cjs` y `src/dashboard-template.js` (3.414 líneas
+  muertas) y la carpeta `agentes/` duplicada de la raíz, congelada en junio —
+  antes se recuperó la línea del POST-CYCLE que la versión nueva había perdido.
+- `ARCHITECTURE.md` decía 39 módulos y 11 tablas; son 75 y 40. Los números ahora
+  llevan escrito cómo contarlos.
+- `config.md` decía VERSION 3.11.7 con `package.json` en 3.18.1. Un test lo
+  vigila.
+
+### Al actualizar
+La primera corrida tras `akdd update` va a reportar cosas que antes no salían:
+decisiones de diseño en disputa, contratos con fallos donde había 0. **No es una
+regresión del update** — es medición que antes no existía.
+
+
 ## [3.18.1] — 2026-08-31
 
 ### El dashboard escupía el grafo entero como texto en pantalla

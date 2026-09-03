@@ -1,5 +1,17 @@
 # Agentix KDD — Architecture
 
+
+> **Los números de este archivo se cuentan, no se estiman.**
+> Comprobados el 03/09/2026 contra el repo: 75 módulos en `.agentic/grafo/`,
+> 40 tablas y 78 índices en `memoria.db`, 54 herramientas en el servidor MCP,
+> 18 archivos de test. Decía 39 módulos y 11 tablas — quedaron congelados en
+> una versión vieja y nadie los volvió a mirar. Si vuelves a tocarlos, cuéntalos:
+>
+> ```bash
+> ls .agentic/grafo/*.cjs | wc -l
+> ```
+
+
 > **One-line summary:** Agentix KDD is a development OS for AI agents — it gives your coding agent persistent memory, enforced quality gates, and a self-healing pipeline across every session.
 
 ---
@@ -17,7 +29,7 @@
 │         Pipeline  →  aa: [task]                  │
 │  Analyst → Build → TDD×3 → QA → Review → Memory │
 ├─────────────────────────────────────────────────┤
-│  Engine  (.agentic/grafo/ — 39 modules)          │
+│  Engine  (.agentic/grafo/ — 75 modules)          │
 ├─────────────────────────────────────────────────┤
 │  Interfaces: CLI (akdd) · MCP (54 tools) · Dash  │
 └─────────────────────────────────────────────────┘
@@ -33,7 +45,7 @@ These modules run on every `aa:` cycle. They are the backbone of the system. Do 
 |---|---|
 | `grafo.cjs` | Central dispatcher — coordinates all subcommands |
 | `post-cycle.cjs` | 10-step cycle orchestrator — runs after every task |
-| `schema.sql` | SQLite schema — 11 tables, 31 indexes |
+| `schema.sql` | SQLite schema — 40 tables, 78 indexes |
 | `tdd-gate.cjs` | TDD enforcement with self-healing loop (×3) |
 | `security-gate.cjs` | Secrets · PII · prompt-injection · auth checks |
 | `regression-guard.cjs` | Blocks changes that break verified behaviors |
