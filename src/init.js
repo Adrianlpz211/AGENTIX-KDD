@@ -172,8 +172,37 @@ function consolidarDocs(projectPath) {
 }
 
 // ── Comando principal: akdd init ────────────────────────────────
+/**
+ * Banderas para uso desatendido. `akdd init` era 100% interactivo: tres
+ * prompts, uno de ellos una lista que se navega con flechas. Un agente (o un
+ * script de CI, o un contenedor) no puede contestarlos — con una tuberia
+ * revienta con ERR_USE_AFTER_CLOSE y deja el proyecto a medio crear.
+ *
+ * Un framework cuyo propio instalador no se puede automatizar obliga a que
+ * haya siempre una persona teclando, que es justo lo que viene a evitar.
+ *
+ *   akdd init --yes                      todo por defecto, sin preguntar
+ *   akdd init --name=clinia --nuevo      nombre y tipo explicitos
+ *   akdd init --yes --existente          proyecto que ya tiene codigo
+ *   akdd init --yes --con-docs           ademas consolida la documentacion
+ */
+function leerBanderas(argv) {
+  const f = { desatendido: false, nombre: null, nuevo: null, docs: null };
+  for (const a of argv) {
+    if (a === '--yes' || a === '-y' || a === '--si') f.desatendido = true;
+    else if (a.startsWith('--name=') || a.startsWith('--nombre=')) f.nombre = a.split('=').slice(1).join('=');
+    else if (a === '--nuevo' || a === '--new') { f.nuevo = true; f.desatendido = true; }
+    else if (a === '--existente' || a === '--existing') { f.nuevo = false; f.desatendido = true; }
+    else if (a === '--con-docs' || a === '--with-docs') { f.docs = true; f.desatendido = true; }
+    else if (a === '--sin-docs' || a === '--no-docs') { f.docs = false; f.desatendido = true; }
+  }
+  if (f.nombre) f.desatendido = true;
+  return f;
+}
+
 async function init() {
   const projectPath = process.cwd();
+  const banderas = leerBanderas(process.argv.slice(2));
 
   console.log('\n' + chalk.bold.hex('#8b5cf6')('  🤖 Agentic KDD') + chalk.gray(' — autonomous development pipeline'));
   console.log(chalk.gray('  github.com/Adrianlpz211/Agentic-KDD\n'));
@@ -198,22 +227,29 @@ async function init() {
   console.log('');
 
   // ── PREGUNTA 1: Nombre ──────────────────────────────────────
-  const { name } = await inquirer.prompt([{
-    type: 'input', name: 'name',
-    message: 'Nombre del proyecto:',
-    default: path.basename(projectPath)
-  }]);
+  const nombrePorDefecto = banderas.nombre || path.basename(projectPath);
+  const { name } = banderas.desatendido
+    ? { name: nombrePorDefecto }
+    : await inquirer.prompt([{
+        type: 'input', name: 'name',
+        message: 'Nombre del proyecto:',
+        default: nombrePorDefecto
+      }]);
+  if (banderas.desatendido) console.log(chalk.gray(`  · nombre: ${name}`));
 
   // ── PREGUNTA 2: Nuevo o existente ──────────────────────────
-  const { isNew } = await inquirer.prompt([{
-    type: 'list', name: 'isNew',
-    message: '¿El proyecto es nuevo o ya tiene código?',
-    choices: [
-      { name: 'Nuevo — empezando desde cero', value: true },
-      { name: 'Existente — ya tiene código o avance', value: false }
-    ],
-    default: !hasCode
-  }]);
+  const { isNew } = banderas.desatendido
+    ? { isNew: banderas.nuevo !== null ? banderas.nuevo : !hasCode }
+    : await inquirer.prompt([{
+        type: 'list', name: 'isNew',
+        message: '¿El proyecto es nuevo o ya tiene código?',
+        choices: [
+          { name: 'Nuevo — empezando desde cero', value: true },
+          { name: 'Existente — ya tiene código o avance', value: false }
+        ],
+        default: !hasCode
+      }]);
+  if (banderas.desatendido) console.log(chalk.gray(`  · tipo: ${isNew ? 'nuevo' : 'existente'}`));
 
   // ── INSTALAR — crear carpetas PRIMERO antes de preguntar docs ──
   const spinner = ora({ text: 'Descargando Agentic KDD...', color: 'magenta' }).start();
@@ -281,11 +317,13 @@ async function init() {
   }
 
   // ── PREGUNTA 3: Docs (DESPUÉS de crear carpetas) ───────────
-  const { hasDocs } = await inquirer.prompt([{
-    type: 'confirm', name: 'hasDocs',
-    message: '¿Tienes specs, wireframes o documentación del proyecto?',
-    default: false
-  }]);
+  const { hasDocs } = banderas.desatendido
+    ? { hasDocs: banderas.docs === true }
+    : await inquirer.prompt([{
+        type: 'confirm', name: 'hasDocs',
+        message: '¿Tienes specs, wireframes o documentación del proyecto?',
+        default: false
+      }]);
 
   if (hasDocs) {
     // Recorrer el proyecto y consolidar docs automáticamente
@@ -385,4 +423,4 @@ Estado: Pendiente aa: configurar
   console.log(chalk.dim('  ─────────────────────────────────────────────\n'));
 }
 
-module.exports = { init };
+module.exports = { init, leerBanderas };

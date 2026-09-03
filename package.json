@@ -7,7 +7,7 @@
   },
   "scripts": {
     "prepublishOnly": "node scripts/prepublish-check.js",
-    "test": "node --test \"test/*.test.cjs\"",
+    "test": "node scripts/run-tests.cjs",
     "test:smoke": "node bin/akdd.js --version",
     "prepare": "node -e \"var fs=require('fs');fs.chmodSync('bin/akdd.js','755')\""
   },
