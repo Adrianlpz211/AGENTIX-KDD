@@ -22,6 +22,7 @@ const path = require('path');
 
 const uilm = require('../.agentic/grafo/ui-layout-memory.cjs');
 const { extraerValores, guard, normSel } = uilm;
+const { abrir, disponible, motivoSinDriver } = require('./helpers/sqlite.cjs');
 
 /* ── extracción ────────────────────────────────────────────────────────────── */
 
@@ -67,8 +68,9 @@ test('un id con y sin almohadilla son el mismo elemento', () => {
 function proyectoDePrueba() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-uilm-'));
   fs.mkdirSync(path.join(root, '.agentic'));
-  const { DatabaseSync } = require('node:sqlite');
-  new DatabaseSync(path.join(root, '.agentic', 'memoria.db')).close();
+  const db = abrir(path.join(root, '.agentic', 'memoria.db'));
+  if (!db) return null;
+  try { db.close(); } catch {}
   return root;
 }
 const escribir = (root, css) => {
@@ -76,16 +78,18 @@ const escribir = (root, css) => {
   return 'estilo.css';
 };
 
-test('nadie registra nada a mano y aun así queda vigilado', () => {
+test('nadie registra nada a mano y aun así queda vigilado', (t) => {
   const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
   const f = escribir(root, '#panel { right: 12px; width: 380px }');
   const r = guard(root, { files: [f], motivo: 'prueba' });
   assert.equal(r.capturados, 2, 'debe registrar los dos valores sin que nadie escriba un comando');
   assert.equal(r.findings.length, 0, 'la primera pasada establece la base, no acusa a nadie');
 });
 
-test('un cambio nuevo NO molesta — es trabajo normal', () => {
+test('un cambio nuevo NO molesta — es trabajo normal', (t) => {
   const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
   const f = escribir(root, '#panel { right: 12px }');
   guard(root, { files: [f], motivo: 'base' });
   escribir(root, '#panel { right: 24px }');
@@ -94,8 +98,9 @@ test('un cambio nuevo NO molesta — es trabajo normal', () => {
     'avisar de cada cambio haría que se desactive, y con ello se pierde el aviso que sí importa');
 });
 
-test('volver a un valor ya abandonado SÍ avisa', () => {
+test('volver a un valor ya abandonado SÍ avisa', (t) => {
   const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
   const f = escribir(root, '#panel { right: 12px }');
   guard(root, { files: [f], motivo: 'base' });
   escribir(root, '#panel { right: 24px }');
@@ -109,8 +114,9 @@ test('volver a un valor ya abandonado SÍ avisa', () => {
   assert.equal(r.findings[0].decidido, '24px');
 });
 
-test('una propiedad que desaparece SÍ avisa (el bug right→left)', () => {
+test('una propiedad que desaparece SÍ avisa (el bug right→left)', (t) => {
   const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
   const f = escribir(root, '#panel { right: 12px; width: 380px }');
   guard(root, { files: [f], motivo: 'base' });
   escribir(root, '#panel { left: 12px; width: 380px }');
@@ -121,11 +127,12 @@ test('una propiedad que desaparece SÍ avisa (el bug right→left)', () => {
   assert.equal(ausente.property, 'right');
 });
 
-test('list no revienta sobre una base sin la tabla', () => {
+test('list no revienta sobre una base sin la tabla', (t) => {
   /* Bug real de la v1: `list` abría la base en solo lectura y llamaba a
      ensureSchema, que hace CREATE TABLE. El comando de consulta fallaba
      siempre con "attempt to write a readonly database". */
   const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
   const db = uilm.recordDecision(root, { elementId: 'x', property: 'top', value: '1px' });
   assert.equal(db.ok, true, 'debe poder registrar sobre una base recién creada');
 });

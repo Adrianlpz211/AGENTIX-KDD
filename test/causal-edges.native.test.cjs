@@ -24,6 +24,15 @@ const { detectRecentChangesNative, tracePathNative } = require('../.agentic/graf
 // openDB() en ast-indexer.cjs y causal-edges.cjs. En este entorno no hay
 // Visual Studio Build Tools, así que better-sqlite3 no puede compilar y se
 // usa node:sqlite.
+/* Sin driver de SQLite este archivo no puede correr: sus aserciones viven en
+   el nivel superior, asi que un require fallido tumbaba la suite ENTERA en la
+   matriz de Node 20. Se omite con su motivo a la vista. */
+const { disponible, motivoSinDriver } = require('./helpers/sqlite.cjs');
+if (!disponible()) {
+  console.log('# SKIP causal-edges.native — ' + motivoSinDriver());
+  return;
+}
+
 function openDb(dbPath, opts = {}) {
   try {
     const BS3 = require('better-sqlite3');

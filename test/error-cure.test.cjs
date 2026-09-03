@@ -23,12 +23,13 @@ const os = require('os');
 const path = require('path');
 
 const { findCures, parseSecciones } = require('../.agentic/grafo/error-cure.cjs');
+const { abrir, disponible, motivoSinDriver } = require('./helpers/sqlite.cjs');
 
 /* ── una base de juguete con los casos que importan ───────────────────────── */
 function dbDePrueba() {
-  const { DatabaseSync } = require('node:sqlite');
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-cura-')), 'memoria.db');
-  const db = new DatabaseSync(f);
+  const db = abrir(f);
+  if (!db) return null;
   db.exec(`CREATE TABLE nodos (
     id INTEGER PRIMARY KEY, tipo TEXT, titulo TEXT, contenido TEXT,
     area TEXT, confianza TEXT, estado TEXT, archivos_aplica TEXT)`);
@@ -56,8 +57,9 @@ function dbDePrueba() {
   return db;
 }
 
-test('la cura aparece cuando la tarea nombra el archivo del error', () => {
+test('la cura aparece cuando la tarea nombra el archivo del error', (t) => {
   const db = dbDePrueba();
+  if (!db) return t.skip(motivoSinDriver());
   const r = findCures(db, {
     task: 'arreglar el modal de importar en compras-cotizacion-detalle.js',
     areas: ['compras'],
@@ -68,8 +70,9 @@ test('la cura aparece cuando la tarea nombra el archivo del error', () => {
     'debe traer la solución, no solo el título del error');
 });
 
-test('un error SIN solución escrita nunca se ofrece como cura', () => {
+test('un error SIN solución escrita nunca se ofrece como cura', (t) => {
   const db = dbDePrueba();
+  if (!db) return t.skip(motivoSinDriver());
   const r = findCures(db, {
     task: 'el tablero parpadea en compras-cotizacion-detalle.js',
     areas: ['compras'],
@@ -78,16 +81,18 @@ test('un error SIN solución escrita nunca se ofrece como cura', () => {
     'un error sin Solución: no cura nada — ofrecerlo solo asusta');
 });
 
-test('compartir área NO basta: es el ruido que hundió los 397 edges', () => {
+test('compartir área NO basta: es el ruido que hundió los 397 edges', (t) => {
   const db = dbDePrueba();
+  if (!db) return t.skip(motivoSinDriver());
   /* Tarea de compras que no tiene nada que ver con el reporte de cierre. */
   const r = findCures(db, { task: 'cambiar el color del botón guardar', areas: ['compras'] });
   assert.ok(!r.some((c) => /reporte de cierre/.test(c.titulo)),
     'el área es desempate, no evidencia — si admitiera, cada brief traería los 27 errores del área');
 });
 
-test('la solución llega entera, con su prevención', () => {
+test('la solución llega entera, con su prevención', (t) => {
   const db = dbDePrueba();
+  if (!db) return t.skip(motivoSinDriver());
   const r = findCures(db, {
     task: 'modal de importar en compras-cotizacion-detalle.js',
     areas: ['compras'],
