@@ -1122,7 +1122,7 @@ async function main() {
       if (dbPG && typeof cg.runPreservationGate === 'function') {
         if (typeof cg.migrateSchema === 'function') { try { cg.migrateSchema(dbPG); } catch {} }
         const pg = cg.runPreservationGate(dbPG, ROOT, (results && results.ciclo) || `post-${Date.now()}`,
-          commitFilesForScans || []);
+          commitFilesForScans || [], { sinSuiteCompleta: true });
         const roturas = (pg.violations || []).length;
 
         /* Cada rotura deja su arista causal: "este cambio rompio aquello".

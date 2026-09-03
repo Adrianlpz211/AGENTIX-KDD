@@ -5,7 +5,7 @@ Estado: IMPLEMENTADO
 
 ## Qué hace
 Módulo global del proyecto Agency OS.
-Tests: 88 pasando ✅
+Tests: 98 pasando ✅
 
 ## Criterios de aceptación
 - ✅ CRUD completo con tenant isolation (agencyId en todas las queries)

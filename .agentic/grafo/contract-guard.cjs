@@ -412,7 +412,15 @@ function takeSnapshot(db, projectRoot, cicloId, snapshotType) {
  *
  * @returns { passed: bool, violations: [], blast_radius: int }
  */
-function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = []) {
+/**
+ * @param opts.sinSuiteCompleta  No caer a la suite completa si los contratos en
+ *   riesgo no tienen archivo de test mapeado. Lo usa el post-cycle, que corre
+ *   desde un hook de git en cada commit: en un proyecto con una suite de cinco
+ *   minutos, ese respaldo la ejecutaria en cada commit y lo primero que haria
+ *   cualquiera es desactivar el hook — perdiendo con el todos los demas gates.
+ *   Invocado a mano (`contract-guard.cjs verify`) el respaldo si tiene sentido.
+ */
+function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = [], opts = {}) {
   const result = {
     passed: true,
     violations: [],
@@ -467,6 +475,14 @@ function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = []) {
       .map(c => c.test_file)
       .filter(Boolean)
   )];
+
+  if (testFilesToRun.length === 0 && opts.sinSuiteCompleta) {
+    result.passed = true;
+    result.skipped_reason =
+      `${contractsToCheck.length} contrato(s) en riesgo sin archivo de test mapeado; ` +
+      'no se corre la suite completa desde el post-cycle';
+    return result;
+  }
 
   let testOutput = '';
   if (testFilesToRun.length > 0) {

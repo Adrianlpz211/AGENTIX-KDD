@@ -219,3 +219,21 @@ test('DEAD_CODE no vuelve sin datos que lo sostengan', () => {
   assert.ok(!/DEAD_CODE:\s*\{/.test(CG),
     'DEAD_CODE solo puede volver cuando el índice AST registre las llamadas internas');
 });
+
+/* ── 5 · el gate no puede tumbar el commit de nadie ────────────────────────── */
+
+test('el post-cycle NO cae a la suite completa', () => {
+  /* El Preservation Gate corre tests. Si los contratos en riesgo no tienen
+     archivo mapeado, cae a la suite entera — y el post-cycle corre desde un
+     hook de git EN CADA COMMIT. En un proyecto ajeno con una suite de cinco
+     minutos, lo primero que haria cualquiera es desactivar el hook, perdiendo
+     con el todos los demas gates. Invocado a mano el respaldo si tiene sentido;
+     desde el hook, no. */
+  assert.match(PC_COD, /sinSuiteCompleta:\s*true/,
+    'post-cycle debe pedir el tope: un gate que hace lento cada commit se desactiva');
+
+  const cgSrc = soloCodigo(fs.readFileSync(
+    path.join(RAIZ, '.agentic', 'grafo', 'contract-guard.cjs'), 'utf8'));
+  assert.match(cgSrc, /opts\.sinSuiteCompleta/,
+    'contract-guard debe respetar el tope');
+});
