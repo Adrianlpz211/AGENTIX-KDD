@@ -70,10 +70,33 @@ async function update() {
     }
 
     // ── 5. CLAUDE.md + cursor rules ─────────────────────────────────────────
+    // CLAUDE.md se regenera ENTERO desde la plantilla. Lo del usuario NO vive
+    // aquí: vive en .agentic/INSTRUCCIONES-PROYECTO.md, un archivo que Agentix
+    // solo LEE. Así `update` no puede destruirlo — no porque se acuerde de
+    // preservarlo, sino porque nunca lo escribe.
+    //
+    // Antes (hasta v3.18) este bucle copiaba CLAUDE.md con overwrite:true sin
+    // preservar nada, mientras el propio archivo invitaba al usuario a pegar
+    // sus instrucciones al final. La prueba de que mordió: el encabezado
+    // «INSTRUCCIONES DEL PROYECTO» acabó duplicado en la plantilla del repo.
+    const userInstrPath = path.join(projectPath, '.agentic', 'INSTRUCCIONES-PROYECTO.md');
+    const migrado = migrarInstruccionesUsuario(projectPath, userInstrPath);
+
     for (const file of ['CLAUDE.md', '_LOCKS.md']) {
       const src  = path.join(TEMP_DIR, file);
       const dest = path.join(projectPath, file);
       if (fs.existsSync(src)) fs.copySync(src, dest, { overwrite: true });
+    }
+
+    // Volver a pegar lo del usuario debajo del marcador
+    if (fs.existsSync(userInstrPath)) {
+      const claudePath = path.join(projectPath, 'CLAUDE.md');
+      if (fs.existsSync(claudePath)) {
+        const propio = fs.readFileSync(userInstrPath, 'utf8').trim();
+        if (propio) {
+          fs.appendFileSync(claudePath, '\n' + propio + '\n');
+        }
+      }
     }
 
     const cursorSrc = path.join(TEMP_DIR, '.cursor');
@@ -273,3 +296,54 @@ function restoreUserState(configPath, state) {
 }
 
 module.exports = { update };
+
+
+// ── migrarInstruccionesUsuario ───────────────────────────────────────────────
+// Una sola vez: si el CLAUDE.md que hay en disco tiene texto del usuario
+// debajo del marcador y todavía no existe .agentic/INSTRUCCIONES-PROYECTO.md,
+// lo mueve allí. A partir de ese momento ese archivo es la única fuente y
+// Agentix jamás lo escribe.
+//
+// Devuelve true si migró algo (para poder avisarlo por consola).
+
+function migrarInstruccionesUsuario(projectPath, userInstrPath) {
+  try {
+    if (fs.existsSync(userInstrPath)) return false;   // ya migrado: no tocar
+
+    const claudePath = path.join(projectPath, 'CLAUDE.md');
+    if (!fs.existsSync(claudePath)) return false;
+
+    const actual = fs.readFileSync(claudePath, 'utf8');
+
+    // El marcador ha tenido dos redacciones; se aceptan ambas.
+    const re = /^#\s*INSTRUCCIONES DEL PROYECTO.*$/gm;
+    let ultimo = null, m;
+    while ((m = re.exec(actual)) !== null) ultimo = m;
+    if (!ultimo) return false;
+
+    // Todo lo que va después del bloque de comentarios del marcador
+    // Cortar por el CIERRE del marco (# =====), no por "lineas que empiezan
+    // por #": el texto del usuario son titulos markdown (## Mi regla) y una
+    // limpieza por # se los comia. Lo cazo la prueba de test/update-instrucciones.
+    let resto = actual.slice(ultimo.index + ultimo[0].length);
+    const cierre = resto.match(/^[^\n]*\n(?:#[ =]+\n)?/);
+    if (cierre) resto = resto.slice(cierre[0].length);
+    // saltar el resto del marco y los comentarios de ayuda, PERO parar en cuanto
+    // aparezca algo que no sea una linea de marco (# === o # texto sin ##)
+    resto = resto.replace(/^(?:#(?!#)[^\n]*\n|[ \t]*\n)+/, '');
+    resto = resto.trim();
+
+    if (!resto) return false;   // no había nada del usuario
+
+    fs.ensureDirSync(path.dirname(userInstrPath));
+    fs.writeFileSync(userInstrPath,
+      '# Instrucciones del proyecto\n' +
+      '#\n' +
+      '# Este archivo es tuyo. Agentix NO lo escribe nunca.\n' +
+      '# `akdd update` lo lee y lo pega al final de CLAUDE.md en cada actualización.\n' +
+      '\n' + resto + '\n', 'utf8');
+    return true;
+  } catch {
+    return false;   // fail-soft: nunca romper un update por esto
+  }
+}

@@ -1,15 +1,15 @@
-# SPEC — general
-Generado: 2026-07-14
-Última actualización: 2026-08-31
+# SPEC — arena-b
+Generado: 2026-07-12
+Última actualización: 2026-07-12
 Estado: IMPLEMENTADO
 
 ## Qué hace
-Módulo general del proyecto Agency OS.
-Tests: 0 pasando ✅
+Módulo arena-b del proyecto Agency OS.
+Tests: 22 pasando ✅
 
 ## Criterios de aceptación
 - ✅ CRUD completo con tenant isolation (agencyId en todas las queries)
-- ✅ 0 tests pasando en primera iteración
+- ✅ 1 tests pasando en primera iteración
 - ✅ 0 regresiones detectadas
 
 ## Archivos principales
@@ -18,7 +18,7 @@ Tests: 0 pasando ✅
 ## Tests
 | Suite | Tests | Estado |
 |-------|-------|--------|
-| general.test.ts | 0 | ✅ PASS |
+| arena-b.test.ts | 1 | ✅ PASS |
 
 ## Patrones aplicados
 - Multi-tenancy: filtrar siempre por agencyId

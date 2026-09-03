@@ -173,6 +173,54 @@ function ensureSchema(db) {
 
 // ── Step 1: Registrar ciclo en BD ─────────────────────────────────────────────
 
+/**
+ * Cuantos controles frenaron durante este ciclo.
+ *
+ * Estaba clavado a 0: los 155 ciclos de D:ð decian "ningun STOP" mientras
+ * la libreta guardaba 68 STOPs reales. El dato existia y la columna mentia.
+ * Se cuenta desde el cierre del ciclo anterior, que es el unico limite que
+ * define "este ciclo" sin depender de que nadie lo marque.
+ */
+/**
+ * Un puerto de desarrollo que este respondiendo AHORA.
+ * Se prueban los habituales y se devuelve el primero que contesta cualquier
+ * cosa. Deliberadamente sin configuracion: si hace falta configurar algo, la
+ * gente no lo configura y el control no corre nunca.
+ */
+function puertoVivo() {
+  const net = require('net');
+  const { execSync } = require('child_process');
+  for (const p of [3000, 3001, 5173, 8080, 4200, 8000]) {
+    const ok = (() => {
+      try {
+        execSync(`node -e "const n=require('net');const s=n.connect(${p},'127.0.0.1');s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1200)"`,
+          { stdio: 'ignore', timeout: 4000 });
+        return true;
+      } catch { return false; }
+    })();
+    if (ok) return p;
+  }
+  return null;
+}
+
+
+function contarStops() {
+  try {
+    const g = require(path.join(GRAFO_DIR, 'grafo.cjs'));
+    const db = g.initDB ? g.initDB() : null;
+    if (!db) return 0;
+    const anterior = db.get
+      ? db.get('SELECT fecha_fin FROM ciclos ORDER BY id DESC LIMIT 1')
+      : null;
+    const desde = anterior && anterior.fecha_fin ? anterior.fecha_fin : null;
+    const fila = desde
+      ? db.get("SELECT COUNT(*) c FROM gate_events WHERE verdict = 'STOP' AND ts > ?", desde)
+      : db.get("SELECT COUNT(*) c FROM gate_events WHERE verdict = 'STOP' AND ts > datetime('now','-1 day')");
+    return (fila && fila.c) || 0;
+  } catch { return 0; }
+}
+
+
 function registrarCiclo(db, cycleData) {
   try {
     // Cuánto tomó de verdad, si alguien marcó el arranque. Sin marca: null,
@@ -207,7 +255,7 @@ function registrarCiclo(db, cycleData) {
       tests_pasando:      datos.tests_pasando || testsPassing,
       review_blockers:    0,
       review_required:    0,
-      stops_count:        0,
+      stops_count:        contarStops(),
       sync_grafo:         true,
       duracion_ms:        (arranqueTarea && arranqueTarea.duracion_ms) || datos.duracion_ms || 0,
       fecha_inicio:       (arranqueTarea && arranqueTarea.fecha_inicio) || null,
@@ -811,29 +859,90 @@ async function main() {
     }
   } catch { if (!silent) console.log('  2.7 Spec/Test integrity scan... ⚠️  omitido'); }
 
-  // Step 2.8: UI Layout Memory — mecaniza el hueco "no hay memoria de layout/
-  // posición" señalado en el análisis externo de Agentix (caso real de esta
-  // sesión: el panel de tour se reposicionó y nada habría detectado si algo
-  // lo devolvía a su lugar viejo). Solo vigila elementos que alguien registró
-  // explícitamente con `ui-layout-memory.cjs record` — sin registro, sin
-  // ruido. Se limita a archivos de UI típicos para no correr sobre todo el
-  // changeset. Fail-soft, WARN-only, mismo espíritu que el paso anterior.
+  // Step 2.75: Reloj derivado - si el ciclo se cerro sin duracion, se deduce
+  // aqui mismo de las huellas mecanicas (marca de arranque del enricher,
+  // ventana de lock, commits, eventos de gate). Antes la hora de inicio
+  // dependia de que alguien corriera `linea-tiempo.cjs inicio`: 96 de 155
+  // ciclos quedaron sin ella. Fail-soft: perder la medicion no cuesta trabajo.
+  try {
+    const relojPath = path.join(GRAFO_DIR, 'reloj-derivado.cjs');
+    if (fs.existsSync(relojPath)) {
+      const d = require(relojPath).completarUltimo(ROOT);
+      if (!silent) {
+        console.log(d
+          ? `  2.75 Reloj... duracion deducida: ${Math.round(d.ms / 60000)} min (${d.origen})`
+          : '  2.75 Reloj... ya venia medido');
+      }
+    }
+  } catch { if (!silent) console.log('  2.75 Reloj... omitido'); }
+
+
+  // Step 2.8: UI Layout Memory — la memoria de diseño se llena SOLA.
+  //
+  // La v1 solo vigilaba lo que alguien registrara a mano con `record`. En
+  // D:ð, tras meses de trabajo: cero registros, la tabla ni existía. Corría
+  // aquí puntualmente, no encontraba nada que vigilar, y protegía cero. Pedir
+  // que se documente cada decisión de diseño a mano es pedir que no se haga.
+  //
+  // Ahora captura sola los valores de diseño de los archivos de front del
+  // commit y solo avisa de REGRESIONES: un valor que vuelve a uno ya
+  // abandonado, o una propiedad que desaparece. Un cambio nuevo es trabajo
+  // normal y se registra en silencio — por eso puede capturar mucho sin
+  // convertirse en ruido. Fail-soft, WARN-only.
+  //
+  // El filtro de archivos incluye .css y .js a propósito: la v1 solo miraba
+  // html/jsx/tsx, y el front de este proyecto vive en public/legacy/*.js y
+  // assets/css/*.css — o sea que ni con registros habría mirado donde duele.
   try {
     const uilmPath = path.join(GRAFO_DIR, 'ui-layout-memory.cjs');
-    const uiFiles = commitFilesForScans.filter(f => /\.(html|jsx|tsx)$/i.test(f) || /dashboard/i.test(f));
+    const uiFiles = commitFilesForScans.filter(f =>
+      /\.(html?|css|scss|js|jsx|ts|tsx|cjs|mjs|vue|svelte)$/i.test(f));
     if (fs.existsSync(uilmPath) && uiFiles.length) {
       const uilm = require(uilmPath);
-      const uiRes = uilm.scanDiff(ROOT, { staged: false, files: uiFiles });
+      const uiRes = uilm.guard(ROOT, { files: uiFiles, capturar: true });
       if (!silent) {
         const n = (uiRes.findings || []).length;
         console.log(n > 0
-          ? `  2.8 UI Layout Memory... ⚠️  ${n} hallazgo(s) — ver libreta (gate_events)`
-          : '  2.8 UI Layout Memory... ✅ sin hallazgos');
+          ? `  2.8 UI Layout Memory... ⚠️  ${n} posible(s) regresión(es) — ${uiRes.capturados} valor(es) registrado(s)`
+          : `  2.8 UI Layout Memory... ✅ ${uiRes.capturados} valor(es) de diseño registrado(s), sin regresiones`);
       }
     } else if (!silent) {
-      console.log('  2.8 UI Layout Memory... — (sin archivos de UI en este commit)');
+      console.log('  2.8 UI Layout Memory... — (sin archivos de front en este commit)');
     }
   } catch { if (!silent) console.log('  2.8 UI Layout Memory... ⚠️  omitido'); }
+
+  // Step 2.85: Browser Gate condicional - solo si hay un servidor vivo.
+  //
+  // El browser-gate existia y era papel: necesitaba que alguien lo invocara a
+  // mano con la URL. Ahora, si el commit toco front Y hay un servidor de
+  // desarrollo respondiendo en un puerto habitual, corre solo y deja en la
+  // libreta los errores de consola y de pagina. Si no hay servidor, no dice
+  // nada y no molesta: un control que exige montar un entorno para poder
+  // correr es un control que no corre.
+  try {
+    const bgPath = path.join(GRAFO_DIR, 'browser-gate.cjs');
+    const frontTocado = commitFilesForScans.some(f =>
+      /\.(html?|css|scss|js|jsx|ts|tsx|vue|svelte)$/i.test(f));
+    if (fs.existsSync(bgPath) && frontTocado) {
+      const puerto = puertoVivo();
+      if (puerto) {
+        const { execSync } = require('child_process');
+        const salida = execSync(
+          `node "${bgPath}" http://127.0.0.1:${puerto}`,
+          { cwd: ROOT, stdio: 'pipe', timeout: 90000 }
+        ).toString();
+        if (!silent) {
+          const mal = /error|ERROR|❌/.test(salida);
+          console.log(mal
+            ? `  2.85 Browser Gate... hallazgos en el puerto ${puerto} - ver libreta`
+            : `  2.85 Browser Gate... sin errores de consola en el puerto ${puerto}`);
+        }
+      } else if (!silent) {
+        console.log('  2.85 Browser Gate... - (ningun servidor de desarrollo escuchando)');
+      }
+    }
+  } catch { if (!silent) console.log('  2.85 Browser Gate... omitido'); }
+
 
   // Step 2.9: CSS Token Gate — mitad mecánica de la NORMA CSS TOKENS de
   // 03-front.md (v3.17.0, caso real salud360: valores visuales compartidos
@@ -859,6 +968,39 @@ async function main() {
       console.log('  2.9 CSS Token Gate... — (sin archivos CSS/HTML en este commit)');
     }
   } catch { if (!silent) console.log('  2.9 CSS Token Gate... ⚠️  omitido'); }
+
+  // Step 2.10: Canario Gate — un arreglo no se cierra sin un test que lo detecte.
+  //
+  // "Que los errores no se repitan" no lo da la memoria: lo da un test que se
+  // pone rojo si el error vuelve. Eso estaba escrito como disciplina en el
+  // protocolo, y la disciplina que depende de que alguien se acuerde no ocurre:
+  // en D:ð hay 29 errores registrados y 3 protected_behaviors. Veintinueve
+  // arreglos, tres canarios.
+  //
+  // Aquí se cuenta, no se juzga: si el cambio toca produccion y ningun test,
+  // lo dice — y distingue el arreglo sin canario (la regresion de manana) de la
+  // funcionalidad sin test (deuda normal). WARN-only, como sus hermanos: el
+  // freno lo pone el dev al leerlo, no un script que puede equivocarse.
+  try {
+    const cgPath = path.join(GRAFO_DIR, 'canario-gate.cjs');
+    if (fs.existsSync(cgPath)) {
+      const cg = require(cgPath);
+      const cgRes = cg.revisar(ROOT, {
+        files: commitFilesForScans.length ? commitFilesForScans : null,
+        commit: !commitFilesForScans.length,
+        tipo: (datos && datos.tipo_tarea) || null,
+      });
+      if (!silent) {
+        console.log(cgRes.veredicto === 'STOP'
+          ? `  2.10 Canario Gate... ⚠️  ARREGLO sin test que lo detecte — ${cgRes.produccion.length} archivo(s) de produccion, 0 tests`
+          : cgRes.veredicto === 'WARN'
+            ? `  2.10 Canario Gate... ⚠️  ${cgRes.produccion.length} archivo(s) de produccion sin test nuevo`
+            : '  2.10 Canario Gate... ✅ el cambio trae su test');
+      }
+    } else if (!silent) {
+      console.log('  2.10 Canario Gate... — (no instalado)');
+    }
+  } catch { if (!silent) console.log('  2.10 Canario Gate... ⚠️  omitido'); }
 
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');

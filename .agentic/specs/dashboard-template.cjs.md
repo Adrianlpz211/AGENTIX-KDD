@@ -1,10 +1,10 @@
-# SPEC — general
-Generado: 2026-07-14
-Última actualización: 2026-08-31
+# SPEC — dashboard-template.cjs
+Generado: 2026-07-11
+Última actualización: 2026-07-11
 Estado: IMPLEMENTADO
 
 ## Qué hace
-Módulo general del proyecto Agency OS.
+Módulo dashboard-template.cjs del proyecto Agency OS.
 Tests: 0 pasando ✅
 
 ## Criterios de aceptación
@@ -18,7 +18,7 @@ Tests: 0 pasando ✅
 ## Tests
 | Suite | Tests | Estado |
 |-------|-------|--------|
-| general.test.ts | 0 | ✅ PASS |
+| dashboard-template.cjs.test.ts | 0 | ✅ PASS |
 
 ## Patrones aplicados
 - Multi-tenancy: filtrar siempre por agencyId

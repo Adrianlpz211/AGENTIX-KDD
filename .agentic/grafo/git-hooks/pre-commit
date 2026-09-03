@@ -1,29 +1,102 @@
 #!/bin/sh
 # Agentic KDD managed hook
-# pre-commit — gates MECÁNICOS sobre lo staged (Plan 7): la invocación deja de
-# depender de que el modelo se acuerde. v1: SIEMPRE exit 0 (visible, no
-# bloqueante — la escalada a bloqueo se gana con datos). Para desactivar:
-# borra este archivo o corre: node .agentic/grafo/install-hooks.cjs --uninstall
+# pre-commit — gates MECÁNICOS sobre lo staged. La invocación no depende de que
+# el modelo se acuerde, así que funciona igual con Claude, con Cursor o con el
+# modelo de reserva al que se cae cuando se agota la cuota.
+#
+# v2 (03/09/2026): escalado de AVISAR a BLOQUEAR, pero SOLO en CRITICAL.
+#   Antes: security-gate salía con código 1 al encontrar una llave privada
+#   filtrada, el hook se lo tragaba con 2>/dev/null y hacía exit 0. El gate
+#   gritaba y nadie lo escuchaba. La v1 decía «la escalada a bloqueo se gana
+#   con datos» — los datos son que CRITICAL solo se activa con secretos
+#   filtrados, fugas cross-tenant y bypass de JWT. No hay caso legítimo para
+#   commitear ninguna de esas cosas.
+#
+#   Lo demás (HIGH, WARN, PII, unicode invisible) sigue siendo visible y NO
+#   bloquea: un hook que grita por todo se desactiva en una semana.
+#
+# Para saltarlo puntualmente:  AKDD_SKIP_GATES=1 git commit ...
+#                       o bien: git commit --no-verify
+# Para desinstalarlo:           node .agentic/grafo/install-hooks.cjs --uninstall
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
-# 1) Valores de negocio vigilados en el diff staged (spec mecánico)
+# Escotilla explícita: quien la usa sabe lo que hace y queda en el historial
+if [ "$AKDD_SKIP_GATES" = "1" ]; then
+  echo "  ⏭️  AKDD_SKIP_GATES=1 — gates de pre-commit saltados a propósito"
+  exit 0
+fi
+
+BLOQUEO=0
+
+# 1) Valores de negocio vigilados en el diff staged (spec mecánico) — solo avisa
 [ -f "$ROOT/.agentic/grafo/spec-value-scan.cjs" ] && \
   node "$ROOT/.agentic/grafo/spec-value-scan.cjs" --staged 2>/dev/null
 
-# 2) Escudo de seguridad sobre los archivos de código staged (secretos/PII/inyección)
+# 2) Escudo de seguridad sobre los archivos de código staged
+#    (secretos, PII, inyección de prompt, fugas cross-tenant)
+#    BLOQUEA si encuentra CRITICAL — que es exactamente y solo:
+#    llaves privadas, tokens de proveedor, connection strings con contraseña,
+#    fugas entre inquilinos y bypass de JWT.
 if [ -f "$ROOT/.agentic/grafo/security-gate.cjs" ]; then
   STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|py|rb|php|go|env)$' | head -20 | tr '\n' ' ')
-  [ -n "$STAGED" ] && node "$ROOT/.agentic/grafo/security-gate.cjs" $STAGED 2>/dev/null
+  if [ -n "$STAGED" ]; then
+    node "$ROOT/.agentic/grafo/security-gate.cjs" $STAGED
+    if [ $? -ne 0 ]; then
+      BLOQUEO=1
+      MOTIVO_SEGURIDAD=1
+    fi
+  fi
 fi
 
 # 3) Integridad de tests protegidos (v3.15.2 — Grieta R8 del Coliseo): un test
-# que verifica un patrón ALTA no debe cambiar de título/aserciones en silencio
-# — eso es exactamente cómo se ocultó una race reintroducida en el Coliseo.
+#    que verifica un patrón ALTA no debe cambiar de título/aserciones en
+#    silencio — así se ocultó una race reintroducida en el Coliseo. Solo avisa.
 [ -f "$ROOT/.agentic/grafo/test-integrity-gate.cjs" ] && \
   node "$ROOT/.agentic/grafo/test-integrity-gate.cjs" --staged 2>/dev/null
 
-# v1: nunca bloquear — el hallazgo queda visible en la terminal y en la
-# libreta (gate_events, source=mechanical). exit 0 SIEMPRE.
+# 4) Diálogos nativos del navegador sin estilizar (confirm/alert/prompt) en el
+#    front staged. La regla vivía solo como prosa en CLAUDE.md, o sea que
+#    dependía de que el modelo la leyera. Ahora corre siempre. Solo avisa.
+if [ -f "$ROOT/.agentic/grafo/ui-native-gate.cjs" ]; then
+  FRONT=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(js|jsx|ts|tsx|html)$' | head -20 | tr '\n' ' ')
+  [ -n "$FRONT" ] && node "$ROOT/.agentic/grafo/ui-native-gate.cjs" $FRONT 2>/dev/null
+fi
+
+# 5) Canario: un arreglo sin test es la regresion de manana. AVISA sobre
+#    cualquier cambio de produccion sin tests, y BLOQUEA solo si el commit se
+#    declara como arreglo (fix/arregla/corrige/hotfix/bug) — ahi el test no es
+#    deuda, es la unica cosa que evita que el mismo error vuelva en silencio.
+if [ -f "$ROOT/.agentic/grafo/canario-gate.cjs" ]; then
+  node "$ROOT/.agentic/grafo/canario-gate.cjs" --staged
+  if [ $? -ne 0 ]; then
+    BLOQUEO=1
+    MOTIVO_CANARIO=1
+  fi
+fi
+
+if [ "$BLOQUEO" = "1" ]; then
+  echo ""
+  echo "  COMMIT BLOQUEADO"
+  echo ""
+  if [ "$MOTIVO_SEGURIDAD" = "1" ]; then
+    echo "   - Security Gate: algo CRITICO en el codigo staged."
+    echo "     Solo salta con secretos filtrados (llaves privadas, tokens,"
+    echo "     contrasenas en connection strings), fugas entre inquilinos o"
+    echo "     bypass de JWT. No hay caso legitimo para commitear eso."
+    echo ""
+  fi
+  if [ "$MOTIVO_CANARIO" = "1" ]; then
+    echo "   - Canario: es un arreglo y no trae ningun test."
+    echo "     Un error arreglado sin un test que lo detecte no esta cerrado,"
+    echo "     esta pospuesto. Cuando vuelva, volvera en silencio."
+    echo ""
+  fi
+  echo "     Arregla lo senalado arriba y vuelve a intentar."
+  echo "     Si de verdad no aplica:  AKDD_SKIP_GATES=1 git commit ..."
+  echo ""
+  exit 1
+fi
+
 exit 0

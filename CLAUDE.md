@@ -244,6 +244,12 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd why <f>` | `decision_why` con `{target: "<f>"}` |
 | `akdd audit` | `memory_audit` |
 | `akdd causal-prune` | `causal_prune` |
+| `akdd cura "<tarea>"` | correr `node .agentic/grafo/error-cure.cjs "<tarea>"` (el error que ya pasó, con la solución que funcionó) |
+| `akdd diseno` | correr `node .agentic/grafo/ui-layout-memory.cjs list` (decisiones de diseño vigiladas) |
+| `akdd reloj` | correr `node .agentic/grafo/reloj-derivado.cjs estado` (cobertura real de la medición de tiempo) |
+| `akdd reloj backfill` | correr `node .agentic/grafo/reloj-derivado.cjs backfill` (deduce la duración de los ciclos sin dato) |
+| `akdd canario` | correr `node .agentic/grafo/canario-gate.cjs --commit` (¿el último cambio trae test?) |
+| `akdd hierro` | correr `node .agentic/grafo/hierro-papel.cjs` (qué del protocolo se ejecuta y qué solo se lee) |
 | `akdd hooks` | correr `node .agentic/grafo/install-hooks.cjs` |
 | `akdd reason status` | correr `node .agentic/grafo/reasoning-bank.cjs status` |
 | `akdd reason recall <query>` | correr `node .agentic/grafo/reasoning-bank.cjs recall "<query>"` |
@@ -351,7 +357,6 @@ Responder normalmente usando el contexto del proyecto.
 - `.audit/`                → Departamento QA
 
 
-
 ## RECUPERACIÓN DE SESIÓN
 
 Si el usuario pega un bloque que empieza con `# Checkpoint Agentic KDD`:
@@ -414,8 +419,6 @@ Si el pipeline genera una de estas operaciones:
 2. Mostrar exactamente qué operación intentaría correr
 3. Preguntar confirmación explícita: "¿Confirmas ejecutar: [comando]?"
 4. Solo proceder si el dev responde SÍ explícitamente
-
-
 
 
 ## REGRESSION GUARD — Steps 4 y 9 del pipeline aa:
@@ -817,10 +820,6 @@ Antes de ejecutar, mostrar exactamente:
 Luego proceder con el pipeline completo como si el dev hubiera escrito `aa:`.
 
 
-# ============================================================
-# INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
-# ============================================================
-
 ## MODO EXPLORE — aa: explore [objetivo]
 
 Antes de implementar, pensar junto al dev sin escribir código.
@@ -860,9 +859,6 @@ Si necesitas registrar contratos de un área SIN correr el post-cycle completo
 
 ---
 
-# ============================================================
-# INSTRUCCIONES DEL PROYECTO — agregar las tuyas aquí abajo
-# ============================================================
 
 ## LOCK MANAGER — Desarrollo multi-instancia
 
@@ -961,3 +957,105 @@ Cuando un gate mecánico (Regression/TDD) frena con STOP durante un ciclo aa::
 
 La calidad del arreglo la pone el modelo; la maquinaria garantiza el orden, los
 límites y el rastro. Ver estadísticas: recoveryStats en gate-telemetry.cjs.
+
+## CURAS CONOCIDAS — el error que ya pasó llega con su solución
+
+Mecánico, corre solo dentro del `context-enricher` en CADA ciclo `aa:`.
+
+La memoria KDD guarda cada error con su cura escrita dentro (`Síntoma:`,
+`Causa:`, `Solución:`, `Prevención:`). Antes nadie las leía: el enricher pedía
+un "ancla de símbolo" que ningún error tenía, consultaba una tabla vacía, y
+solo miraba con riesgo ALTO. Resultado medido: 25 soluciones escritas, 0 veces
+mostradas.
+
+Ahora `error-cure.cjs` lee el texto del propio nodo y el brief abre con
+**"Esto ya pasó antes — así se arregló"** cuando la tarea toca un archivo o un
+síntoma que ya tuvo su error. Los edges `resuelto_por` se IGNORAN a propósito:
+en la práctica son un producto cartesiano (cada error enlazado a los ~27
+patrones de su área) y usarlos inundaría el brief de curas falsas.
+
+Consultar a mano:  `node .agentic/grafo/error-cure.cjs "<tarea>"`
+
+## MEMORIA DE DISEÑO — se llena sola y se defiende sola
+
+Mecánico, `post-cycle.cjs` paso 2.8. No hay nada que registrar a mano.
+
+`ui-layout-memory.cjs` captura los valores de diseño de los archivos de front
+del commit (elementos con `id` y reglas CSS de un solo selector, ~60
+propiedades desde `letter-spacing` hasta `position`) y **solo avisa de
+regresiones**:
+
+  · un valor VUELVE a uno ya abandonado   → casi siempre es sin querer
+  · una propiedad DESAPARECE del elemento → el bug `right` reemplazado por `left`
+
+Un cambio nuevo es trabajo normal: se registra en silencio y no molesta. Por
+eso puede capturar mucho sin volverse ruido — capturar es barato, avisar es
+caro. La v1 solo vigilaba lo registrado a mano y en un proyecto real con meses
+de trabajo hubo cero registros: protegía cero.
+
+Consultar:  `node .agentic/grafo/ui-layout-memory.cjs list`
+
+## RELOJ DE HIERRO — la duración no depende de que nadie la marque
+
+Mecánico: el `context-enricher` sella el arranque de cada ciclo y
+`post-cycle.cjs` (paso 2.75) deduce la duración al cerrar.
+
+`linea-tiempo.cjs inicio` sigue existiendo, pero ya no es la fuente. La
+duración se deriva, en este orden, de huellas que se escriben solas: marca de
+arranque del enricher → ventana de lock del lock-manager → commits agrupados en
+tandas (hueco de 90 min = sesión nueva) → horas de los eventos de gate.
+
+Si no hay huella suficiente, el ciclo queda **sin dato** y así se muestra. No
+se estima: un cero inventado ensucia todos los promedios que alguien mire
+después. Cada duración lleva su origen (`medido`, `marca`, `lock`, `git`,
+`gates`).
+
+Rellenar el histórico:  `node .agentic/grafo/reloj-derivado.cjs backfill`
+
+## CANARIO — un arreglo no cierra sin un test que lo detecte
+
+Mecánico, en el `pre-commit`. **BLOQUEA.**
+
+  · cambio de producción sin ningún test  → aviso
+  · **arreglo** sin ningún test           → freno, `exit 1`
+
+El arreglo se detecta del mensaje del commit (`fix`, `arregla`, `corrige`,
+`hotfix`, `bug`) o del tipo de tarea. No juzga si el test es bueno — eso es del
+que lo escribe; solo garantiza que exista uno. Un error arreglado sin canario
+no está cerrado, está pospuesto, y cuando vuelve, vuelve en silencio.
+
+Escotilla:  `AKDD_SKIP_GATES=1 git commit ...`
+
+## HIERRO O PAPEL — ninguna sección puede prometer un script que nadie corre
+
+Mecánico, en el CI (`test/hierro-papel.test.cjs`).
+
+Este archivo mezcla reglas que ejecuta una máquina con reglas que dependen de
+que el modelo las lea, y las dos se ven igual. Tres degradaciones silenciosas
+medidas el 03/09/2026: el reloj sin medir 96 de 155 ciclos, `stops_count` en 0
+con 68 STOPs en la libreta, y `ui-native-gate` escrito como prosa sin que nada
+lo invocara.
+
+Toda sección que nombre un `.cjs` está prometiendo que ese script corre.
+`hierro-papel.cjs` comprueba que exista Y que alguien lo invoque de verdad —
+nombrarlo aquí no cuenta. Si no, o se declara en
+`.agentic/grafo/PAPEL-ACEPTADO.json` con su motivo, o el CI se pone rojo.
+
+**Regla de entrada, a partir de ahora:** una regla nueva entra a este archivo
+solo si viene con su script o con su test. Si no, no entra — cada línea de
+prosa nueva reduce la probabilidad de que se lea la anterior.
+
+Inventario:  `node .agentic/grafo/hierro-papel.cjs`
+
+# ============================================================
+# INSTRUCCIONES DEL PROYECTO
+# ============================================================
+# Todo lo de arriba lo genera Agentix y `akdd update` lo reemplaza entero.
+#
+# Lo tuyo NO va aquí: va en `.agentic/INSTRUCCIONES-PROYECTO.md`.
+# Ese archivo es tuyo, Agentix no lo escribe nunca, y `akdd update` lo
+# vuelve a pegar debajo de esta línea en cada actualización.
+#
+# Si ya tenías texto propio en este archivo, el primer `akdd update`
+# lo mueve solo a `.agentic/INSTRUCCIONES-PROYECTO.md` y te avisa.
+# ============================================================

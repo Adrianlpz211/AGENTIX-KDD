@@ -1291,6 +1291,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 /* ════════ PROJECT DOCS MODE ════════ */
 #mode-docs{flex:1;display:none;overflow:hidden}
+#mode-tiempos{flex:1;display:none;overflow:hidden}
 .docs-layout{display:flex;height:100%;width:100%;overflow:hidden;flex:1;min-width:0}
 .docs-nav{width:210px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;padding:12px}
 .docs-nav::-webkit-scrollbar{width:3px}
@@ -1449,6 +1450,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab active" onclick="setMode('graph',this)">🧠 <span data-i="tab_graph">Knowledge Graph</span></div>
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
   <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
+  <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
 </div>
 
 <div class="content">
@@ -1678,7 +1680,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="nav-item" onclick="showDoc('errors',this)">🔴 <span data-i="nav_errors">Errors</span> <span class="nav-count">${errores.length}</span></div>
         <div class="nav-item" onclick="showDoc('questions',this)">💡 <span data-i="nav_questions">For New Devs</span></div>
         <div class="nav-item" onclick="showDoc('metrics',this)">📊 <span>Metrics</span></div>
-        <div class="nav-item" onclick="showDoc('tiempos',this)">⏱ <span>Tiempos</span></div>
         <div class="nav-item" onclick="showDoc('timeline',this)">🕐 <span>Timeline</span></div>
         <div class="nav-item" onclick="showDoc('onboarding',this)">🚀 <span>Onboarding</span> <span class="nav-count">${onboardingData.pct}%</span></div>
       </div>
@@ -1836,164 +1837,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       </div>
 
       <!-- FOR NEW DEVS -->
-      <div class="docs-section" id="doc-tiempos">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-          <div class="docs-h1" style="margin:0">⏱ Tiempos y avance</div>
-          <select onchange="exportarTiempos(this)" title="Descargar este tablero como reporte"
-            style="background:var(--bg2);color:var(--text2);border:1px solid var(--border);border-radius:6px;
-                   padding:6px 10px;font-size:12px;cursor:pointer">
-            <option value="">⤓ Exportar…</option>
-            <option value="html">Reporte HTML — se abre solo, se manda por correo</option>
-            <option value="pdf">PDF — vía «Guardar como PDF» del navegador</option>
-          </select>
-        </div>
-        <div class="docs-sub">Cuánto costó cada módulo, cuál se movió y cuál lleva días parado, y dónde se atascó el trabajo. Cuando cada módulo lo lleva una persona distinta, esta pantalla es la que muestra dónde mirar.</div>
-      
-        ${(() => {
-          const T = tiemposDB || [], F = friccionDB || [], R = ritmoDB || [];
-          if (!T.length) return '<div class="empty-state" style="padding:40px">Sin ciclos registrados todavía — aparecen solos al cerrar cada tarea.</div>';
-      
-          const fecha = (x) => x ? new Date(String(x).replace(' ','T')+'Z') : null;
-          const dias = (a,b) => (a&&b&&!isNaN(a)&&!isNaN(b))
-            ? Math.round((new Date(b.getFullYear(),b.getMonth(),b.getDate())-new Date(a.getFullYear(),a.getMonth(),a.getDate()))/86400000)+1 : 0;
-          const hoy = new Date();
-          const durTxt = (ms) => { if(!ms) return '—'; const m=Math.round(ms/60000);
-            return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min'; };
-      
-          // La fricción se atribuye a un módulo cuando su nombre aparece en la ruta del
-          // archivo. Es una heurística: lo que no case queda "sin atribuir", nunca se
-          // reparte a ojo entre los módulos.
-          const frPorMod = {};
-          let frSinAtribuir = 0;
-          for (const f of F) {
-            const ruta = String(f.archivo || '').toLowerCase();
-            const m = T.map(t=>String(t.m)).find(n => n !== '(sin módulo)' && ruta.includes(n.toLowerCase()));
-            if (m) frPorMod[m] = (frPorMod[m]||0) + f.n; else frSinAtribuir += f.n;
-          }
-      
-          const totCiclos = T.reduce((a,t)=>a+(t.ciclos||0),0);
-          const totFixes  = T.reduce((a,t)=>a+(t.fixes||0),0);
-          const totConDur = T.reduce((a,t)=>a+(t.con_dur||0),0);
-          const totMs     = T.reduce((a,t)=>a+(t.ms||0),0);
-          const totFric   = F.reduce((a,f)=>a+(f.n||0),0);
-          const stops     = F.filter(f=>f.verdict==='STOP').reduce((a,f)=>a+f.n,0);
-          const retrabajo = totCiclos ? Math.round((totFixes/totCiclos)*100) : 0;
-          const cobertura = totCiclos ? Math.round((totConDur/totCiclos)*100) : 0;
-      
-          // Estancado = tres semanas sin cerrar un ciclo. Es el umbral que hace que un
-          // proyecto de tres semanas tenga sentido: por debajo, todo parecería activo.
-          const conEdad = T.map(t => {
-            const u = fecha(t.hasta);
-            const edad = u && !isNaN(u) ? Math.floor((hoy-u)/86400000) : null;
-            return {...t, edad};
-          });
-          const estancados = conEdad.filter(t => t.edad != null && t.edad >= 21).length;
-      
-          const kpi = (val,lab,col,nota) => `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
-            <div style="font-size:22px;font-weight:600;color:${col}">${val}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">${lab}</div>
-            ${nota?`<div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">${nota}</div>`:''}</div>`;
-      
-          let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">';
-          h += kpi(totCiclos, 'ciclos cerrados', 'var(--text)', T.length+' módulos');
-          h += kpi(retrabajo+'%', 'retrabajo', retrabajo>30?'#f87171':retrabajo>15?'#fbbf24':'#34d399', totFixes+' de '+totCiclos+' fueron arreglos');
-          h += kpi(stops||totFric, stops?'veces que un gate frenó':'avisos de gate', (stops>0)?'#f87171':'var(--text2)', stops?totFric+' eventos en total':'ningún STOP');
-          h += kpi(estancados, 'módulos parados', estancados>0?'#fbbf24':'#34d399', '21 días o más sin cerrar nada');
-          h += kpi(durTxt(totMs), 'tiempo medido', 'var(--text)', cobertura+'% de los ciclos lo tiene');
-          h += '</div>';
-      
-          // ── Tabla por módulo ──
-          h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-          h += '<thead><tr style="color:var(--text3);font-size:11px">'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left">Módulo</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Ciclos</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Retrabajo</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Frenos</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Días activos</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Trabajado</th>'
-            + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Última vez</th>'
-            + '</tr></thead><tbody>';
-      
-          const maxC = Math.max(...T.map(t=>t.ciclos||0), 1);
-          const orden = [...conEdad].sort((a,b) => (a.edad??9e9)-(b.edad??9e9));
-          for (const t of orden) {
-            const rt = t.ciclos ? Math.round((t.fixes/t.ciclos)*100) : 0;
-            const fr = frPorMod[String(t.m)] || 0;
-            const pct = Math.round(((t.ciclos||0)/maxC)*100);
-            const edadTxt = t.edad == null ? '—' : t.edad === 0 ? 'hoy' : t.edad === 1 ? 'ayer' : 'hace '+t.edad+' d';
-            const edadCol = t.edad == null ? 'var(--text3)' : t.edad >= 21 ? '#f87171' : t.edad >= 7 ? '#fbbf24' : '#34d399';
-            const rtCol = rt > 30 ? '#f87171' : rt > 15 ? '#fbbf24' : 'var(--text2)';
-            h += '<tr>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border)"><div style="color:var(--text);margin-bottom:3px">'+escHtml(String(t.m))+'</div>'
-              + '<div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--blue)"></div></div></td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text)">'+(t.ciclos||0)+'</td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+rtCol+'">'+(t.fixes?rt+'%':'—')+'</td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+(fr?'#f87171':'var(--text3)')+'">'+(fr||'—')+'</td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+(t.dias_activos||'—')+'</td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+durTxt(t.ms)+(t.con_dur&&t.con_dur<t.ciclos?'<span style="color:var(--text3);font-size:10px"> ('+t.con_dur+'/'+t.ciclos+')</span>':'')+'</td>'
-              + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+edadCol+'">'+edadTxt+'</td>'
-              + '</tr>';
-          }
-          h += '</tbody></table>';
-      
-          // ── Dónde se atascó ──
-          // Igual que en el reporte: la seccion existe siempre, con o sin eventos.
-          h += '<div class="docs-h2" style="margin-top:26px">Dónde se atascó el trabajo</div>';
-          if (!F.length) {
-            h += '<div style="font-size:12px;color:var(--text3)">Ningún control frenó ni avisó en este '
-              + 'proyecto. No es que falte el dato: no hubo eventos que registrar.</div>';
-          } else {
-            h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cada fila es un archivo que hizo saltar un control. Un archivo con muchos frenos es donde de verdad se fue el tiempo — no aparece en ninguna estimación.</div>';
-            h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
-            for (const f of F.slice(0,10)) {
-              const col = f.verdict==='STOP' ? '#f87171' : f.verdict==='DOUBT' ? '#fbbf24' : 'var(--text3)';
-              h += '<tr>'
-                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-family:ui-monospace,monospace;font-size:11px">'+escHtml(String(f.archivo))+'</td>'
-                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text3);white-space:nowrap">'+escHtml(String(f.gate))+'</td>'
-                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+col+';white-space:nowrap">'+escHtml(String(f.verdict))+'</td>'
-                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);width:50px">'+f.n+'</td>'
-                + '</tr>';
-            }
-            h += '</tbody></table>';
-            if (frSinAtribuir) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">'+frSinAtribuir+' evento(s) no se pudieron atribuir a un módulo: su archivo no lleva el nombre de ninguno. Se cuentan aquí pero no en la columna «Frenos».</div>';
-          }
-      
-          // ── Ritmo ──
-          if (R.length > 1) {
-            h += '<div class="docs-h2" style="margin-top:26px">Ritmo</div>';
-            h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cuándo se trabajó de verdad. '
-              + 'Cada casilla es un día; cuanto más intenso el color, más ciclos se cerraron ese día.</div>';
-            h += '<div id="ritmo-cal"></div>';
-          }
-      
-          return h;
-        })()}
-      
-        <div class="docs-h2" style="margin-top:28px">Cómo leer esto</div>
-        <div style="font-size:12px;color:var(--text2);line-height:1.8">
-          <b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar
-          simplemente que es más grande — por sí solos no acusan a nadie.
-          <br><br>
-          <b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción.
-          Es la métrica que más habla: un módulo que construye avanza, uno que repara gira
-          en el sitio. Si sube, suele ser que algo se cerró antes de estar listo.
-          <br><br>
-          <b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la
-          fricción real, la que no aparece en ninguna estimación porque nadie la planifica.
-          <br><br>
-          <b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un
-          módulo en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, puede
-          estar terminado, o puede que nadie lo esté tocando. La tabla no lo sabe — dice
-          dónde preguntar.
-          <br><br>
-          <b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si
-          dice (2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el
-          total real. Un guion no es cero minutos, es un ciclo sin dato.
-          <br><br>
-          Y lo que ninguna columna dice: <b>si quedó bien</b>. Una tarea rápida con un
-          defecto que aparece después costó más que una lenta que quedó cerrada.
-        </div>
-      </div>
       
       <div class="docs-section" id="doc-questions">
         <div class="docs-h1">For New Developers</div>
@@ -2351,6 +2194,201 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 
 </div>
+
+<div id="mode-tiempos">
+  <div class="docs-main">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+            <div class="docs-h1" style="margin:0">⏱ Tiempos y avance</div>
+            <select onchange="exportarTiempos(this)" title="Descargar este tablero como reporte"
+              style="background:var(--bg2);color:var(--text2);border:1px solid var(--border);border-radius:6px;
+                     padding:6px 10px;font-size:12px;cursor:pointer">
+              <option value="">⤓ Exportar…</option>
+              <option value="html">Reporte HTML — se abre solo, se manda por correo</option>
+              <option value="pdf">PDF — vía «Guardar como PDF» del navegador</option>
+            </select>
+          </div>
+          <div class="docs-sub">Cuánto costó cada módulo, cuál se movió y cuál lleva días parado, y dónde se atascó el trabajo. Cuando cada módulo lo lleva una persona distinta, esta pantalla es la que muestra dónde mirar.</div>
+      
+          ${(() => {
+            const T = tiemposDB || [], F = friccionDB || [], R = ritmoDB || [];
+            if (!T.length) return '<div class="empty-state" style="padding:40px">Sin ciclos registrados todavía — aparecen solos al cerrar cada tarea.</div>';
+      
+            const fecha = (x) => x ? new Date(String(x).replace(' ','T')+'Z') : null;
+            const dias = (a,b) => (a&&b&&!isNaN(a)&&!isNaN(b))
+              ? Math.round((new Date(b.getFullYear(),b.getMonth(),b.getDate())-new Date(a.getFullYear(),a.getMonth(),a.getDate()))/86400000)+1 : 0;
+            const hoy = new Date();
+            const durTxt = (ms) => { if(!ms) return '—'; const m=Math.round(ms/60000);
+              return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min'; };
+      
+            // La fricción se atribuye a un módulo cuando su nombre aparece en la ruta del
+            // archivo. Es una heurística: lo que no case queda "sin atribuir", nunca se
+            // reparte a ojo entre los módulos.
+            const frPorMod = {};
+            let frSinAtribuir = 0;
+            for (const f of F) {
+              const ruta = String(f.archivo || '').toLowerCase();
+              const m = T.map(t=>String(t.m)).find(n => n !== '(sin módulo)' && ruta.includes(n.toLowerCase()));
+              if (m) frPorMod[m] = (frPorMod[m]||0) + f.n; else frSinAtribuir += f.n;
+            }
+      
+            const totCiclos = T.reduce((a,t)=>a+(t.ciclos||0),0);
+            const totFixes  = T.reduce((a,t)=>a+(t.fixes||0),0);
+            const totConDur = T.reduce((a,t)=>a+(t.con_dur||0),0);
+            const totMs     = T.reduce((a,t)=>a+(t.ms||0),0);
+            const totFric   = F.reduce((a,f)=>a+(f.n||0),0);
+            const stops     = F.filter(f=>f.verdict==='STOP').reduce((a,f)=>a+f.n,0);
+            const retrabajo = totCiclos ? Math.round((totFixes/totCiclos)*100) : 0;
+            const cobertura = totCiclos ? Math.round((totConDur/totCiclos)*100) : 0;
+      
+            // Estancado = tres semanas sin cerrar un ciclo. Es el umbral que hace que un
+            // proyecto de tres semanas tenga sentido: por debajo, todo parecería activo.
+            const conEdad = T.map(t => {
+              const u = fecha(t.hasta);
+              const edad = u && !isNaN(u) ? Math.floor((hoy-u)/86400000) : null;
+              return {...t, edad};
+            });
+            const estancados = conEdad.filter(t => t.edad != null && t.edad >= 21).length;
+      
+            const kpi = (val,lab,col,nota) => `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+              <div style="font-size:22px;font-weight:600;color:${col}">${val}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">${lab}</div>
+              ${nota?`<div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">${nota}</div>`:''}</div>`;
+      
+            let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">';
+            h += kpi(totCiclos, 'ciclos cerrados', 'var(--text)', T.length+' módulos');
+            h += kpi(retrabajo+'%', 'retrabajo', retrabajo>30?'#f87171':retrabajo>15?'#fbbf24':'#34d399', totFixes+' de '+totCiclos+' fueron arreglos');
+            h += kpi(stops||totFric, stops?'veces que un gate frenó':'avisos de gate', (stops>0)?'#f87171':'var(--text2)', stops?totFric+' eventos en total':'ningún STOP');
+            h += kpi(estancados, 'módulos parados', estancados>0?'#fbbf24':'#34d399', '21 días o más sin cerrar nada');
+            h += kpi(durTxt(totMs), 'tiempo medido', 'var(--text)', cobertura+'% de los ciclos lo tiene');
+            h += '</div>';
+      
+            // ── Tabla por módulo ──
+            h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+            h += '<thead><tr style="color:var(--text3);font-size:11px">'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left">Módulo</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Ciclos</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Retrabajo</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Frenos</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Días activos</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Trabajado</th>'
+              + '<th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;text-align:right">Última vez</th>'
+              + '</tr></thead><tbody>';
+      
+            const maxC = Math.max(...T.map(t=>t.ciclos||0), 1);
+            const orden = [...conEdad].sort((a,b) => (a.edad??9e9)-(b.edad??9e9));
+            for (const t of orden) {
+              const rt = t.ciclos ? Math.round((t.fixes/t.ciclos)*100) : 0;
+              const fr = frPorMod[String(t.m)] || 0;
+              const pct = Math.round(((t.ciclos||0)/maxC)*100);
+              const edadTxt = t.edad == null ? '—' : t.edad === 0 ? 'hoy' : t.edad === 1 ? 'ayer' : 'hace '+t.edad+' d';
+              const edadCol = t.edad == null ? 'var(--text3)' : t.edad >= 21 ? '#f87171' : t.edad >= 7 ? '#fbbf24' : '#34d399';
+              const rtCol = rt > 30 ? '#f87171' : rt > 15 ? '#fbbf24' : 'var(--text2)';
+              h += '<tr>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border)"><div style="color:var(--text);margin-bottom:3px">'+escHtml(String(t.m))+'</div>'
+                + '<div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--blue)"></div></div></td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text)">'+(t.ciclos||0)+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+rtCol+'">'+(t.fixes?rt+'%':'—')+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+(fr?'#f87171':'var(--text3)')+'">'+(fr||'—')+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+(t.dias_activos||'—')+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+durTxt(t.ms)+(t.con_dur&&t.con_dur<t.ciclos?'<span style="color:var(--text3);font-size:10px"> ('+t.con_dur+'/'+t.ciclos+')</span>':'')+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+edadCol+'">'+edadTxt+'</td>'
+                + '</tr>';
+            }
+            h += '</tbody></table>';
+      
+            // ── Dónde se atascó ──
+            // Igual que en el reporte: la seccion existe siempre, con o sin eventos.
+            /* LO QUE SE REPITE — la pregunta "¿por qué vuelve lo mismo?" contestada
+               con datos que ya estaban ahí. Cada fila de fricción trae su contador:
+               un contador mayor que uno significa, literalmente, esto ya pasó y
+               volvió a pasar. Eso es una regresión, no una incidencia. */
+            const repetidos = F.filter(f => (f.n || 0) > 1).sort((a,b) => b.n - a.n);
+            h += '<div class="docs-h2" style="margin-top:26px">Lo que se repite</div>';
+            if (!repetidos.length) {
+              h += '<div style="font-size:12px;color:var(--text3)">Ningún control ha saltado dos veces por lo mismo. '
+                + 'Es la casilla que conviene mirar primero: un control que salta una vez es una incidencia, '
+                + 'uno que salta tres veces en el mismo archivo es un problema que no se ha cerrado.</div>';
+            } else {
+              h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Un control que salta una vez '
+                + 'es una incidencia. Uno que salta varias veces en el mismo archivo es algo que se arregló '
+                + 'por encima y sigue ahí. Ordenado por insistencia.</div>';
+              h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tr>'
+                + '<th style="text-align:left;padding:7px 10px;color:var(--text3);font-weight:500">Archivo</th>'
+                + '<th style="text-align:left;padding:7px 10px;color:var(--text3);font-weight:500">Control</th>'
+                + '<th style="text-align:right;padding:7px 10px;color:var(--text3);font-weight:500">Veces</th>'
+                + '<th style="text-align:right;padding:7px 10px;color:var(--text3);font-weight:500">Última</th></tr>';
+              for (const r of repetidos.slice(0, 12)) {
+                const col = r.n >= 5 ? '#f87171' : r.n >= 3 ? '#fbbf24' : 'var(--text2)';
+                const u = fecha(r.ultimo);
+                const hace = u && !isNaN(u) ? Math.floor((hoy - u) / 86400000) : null;
+                h += '<tr>'
+                  + '<td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:ui-monospace,monospace;font-size:11px;color:var(--text2)">' + escHtml(String(r.archivo)) + '</td>'
+                  + '<td style="padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text3)">' + escHtml(String(r.gate || '') + ' · ' + String(r.verdict || '')) + '</td>'
+                  + '<td style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;color:' + col + '">' + r.n + '</td>'
+                  + '<td style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text3)">' + (hace == null ? '—' : 'hace ' + hace + ' d') + '</td>'
+                  + '</tr>';
+              }
+              h += '</table>';
+              if (repetidos.length > 12) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">… y ' + (repetidos.length - 12) + ' más.</div>';
+            }
+
+            h += '<div class="docs-h2" style="margin-top:26px">Dónde se atascó el trabajo</div>';
+            if (!F.length) {
+              h += '<div style="font-size:12px;color:var(--text3)">Ningún control frenó ni avisó en este '
+                + 'proyecto. No es que falte el dato: no hubo eventos que registrar.</div>';
+            } else {
+              h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cada fila es un archivo que hizo saltar un control. Un archivo con muchos frenos es donde de verdad se fue el tiempo — no aparece en ninguna estimación.</div>';
+              h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
+              for (const f of F.slice(0,10)) {
+                const col = f.verdict==='STOP' ? '#f87171' : f.verdict==='DOUBT' ? '#fbbf24' : 'var(--text3)';
+                h += '<tr>'
+                  + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-family:ui-monospace,monospace;font-size:11px">'+escHtml(String(f.archivo))+'</td>'
+                  + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text3);white-space:nowrap">'+escHtml(String(f.gate))+'</td>'
+                  + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+col+';white-space:nowrap">'+escHtml(String(f.verdict))+'</td>'
+                  + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);width:50px">'+f.n+'</td>'
+                  + '</tr>';
+              }
+              h += '</tbody></table>';
+              if (frSinAtribuir) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">'+frSinAtribuir+' evento(s) no se pudieron atribuir a un módulo: su archivo no lleva el nombre de ninguno. Se cuentan aquí pero no en la columna «Frenos».</div>';
+            }
+      
+            // ── Ritmo ──
+            if (R.length > 1) {
+              h += '<div class="docs-h2" style="margin-top:26px">Ritmo</div>';
+              h += '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cuándo se trabajó de verdad. '
+                + 'Cada casilla es un día; cuanto más intenso el color, más ciclos se cerraron ese día.</div>';
+              h += '<div id="ritmo-cal"></div>';
+            }
+      
+            return h;
+          })()}
+      
+          <div class="docs-h2" style="margin-top:28px">Cómo leer esto</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">
+            <b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar
+            simplemente que es más grande — por sí solos no acusan a nadie.
+            <br><br>
+            <b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción.
+            Es la métrica que más habla: un módulo que construye avanza, uno que repara gira
+            en el sitio. Si sube, suele ser que algo se cerró antes de estar listo.
+            <br><br>
+            <b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la
+            fricción real, la que no aparece en ninguna estimación porque nadie la planifica.
+            <br><br>
+            <b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un
+            módulo en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, puede
+            estar terminado, o puede que nadie lo esté tocando. La tabla no lo sabe — dice
+            dónde preguntar.
+            <br><br>
+            <b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si
+            dice (2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el
+            total real. Un guion no es cero minutos, es un ciclo sin dato.
+            <br><br>
+            Y lo que ninguna columna dice: <b>si quedó bien</b>. Una tarea rápida con un
+            defecto que aparece después costó más que una lenta que quedó cerrada.
+          </div>
+  </div>
+</div>
 </div>
 
 <div class="glossary-modal" id="glossary-modal" onclick="if(event.target===this)closeGlossary()">
@@ -2364,7 +2402,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 </div>
 
 <script>
-function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+/* UNA SOLA definición de escHtml: la del servidor, inyectada aquí.
+   Antes había una segunda copia en el cliente que solo escapaba & < >
+   — sin comilla, backtick ni $. Dos copias de una función de escape es
+   el terreno donde aparecen los agujeros: la copia débil se olvida. */
+${escHtml.toString()}
 
 // ─── "¡NO ENTIENDO!" — explicación de ESE nodo específico, no un glosario ───
 // Reorganiza los datos reales que YA existen para ese nodo puntual (su propio
@@ -2713,6 +2755,11 @@ function setMode(mode,el){
   document.getElementById('mode-graph').style.display=mode==='graph'?'flex':'none';
   document.getElementById('mode-intel').style.display=mode==='intel'?'flex':'none';
   document.getElementById('mode-docs').style.display=mode==='docs'?'flex':'none';
+  // Línea de Tiempo: vista propia de primer nivel. Antes vivía enterrada dentro
+  // de Project Docs > Knowledge > Tiempos, donde nadie la encontraba — y es la
+  // que responde «cuánto costó esto», que es lo primero que pregunta un jefe.
+  const mt=document.getElementById('mode-tiempos');
+  if(mt)mt.style.display=mode==='tiempos'?'flex':'none';
   if(mode==='docs')setTimeout(renderModuleGraph,100);
 }
 

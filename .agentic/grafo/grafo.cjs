@@ -764,8 +764,8 @@ function registrarCiclo(datos) {
     db.run(`INSERT INTO ciclos (ciclo_id,tarea,tipo_tarea,modulo,area,estado,context_guard,
       fases_total,fases_completadas,patrones_aplicados,errores_evitados,decisiones_usadas,
       memory_trace,tests_generados,tests_pasando,review_blockers,review_required,stops_count,
-      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,fecha_inicio,fecha_fin)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,post_cycle_ran,fecha_inicio,fecha_fin)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
               COALESCE(?, datetime('now')), datetime('now'))`,
       ciclo_id,
       datos.tarea||'',
@@ -789,6 +789,10 @@ function registrarCiclo(datos) {
       datos.duracion_ms||0,
       snap?JSON.stringify(snap):null,
       snap?JSON.stringify(snap):null,
+      /* post_cycle_ran: post-cycle lo enviaba y este INSERT lo ignoraba, asi que
+         quedo en null en los 155 ciclos. Un campo que siempre es null ensena a
+         desconfiar del esquema entero. */
+      datos.post_cycle_ran || null,
       datos.fecha_inicio || null
     );
     if (datos.fases && Array.isArray(datos.fases)) {

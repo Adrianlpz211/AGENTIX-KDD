@@ -1,0 +1,9 @@
+{
+  "_lee_esto_antes_de_anadir": "Aquí van los scripts que a propósito los invoca una persona o el modelo, no otro script. Añadir una entrada es una decisión consciente y deja constancia; lo que NO esté aquí y nadie invoque pone el CI en rojo. Esta lista es lo que evita que el control se vuelva ruido y alguien lo desactive — pero cada línea es deuda declarada, no una absolución.",
+  "aceptados": {
+    "diff-overlay.cjs": "lo lanza la persona con el botón 🔥 del dashboard",
+    "tour-builder.cjs": "lo lanza la persona con el botón 🧭 del dashboard",
+    "sprint-state.cjs": "lo corre el modelo al seguir el protocolo de sprint (09-sprint.md)",
+    "context-enricher.cjs": "lo corre el modelo en el paso 0.1 del pipeline aa:. ES PAPEL Y SE SABE: si el modelo no lo corre, no hay brief y el reloj pierde su marca de arranque. Mecanizarlo requiere un disparador de inicio de ciclo que hoy no existe — anotado como la promesa de papel más caras que queda."
+  }
+}

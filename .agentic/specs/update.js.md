@@ -1,10 +1,10 @@
-# SPEC — general
-Generado: 2026-07-14
-Última actualización: 2026-08-31
+# SPEC — update.js
+Generado: 2026-07-20
+Última actualización: 2026-07-20
 Estado: IMPLEMENTADO
 
 ## Qué hace
-Módulo general del proyecto Agency OS.
+Módulo update.js del proyecto Agency OS.
 Tests: 0 pasando ✅
 
 ## Criterios de aceptación
@@ -18,7 +18,7 @@ Tests: 0 pasando ✅
 ## Tests
 | Suite | Tests | Estado |
 |-------|-------|--------|
-| general.test.ts | 0 | ✅ PASS |
+| update.js.test.ts | 0 | ✅ PASS |
 
 ## Patrones aplicados
 - Multi-tenancy: filtrar siempre por agencyId

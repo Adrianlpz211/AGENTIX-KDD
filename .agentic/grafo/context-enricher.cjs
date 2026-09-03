@@ -35,7 +35,7 @@ function openDB() {
 }
 
 function emptyBrief(task) {
-  return { tarea: task, contexto: [], dependencias: [], riesgo: 'BAJO', avisos: [], faltante: [] };
+  return { tarea: task, contexto: [], dependencias: [], riesgo: 'BAJO', avisos: [], curas: [], faltante: [] };
 }
 
 async function enrich(task) {
@@ -189,45 +189,31 @@ async function enrich(task) {
       brief.riesgo = 'MEDIO';
     }
 
-    // 7. Zonas de error ANCLADAS (Plan 5, T2-lectura) — solo con riesgo
-    //    MEDIO/ALTO: errores de las áreas relacionadas que tienen ancla de
-    //    símbolo (nombres estables del índice, jamás coincidencia de texto).
-    //    Si la tarea cita el símbolo exacto entre backticks, el aviso sube de
-    //    tono; en ALTO además se sigue el edge was_fixed_by para llegar con la
-    //    cura conocida (Plan 5, T3).
+    // 7. CURAS CONOCIDAS - el error que ya paso, con la solucion que funciono.
+    //
+    //    Esto ANTES no disparaba nunca. Pedia "ancla de simbolo" (0 de 29
+    //    errores la tenian), consultaba relaciones_semanticas.was_fixed_by
+    //    (0 filas) y solo corria con riesgo ALTO. Tres cortocircuitos sobre
+    //    una memoria que si tenia 25 soluciones escritas.
+    //
+    //    Ahora lee el texto del propio nodo de error, que es donde alguien
+    //    redacto de verdad que lo arreglo, y corre SIEMPRE - un error se
+    //    repite igual en una tarea que parecia trivial. Ver error-cure.cjs.
     try {
-      if (brief.riesgo !== 'BAJO' && areas.length) {
-        const ph2 = areas.map(() => '?').join(',');
-        const anclados = db.prepare(
-          `SELECT id, titulo, anclas FROM nodos
-           WHERE tipo='error' AND anclas IS NOT NULL AND anclas != '[]' AND area IN (${ph2})
-           LIMIT 6`
-        ).all(...areas);
-        const tokensAncla = new Set([...task.matchAll(/\`([^\`]+)\`/g)].map(m => m[1].trim()));
-        let agregados = 0;
-        for (const e of anclados) {
-          let anclas = []; try { anclas = JSON.parse(e.anclas); } catch {}
-          if (!anclas.length) continue;
-          const citada = anclas.find(a => a && tokensAncla.has(a.symbol_name));
-          const muestra = citada || anclas[0];
-          if (!citada && agregados >= 2) continue; // sin cita directa: máximo 2 — no inundar el brief
-          brief.avisos.push(
-            (citada ? '🎯' : '⚠️') +
-            ` Error anclado en esta área: "${String(e.titulo).slice(0, 70)}" — vive en ${muestra.kind}:${muestra.symbol_name} (${muestra.file})`
-          );
-          agregados++;
-          if (brief.riesgo === 'ALTO') {
-            try {
-              const fix = db.prepare(
-                `SELECT hacia_entidad, descripcion FROM relaciones_semanticas
-                 WHERE tipo='was_fixed_by' AND desde_entidad = ? LIMIT 1`
-              ).get(`nodo:error:${e.titulo}`);
-              if (fix) brief.avisos.push(`   ↳ 💊 Cura conocida: ${fix.hacia_entidad}${fix.descripcion ? ' — ' + String(fix.descripcion).slice(0, 80) : ''}`);
-            } catch {}
-          }
-        }
+      const { findCures } = require(path.join(__dirname, 'error-cure.cjs'));
+      const curas = findCures(db, {
+        task,
+        areas,
+        limit: brief.riesgo === 'BAJO' ? 2 : 3,
+      });
+      for (const c of curas) {
+        brief.curas.push({
+          titulo: c.titulo, area: c.area, confianza: c.confianza,
+          solucion: c.solucion, prevencion: c.prevencion,
+          porque: c.porque, archivos: c.archivos,
+        });
       }
-    } catch { /* zonas ancladas son un plus, nunca un requisito */ }
+    } catch { /* la cura es un plus: si falla, el brief sigue valiendo */ }
 
     // 8. Presupuesto por riesgo (Plan 5, T5): brief del tamaño del peligro.
     //    BAJO = recorte (una tarea trivial no necesita el kilo de contexto);
@@ -248,6 +234,36 @@ async function enrich(task) {
 
   return brief;
 }
+
+/**
+ * Deja la hora de arranque del ciclo en la libreta.
+ *
+ * ESTO ES LO QUE VUELVE EL RELOJ DE HIERRO. Antes la hora de inicio la ponia
+ * `linea-tiempo.cjs inicio`, un comando que alguien tenia que recordar: de 155
+ * ciclos en D:ð, 96 quedaron con fecha_inicio == fecha_fin, o sea sin
+ * arranque. No se perdio el dato: nunca se tomo.
+ *
+ * El enricher, en cambio, corre al principio de CADA ciclo (paso 0.1 del
+ * pipeline). Colgar la marca de algo que ya ocurre siempre es la diferencia
+ * entre medir y acordarse de medir.
+ *
+ * Fail-soft absoluto: si no se puede escribir, el brief sigue igual. Perder la
+ * medicion no puede costar el trabajo.
+ */
+function marcarArranque(task) {
+  try {
+    const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
+    let db = null;
+    try { db = new (require('better-sqlite3'))(DB_PATH); }
+    catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(DB_PATH); }
+    gt.recordGateEvent(db, {
+      gate: 'reloj', verdict: 'CICLO_INICIO', source: 'mechanical',
+      detalle: { tarea: String(task || '').slice(0, 160) },
+    });
+    try { db.close(); } catch {}
+  } catch { /* la medicion es un plus; el trabajo no se detiene por ella */ }
+}
+
 
 function printBrief(brief) {
   const lines = [];
@@ -273,6 +289,18 @@ function printBrief(brief) {
     brief.contexto.forEach(c => lines.push(`- [${c.tipo}/${c.confianza}] ${c.titulo} (${c.area})`));
     lines.push('');
   }
+  if (brief.curas && brief.curas.length) {
+    /* Va ANTES de los avisos a propósito: de todo el brief, esto es lo único
+       que ya trae la respuesta hecha. Un aviso dice «cuidado»; una cura dice
+       «esto pasó y se arregló así». */
+    lines.push('**💊 Esto ya pasó antes — así se arregló:**');
+    brief.curas.forEach(c => {
+      lines.push(`- **${c.titulo}** [${c.confianza}] — ${c.porque.join(', ')}`);
+      lines.push(`  - **Solución que funcionó:** ${String(c.solucion).replace(/\s+/g, ' ')}`);
+      if (c.prevencion) lines.push(`  - **Para que no vuelva:** ${String(c.prevencion).replace(/\s+/g, ' ')}`);
+    });
+    lines.push('');
+  }
   if (brief.avisos.length) {
     lines.push('**Avisos:**');
     brief.avisos.forEach(a => lines.push(`- ${a}`));
@@ -288,6 +316,7 @@ function printBrief(brief) {
 
 if (require.main === module) {
   const task = process.argv.slice(2).join(' ');
+  marcarArranque(task);
   enrich(task)
     .then(printBrief)
     .catch(() => {

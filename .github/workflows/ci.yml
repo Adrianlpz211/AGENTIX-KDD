@@ -21,6 +21,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Syntax check all .cjs modules
         run: |
@@ -34,6 +38,9 @@ jobs:
           done
           if [ $failed -eq 1 ]; then exit 1; fi
           echo "✅ All .cjs files pass syntax check"
+
+      - name: Run tests
+        run: npm test
 
       - name: Check install scripts
         run: bash -n install.sh && echo "✅ install.sh OK" || echo "⚠️ install.sh not found"
