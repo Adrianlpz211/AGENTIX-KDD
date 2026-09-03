@@ -1,6 +1,6 @@
 # Agentic KDD — Configuración del proyecto
 CONFIGURADO: SI
-VERSION: 3.11.7
+VERSION: 3.18.1
 
 ---
 <!-- Configuración autodetectada por aa: configurar -->
@@ -30,7 +30,7 @@ commands:
   install: npm install
   dev: —
   build: —
-  test: node bin/akdd.js --version
+  test: npm test
   lint: —
 ```
 

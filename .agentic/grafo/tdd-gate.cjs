@@ -326,6 +326,42 @@ function parseTestOutput(raw, exitCode) {
  * @param {string[]} [scope] - archivos/directorios a buscar
  * @returns {string[]}
  */
+/* Extensiones que SI pueden tener tests relacionados. Ver el filtro del scope
+   en el comando `run` para el motivo de que sea lista blanca y no negra. */
+/**
+ * Deja en el scope solo lo que puede tener tests relacionados.
+ *
+ * DOS FILTROS Y DOS HISTORIAS
+ * ---------------------------
+ * 1 · Estado del motor. El gate ensucia memoria.db al correr, y en proyectos
+ *     que la versionan el scope quedaba como [.agentic/...] → 0 tests →
+ *     fallo mudo en cada post-cycle (FLOTA360, 2026-07-19).
+ *
+ * 2 · Todo lo que no es codigo. Un .md no tiene tests relacionados: dejarlo
+ *     manda al buscador a rastrear su carpeta, no encontrar nada, y abortar
+ *     con "No se encontraron archivos de test" — en un repo con 17 archivos
+ *     de test y 99 verdes.
+ *
+ *     Caso real (03/09/2026, este mismo repo): el unico archivo modificado era
+ *     `_output/log-2026-09.md`, el registro que EL PROPIO post-cycle escribe al
+ *     terminar. 61 ciclos seguidos con 0 contratos, y un Preservation Gate que
+ *     no protegia nada.
+ *
+ * El segundo filtro es lista BLANCA a proposito. La lista negra por carpeta ya
+ * fallo dos veces, y por el mismo motivo las dos: siempre aparece una carpeta
+ * que nadie penso. Lo que no es codigo no entra, se llame como se llame.
+ *
+ * Si tras filtrar no queda nada, scope vacio = escaneo completo del proyecto,
+ * que es lo correcto para un arbol limpio.
+ */
+function filtrarScope(scope) {
+  return (scope || [])
+    .filter(f => !/^(\.agentic|\.claude|\.git|node_modules|dist|build|coverage)[\/]/.test(f))
+    .filter(f => ES_CODIGO_FUENTE.test(f));
+}
+
+const ES_CODIGO_FUENTE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|py|rb|go|java|kt|php|cs|rs|sql)$/i;
+
 function findTestFiles(projectRoot, scope = []) {
   const testPatterns = [
     /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/,
@@ -622,7 +658,7 @@ if (require.main === module) {
       // completo del proyecto, que es lo correcto para un árbol limpio.
       // Excluir estado del motor y config del entorno (no son código fuente
       // del proyecto): .agentic/, .claude/, .git/, node_modules/, dist/build.
-      scope = scope.filter(f => !/^(\.agentic|\.claude|\.git|node_modules|dist|build|coverage)[\\\/]/.test(f));
+      scope = filtrarScope(scope);
       const result = runSelfHealingLoop({ projectRoot, area, scope });
       // El fallo era invisible: run devolvía reason sin imprimirla y el exit 1
       // parecía un crash mudo. Ahora la razón siempre se ve.
@@ -664,5 +700,4 @@ module.exports = {
   runTests,
   parseTestOutput,
   findTestFiles,
-  detectTestCommand,
-};
+  detectTestCommand, filtrarScope, ES_CODIGO_FUENTE};
