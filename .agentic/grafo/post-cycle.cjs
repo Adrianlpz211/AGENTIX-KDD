@@ -897,9 +897,17 @@ async function main() {
     const uilmPath = path.join(GRAFO_DIR, 'ui-layout-memory.cjs');
     const uiFiles = commitFilesForScans.filter(f =>
       /\.(html?|css|scss|js|jsx|ts|tsx|cjs|mjs|vue|svelte)$/i.test(f));
-    if (fs.existsSync(uilmPath) && uiFiles.length) {
+    if (fs.existsSync(uilmPath)) {
       const uilm = require(uilmPath);
-      const uiRes = uilm.guard(ROOT, { files: uiFiles, capturar: true });
+      /* Sin lista de archivos se deja que el modulo busque por fecha de
+         modificacion. Hace falta: un proyecto SIN git (que es el caso de mas de
+         uno en produccion) da un changeset vacio, y pasarle la lista vacia
+         hacia que la captura no corriera NUNCA ahi — el mismo pecado de la v1,
+         con otra causa. */
+      const uiRes = uilm.guard(ROOT, {
+        files: uiFiles.length ? uiFiles : null,
+        capturar: true,
+      });
       if (!silent) {
         const n = (uiRes.findings || []).length;
         console.log(n > 0
