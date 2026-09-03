@@ -189,6 +189,28 @@ async function enrich(task) {
       brief.riesgo = 'MEDIO';
     }
 
+    // 6.5 APUNTAR LA PREDICCIÓN — para poder saber después si acertó.
+    //
+    // La tabla `prediction_log` existe desde el principio, con una columna
+    // llamada `fue_correcto`, y tenía CERO filas: nadie insertaba nunca. El
+    // sistema predecía y nadie sabía si acertaba, lo que convierte cualquier
+    // predicción en una opinión que se olvida.
+    //
+    // Va aquí porque el enricher corre al principio de TODOS los ciclos: la
+    // predicción queda apuntada antes de tocar nada, que es el único momento en
+    // que apuntarla significa algo. Al cerrar, el post-cycle la califica.
+    try {
+      const reg = require(path.join(__dirname, 'prediccion-registro.cjs'));
+      brief.prediccionId = reg.registrarPrediccion(ROOT, {
+        tarea: task,
+        modulo: (areas && areas[0]) || 'global',
+        archivos: [],
+        nivel: brief.riesgo,
+        alertas: brief.avisos.slice(0, 12),
+        precondiciones: brief.faltante.slice(0, 6),
+      });
+    } catch { /* apuntar es un plus: si falla, el brief sigue valiendo */ }
+
     // 7. CURAS CONOCIDAS - el error que ya paso, con la solucion que funciono.
     //
     //    Esto ANTES no disparaba nunca. Pedia "ancla de simbolo" (0 de 29

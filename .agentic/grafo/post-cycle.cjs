@@ -1148,6 +1148,46 @@ async function main() {
       (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
   }
 
+  // Step 2.12: ¿acertó la predicción?
+  //
+  // Va AL FINAL de los controles a propósito: la calificación sale de comparar
+  // lo que se predijo al empezar con lo que registraron los gates. Si corriera
+  // antes, no habría nada que comparar.
+  //
+  // La tabla de verdad está en prediccion-registro.cjs, y el caso que importa
+  // entenderlo es este: "predijo ALTO y no pasó nada" NO se cuenta como fallo.
+  // Un aviso atendido previene el problema, y castigar al sistema por eso lleva
+  // a bajar la sensibilidad hasta que la alerta no avisa de nada. Se cuenta
+  // como "sin verdad conocida".
+  //
+  // El número que sí se puede exigir que baje es el FALSO NEGATIVO: predijo
+  // BAJO y se rompió algo. Ese no admite interpretación.
+  try {
+    const pregPath = path.join(GRAFO_DIR, 'prediccion-registro.cjs');
+    if (fs.existsSync(pregPath)) {
+      const preg = require(pregPath);
+      const ev = preg.evaluarPendientes(ROOT, (results && results.ciclo) || null);
+      if (!silent) {
+        if (!ev.evaluadas) {
+          console.log('  2.12 Predicción... — (ninguna apuntada en las últimas horas)');
+        } else {
+          const partes = [];
+          if (ev.aciertos) partes.push(ev.aciertos + ' acierto(s)');
+          if (ev.falsosNegativos) partes.push(ev.falsosNegativos + ' FALSO(S) NEGATIVO(S)');
+          if (ev.sinVerdad) partes.push(ev.sinVerdad + ' sin verdad conocida');
+          console.log((ev.falsosNegativos
+            ? '  2.12 Predicción... ⚠️  '
+            : '  2.12 Predicción... ✅ ') + partes.join(' · '));
+        }
+      }
+    } else if (!silent) {
+      console.log('  2.12 Predicción... — (no instalado)');
+    }
+  } catch (e) {
+    if (!silent) console.log('  2.12 Predicción... ⚠️  omitido' +
+      (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
+  }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);

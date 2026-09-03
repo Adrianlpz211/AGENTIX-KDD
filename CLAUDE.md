@@ -252,6 +252,8 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd hierro` | correr `node .agentic/grafo/hierro-papel.cjs` (qué del protocolo se ejecuta y qué solo se lee) |
 | `akdd hooks` | correr `node .agentic/grafo/install-hooks.cjs` |
 | `akdd reason status` | correr `node .agentic/grafo/reasoning-bank.cjs status` |
+| `akdd prediccion` | correr `node .agentic/grafo/prediccion-registro.cjs precision` (¿acierta la predicción de riesgo? el número que importa es el FALSO NEGATIVO: predijo BAJO y se rompió algo) |
+| `akdd prediccion listar [n]` | correr `node .agentic/grafo/prediccion-registro.cjs listar [n]` (las últimas predicciones con su veredicto y la evidencia) |
 | `akdd reason recall <query>` | correr `node .agentic/grafo/reasoning-bank.cjs recall "<query>"` |
 | `akdd resolve-errors [area]` | correr `node .agentic/grafo/creative-engine.cjs resolve-errors [area]` |
 | `akdd auto-confirm [days]` | correr `node .agentic/grafo/creative-engine.cjs auto-confirm [days]` |
@@ -1025,6 +1027,30 @@ que lo escribe; solo garantiza que exista uno. Un error arreglado sin canario
 no está cerrado, está pospuesto, y cuando vuelve, vuelve en silencio.
 
 Escotilla:  `AKDD_SKIP_GATES=1 git commit ...`
+
+## GESTIÓN PREDICTIVA — la predicción se apunta y se califica
+
+El enricher estima el riesgo de cada tarea antes de tocar nada (paso 0.1) y
+ahora **apunta esa predicción** en `prediction_log`. Al cerrar, el post-cycle
+(paso 2.12) la compara con lo que registraron los controles y la califica.
+
+Hasta el 03/09/2026 esa tabla tenía CERO filas, con una columna llamada
+`fue_correcto`: el sistema predecía y nadie sabía si acertaba.
+
+**La tabla de verdad, y el caso que hay que entender:**
+
+```
+predijo ALTO/MEDIO  ·  hubo problema   → ACIERTO
+predijo BAJO        ·  sin problema    → ACIERTO
+predijo BAJO        ·  HUBO problema   → FALLO      ← el único sin interpretación
+predijo ALTO/MEDIO  ·  sin problema    → SIN VERDAD  (NULL, no 0)
+```
+
+El último caso NO se cuenta como falsa alarma: **un aviso atendido previene el
+problema**, y penalizarlo empuja a bajar la sensibilidad hasta que la alerta no
+avisa de nada. El número que se puede exigir que baje es el **falso negativo**.
+
+Ver: `akdd prediccion`. Detalle en `.agentic/grafo/prediccion-registro.cjs`.
 
 ## HIERRO O PAPEL — ninguna sección puede prometer un script que nadie corre
 
