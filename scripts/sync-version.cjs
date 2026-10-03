@@ -118,7 +118,20 @@ function check(raiz = RAIZ, opts = {}) {
 function escribir(raiz = RAIZ) {
   const destino = path.join(raiz, '.agentic', 'grafo', 'framework.json');
   fs.writeFileSync(destino, JSON.stringify(esperado(raiz), null, 2) + '\n');
+  alinearConfig(raiz);
   return destino;
+}
+
+/* `npm version` solo cambia package.json; la VERSION de config.md (el número
+   que ve quien abre el proyecto) se quedaba atrás y la barrera de release lo
+   frenaba (3.20.1, 03/10/2026). Se alinea aquí, en el mismo paso. */
+function alinearConfig(raiz = RAIZ) {
+  const f = path.join(raiz, '.agentic', 'config.md');
+  try {
+    const txt = fs.readFileSync(f, 'utf8');
+    const nuevo = txt.replace(/^(\s*VERSION:\s*)\S+/m, '$1' + esperado(raiz).version);
+    if (nuevo !== txt) fs.writeFileSync(f, nuevo);
+  } catch { /* sin config.md: nada que alinear */ }
 }
 
 if (require.main === module) {
