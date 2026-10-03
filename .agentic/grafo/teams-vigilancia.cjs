@@ -400,7 +400,8 @@ function ultimoVisto(root, rol) {
 /**
  * Qué puede y qué NO puede hacer la vigilancia en este entorno. Honesto por construcción:
  *   deteccion         lo que el proceso Node ve (watch, respaldo, canal) según su latido
- *   despertar_modelo  EVENT_WAKE_UNSUPPORTED: ningún host expone una vía verificada para despertar al modelo por evento
+ *   despertar_modelo  EVENT_WAKE_UNSUPPORTED sin espera activa; EVENT_WAKE_POR_TAREA_DEL_HOST con `esperar --despertar` vivo como
+ *                     tarea en segundo plano del host; EVENT_WAKE_VERIFICADO solo cuando la sesión confirma una lectura (VISTO) tras un aviso
  *   loop_host         MANUAL_ONLY si no hay rastro de un loop; DECLARADO_SIN_ACTIVIDAD / ACTIVO_OBSERVADO según el rastro
  *                     real (lecturas confirmadas por la sesión: VISTO), nunca por lo que la sesión dice de sí misma
  *   autonomia         qué se puede afirmar. Un hook, un proceso o una tarea de Windows no demuestran integración.
@@ -415,17 +416,34 @@ function capacidades(root, rol, opts = {}) {
     : { estado: p.hay_latido ? 'LATIDO_OBSOLETO_O_SIN_PROCESO' : 'SIN_PROCESO', watcher: 'DESCONOCIDO', respaldo: 'DESCONOCIDO', canal: 'DESCONOCIDO' };
   let adapterWake = null;
   try { adapterWake = opts.adapter && typeof opts.adapter.capabilities === 'function' ? opts.adapter.capabilities().wake : null; } catch { /* sin adapter */ }
+  // Espera activa lanzada como TAREA EN SEGUNDO PLANO del host (`esperar --despertar`): al haber trabajo imprime
+  // AGENT_LOOP_WAKE_<rol> y termina, y el host entrega eso a la sesión como notificación. Se declara VERIFICADO solo cuando
+  // la sesión confirma después una lectura (VISTO posterior al aviso); un proceso vivo solo prueba que la espera existe.
+  const wk = leerWake(root, rol);
+  const wakeVivo = !!(wk && wk.esperando && pidVivo(wk.pid));
+  const wakeProbado = !!(wk && wk.ultimo_wake_at && v && v.t >= Date.parse(wk.ultimo_wake_at));
+  const VIA = 'tarea en segundo plano del host (esperar --despertar → AGENT_LOOP_WAKE_' + rol + ')';
   const despertar_modelo = adapterWake === 'EVENT' && opts.verificadoEnHost
     ? { estado: 'EVENT_WAKE_VERIFICADO', verificado: true }
-    : { estado: 'EVENT_WAKE_UNSUPPORTED', verificado: false, motivo: 'este proceso detecta cambios, pero ninguna vía verificada despierta al modelo del host por evento; la sesión lee en su propio loop' };
+    : wakeProbado
+      ? { estado: 'EVENT_WAKE_VERIFICADO', verificado: true, via: VIA, ultimo_aviso_at: wk.ultimo_wake_at, lectura_confirmada_at: v.at }
+      : wakeVivo
+        ? { estado: 'EVENT_WAKE_POR_TAREA_DEL_HOST', verificado: false, via: VIA, desde: wk.desde, motivo: 'la espera activa está viva; falta que la sesión confirme una lectura (VISTO) tras un aviso para darla por verificada' }
+        : { estado: 'EVENT_WAKE_UNSUPPORTED', verificado: false, motivo: 'no hay una espera activa viva: lanza `esperar --rol=' + rol + ' --despertar` como tarea en segundo plano del host para que el aviso llegue a la sesión; mientras tanto la sesión solo lee en su loop' };
   let loop_host;
   if (v && ahora - v.t <= intervalo * 2 + 15000) loop_host = { estado: 'ACTIVO_OBSERVADO', ultima_lectura_confirmada: v.at, hasta_seq: v.hasta_seq, nota: 'lecturas confirmadas por la propia sesión (VISTO); no prueba el intervalo exacto' };
   else if (v) loop_host = { estado: 'DECLARADO_SIN_ACTIVIDAD', ultima_lectura_confirmada: v.at, nota: 'hubo lecturas pero no recientes: el loop pudo detenerse' };
   else loop_host = { estado: 'MANUAL_ONLY', nota: 'sin rastro de lecturas confirmadas por la sesión: solo atiende cuando alguien le dice que lea' };
-  const autonomia = loop_host.estado === 'ACTIVO_OBSERVADO' && deteccion.estado === 'ACTIVA'
+  const eventoOk = despertar_modelo.estado === 'EVENT_WAKE_VERIFICADO';
+  const eventoDeclarado = despertar_modelo.estado === 'EVENT_WAKE_POR_TAREA_DEL_HOST';
+  const autonomia = eventoOk && loop_host.estado === 'ACTIVO_OBSERVADO'
+    ? 'POR_EVENTO_VERIFICADA: aviso por tarea del host + lectura confirmada + loop de respaldo observado'
+    : eventoDeclarado
+      ? 'POR_EVENTO_DECLARADA: espera activa viva como tarea del host; aún sin una lectura confirmada tras un aviso'
+      : loop_host.estado === 'ACTIVO_OBSERVADO' && deteccion.estado === 'ACTIVA'
     ? 'PARCIAL: detección por evento + lectura periódica observada; el despertar por evento del modelo NO está soportado'
     : (loop_host.estado === 'ACTIVO_OBSERVADO' ? 'PARCIAL: lectura periódica observada; sin vigilancia por evento activa y el despertar por evento del modelo NO está soportado' : 'MANUAL: no se puede anunciar un modo autónomo');
-  return { rol, intervalo_respaldo_ms: intervalo, deteccion, despertar_modelo, loop_host, autonomia, capacidad_completa: false };
+  return { rol, intervalo_respaldo_ms: intervalo, deteccion, despertar_modelo, loop_host, autonomia, capacidad_completa: eventoOk && loop_host.estado === 'ACTIVO_OBSERVADO' };
 }
 
 /**
@@ -463,9 +481,28 @@ function evaluarSmokeDespertar(root, rol, { editado_at, intervalo_ms = INTERVALO
  * corta los comandos largos, vuelve el loop de 180 s: por eso el loop nunca se elimina. Dos mecanismos
  * independientes dentro: fs.watch (señal de revisión y canal) y un sondeo de respaldo cada `sondeoMs`.
  */
+/** Marca de la espera activa de un rol (.agentic/_teams/wake-<rol>.json): vive aparte del latido del watch. */
+const archivoWake = (root, rol) => path.join(dirTeams(root), 'wake-' + rol + '.json');
+function leerWake(root, rol) { try { return JSON.parse(fs.readFileSync(archivoWake(root, rol), 'utf8')); } catch { return null; } }
+function marcarWake(root, rol, extra) {
+  try {
+    fs.mkdirSync(dirTeams(root), { recursive: true });
+    const previa = leerWake(root, rol) || {};
+    const tmp = archivoWake(root, rol) + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(Object.assign({}, previa, { rol, pid: process.pid }, extra)));
+    fs.renameSync(tmp, archivoWake(root, rol));
+  } catch { /* la marca es observabilidad: nunca rompe la espera */ }
+}
+const pidVivo = (pid) => { if (!Number.isInteger(pid)) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+
 function esperarTrabajo(root, rol, opts = {}) {
   const tm = require('./teams-manager.cjs');
-  const maxMs = Math.min(Math.max(Number(opts.maxMs) || 170000, 1000), 600000);
+  // Modo despertar: espera activa PERSISTENTE lanzada como tarea del host. No expira cada 170 s (cada salida sin trabajo
+  // costaría un turno de modelo): solo termina cuando hay trabajo. El tope (12 h) evita un proceso eterno olvidado.
+  const despertar = opts.despertar === true;
+  const maxMs = despertar ? Math.min(Math.max(Number(opts.maxMs) || 43200000, 1000), 43200000) : Math.min(Math.max(Number(opts.maxMs) || 170000, 1000), 600000);
+  const marca = (extra) => marcarWake(root, rol, extra);
+  if (despertar) marca({ esperando: true, desde: new Date().toISOString(), pid: process.pid });
   const sondeoMs = Math.max(Number(opts.sondeoMs) || 5000, 200);
   const dirT = dirTeams(root); const dirL = path.join(root, '.legion');
   const inicio = Date.now();
@@ -475,6 +512,7 @@ function esperarTrabajo(root, rol, opts = {}) {
       if (hecho) return; hecho = true;
       clearTimeout(timerMax); clearInterval(timerSondeo); clearTimeout(deb);
       for (const w of ws) { try { w.close(); } catch { /* ya cerrado */ } }
+      if (despertar) marca(Object.assign({ esperando: false, ultimo_estado: r.estado }, r.estado === 'TRABAJO' ? { ultimo_wake_at: new Date().toISOString() } : {}));
       resolve(Object.assign({ rol, esperado_ms: Date.now() - inicio, nota: 'detectar no es leer ni confirmar: tras leer, confirma con teams-md-session.cjs visto' }, r));
     };
     const revisar = (origen) => {
@@ -513,8 +551,12 @@ async function cli(argv) {
     else if (cmd === 'metricas') r = require('./teams-watch.cjs').resumenMetricas(root, rol);
     else if (cmd === 'smoke') r = evaluarSmokeDespertar(root, rol, { editado_at: opt.editado, intervalo_ms: opt.intervalo ? Number(opt.intervalo) : undefined });
     else if (cmd === 'script') r = generarTarea(root, rol);
-    else if (cmd === 'esperar') r = await esperarTrabajo(root, rol, { maxMs: opt.max ? Number(opt.max) * (Number(opt.max) < 1000 ? 1000 : 1) : undefined });
-    else r = { status: 'COMANDO_DESCONOCIDO', uso: 'estado|capacidades|instalar [--aprobar]|reparar [--aprobar]|desinstalar [--aprobar]|iniciar|esperar [--max=<segundos>]|apagar [--rol=builder|director|todos]|metricas|smoke --editado=<iso>|script  (--rol=builder|director)' };
+    else if (cmd === 'esperar') {
+      r = await esperarTrabajo(root, rol, { despertar: opt.despertar === true, maxMs: opt.max ? Number(opt.max) * (Number(opt.max) < 1000 ? 1000 : 1) : undefined });
+      // La línea fija que el host recibe como notificación (tarea en segundo plano de Claude Code o de Cursor).
+      if (opt.despertar === true && r && r.estado === 'TRABAJO') console.log('AGENT_LOOP_WAKE_' + rol);
+    }
+    else r = { status: 'COMANDO_DESCONOCIDO', uso: 'estado|capacidades|instalar [--aprobar]|reparar [--aprobar]|desinstalar [--aprobar]|iniciar|esperar [--max=<segundos>] [--despertar]|apagar [--rol=builder|director|todos]|metricas|smoke --editado=<iso>|script  (--rol=builder|director)' };
   } catch (e) { r = { status: 'ERROR', code: e.code || null, detalle: e.message }; }
   console.log(JSON.stringify(r, null, 2));
   if (r && /FALLID|STOP_FAILED|ERROR|PARAMETROS_INVALIDOS|DESCONOCIDO/.test(String(r.status))) process.exitCode = 1;

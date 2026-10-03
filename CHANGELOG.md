@@ -6,6 +6,9 @@
 comandos (`update` y `update --migrate`) y nada demostraba, de forma comprobable, que la
 memoria había sobrevivido.
 
+### El aviso al modelo es una tarea en segundo plano del host
+`teams-vigilancia.cjs esperar --rol=<rol> --despertar` es una espera persistente (sin el tope de 170 s: no gasta turnos sin trabajo) que imprime `AGENT_LOOP_WAKE_<rol>` y termina cuando hay trabajo; el host (Claude Code: comando en segundo plano o Monitor; Cursor: proceso en segundo plano) se lo entrega a la sesión. `capacidades` pasa a `EVENT_WAKE_POR_TAREA_DEL_HOST` con la espera viva y a `EVENT_WAKE_VERIFICADO` solo tras un VISTO posterior al aviso; sin espera sigue `EVENT_WAKE_UNSUPPORTED`. Los prompts del director y del constructor lo indican. Antes se declaraba que ningún host permitía despertar por evento: era un error.
+
 ### Regresión del flujo individual `aa:`, tablero con enlaces y README reescrito
 Nueva prueba `test/aa-individual-regresion.test.cjs`: corre el ciclo individual completo contra una copia real del motor (arranque de reloj → enricher → construcción → `post-cycle` → cierre de tiempo) y comprueba por SQL que ciclo, contratos, AST, layout, módulo, spec, episodio y tiempo se siguen registrando, que la memoria con procedencia se SUMA sin quitar nada y que ningún job queda en dead-letter. El tablero principal ahora enlaza (solo anclas en su barra de pestañas) a `/memoria`, `/contexto`, `/teams` y `/actualizacion`; los grafos no cambian y no cargan nada de las páginas nuevas. `README.md` y `README.es.md` se reorganizaron por lo que Agentix es hoy (tres piezas, dos formas de trabajar, ciclo `aa:`, memoria, verificación, autonomía, dashboard, actualización) en vez de por notas de versión; la imagen de portada no cambia.
 

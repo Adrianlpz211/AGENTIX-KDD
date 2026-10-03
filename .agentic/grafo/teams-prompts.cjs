@@ -44,6 +44,7 @@ const COMANDOS = {
   tomar: { s: 'teams-correcciones.cjs', t: 'tomar', l: 'node .agentic/grafo/teams-correcciones.cjs tomar --id=<HALLAZGO> --dueno=<OWNER> --sesion=<SESSION_ID> --siguiente-paso="qué ibas a hacer en tu tarea"' },
   reanudar: { s: 'teams-correcciones.cjs', t: 'reanudar', l: 'node .agentic/grafo/teams-correcciones.cjs reanudar --id=<HALLAZGO> --tarea=<TAREA> --dueno=<OWNER>' },
   vig_iniciar: { s: 'teams-vigilancia.cjs', t: 'iniciar', l: 'node .agentic/grafo/teams-vigilancia.cjs iniciar --rol=<ROL>' },
+  vig_despertar: { s: 'teams-vigilancia.cjs', t: 'esperar', l: 'node .agentic/grafo/teams-vigilancia.cjs esperar --rol=<ROL> --despertar' },
   vig_esperar: { s: 'teams-vigilancia.cjs', t: 'esperar', l: 'node .agentic/grafo/teams-vigilancia.cjs esperar --rol=<ROL> --max=170' },
   vig_estado: { s: 'teams-vigilancia.cjs', t: 'capacidades', l: 'node .agentic/grafo/teams-vigilancia.cjs capacidades --rol=<ROL>' },
   vig_apagar: { s: 'teams-vigilancia.cjs', t: 'apagar', l: 'node .agentic/grafo/teams-vigilancia.cjs apagar --rol=<ROL>' },
@@ -192,8 +193,8 @@ Declara \`--loop\` y \`--watch\` según lo que de verdad vas a activar en el pas
 ## 2. Tus DOS vigilantes (independientes: ninguno depende del otro)
 - **A. Loop del host, cada ${INTERVALO_S} s.** Configura en el motor de loop o de tareas periódicas de tu IDE una ronda cada ${INTERVALO_S} segundos que ejecute el comando de la ronda (sección 3). Es el respaldo: se mantiene aunque el watch falle, y NO se reinicia por señales.
 - **B. Watch de cambios.** Arranca el proceso de vigilancia propio (una vez; es idempotente) y, cuando estés ocioso entre rondas, queda a la escucha con la espera por evento:
-${bloque(L(ctx, 'vig_iniciar', { ROL: 'builder' }), L(ctx, 'vig_esperar', { ROL: 'builder' }))}
-  \`esperar\` termina en cuanto hay trabajo nuevo (o a los 170 s) y entonces haces la ronda sin esperar al siguiente tick. El proceso del paso \`iniciar\` detecta y mide, pero **no despierta a tu chat por sí solo**: lo que te despierta es el loop A y el fin del comando \`esperar\`. Una señal no es una tarea ni un ACK.
+${bloque(L(ctx, 'vig_iniciar', { ROL: 'builder' }), L(ctx, 'vig_despertar', { ROL: 'builder' }))}
+  **Lanza \`esperar --despertar\` como TAREA EN SEGUNDO PLANO de tu host** (no como comando bloqueante): imprime \`AGENT_LOOP_WAKE_builder\` y termina cuando hay trabajo nuevo, y tu host te entrega esa salida como notificación. Cuando llegue, haces la ronda (sección 3) y **vuelves a lanzarlo**. Mientras no hay trabajo no gasta ningún turno. Variante bloqueante (\`${L(ctx, 'vig_esperar', { ROL: 'builder' })}\`, termina a los 170 s): solo si tu host no tiene tareas en segundo plano. El proceso del paso \`iniciar\` detecta y mide; el aviso que te despierta es el de \`esperar --despertar\`, y el loop A sigue siendo el respaldo. Una señal no es una tarea ni un ACK.
 Cuando ambos estén activos, responde READY (también puedes actualizar lo declarado):
 ${bloque(L(ctx, 'listo'))}
 
@@ -271,8 +272,8 @@ Si la memoria falla, el cierre queda MEMORY_PENDING y se reintenta (\`${COMANDOS
 
 ## Tus DOS vigilantes (independientes)
 - **A. Loop del host cada ${INTERVALO_S} s** en tu sesión: una ronda con \`${r('ronda_d')}\` (correcciones y entregas primero). Es el respaldo y no se reinicia por señales.
-- **B. Watch**: \`${r('vig_iniciar', { ROL: 'director' })}\` y, ocioso, \`${r('vig_esperar', { ROL: 'director' })}\`. El watch detecta; no despierta a nadie por sí solo.
-- Cuando termines una tarea o revisión, lee de inmediato: no esperes el tick. Estado real de lo que hay y lo que no: \`${r('vig_estado', { ROL: 'director' })}\`. Declara EVENT_WAKE_UNSUPPORTED o MANUAL_ONLY tal cual; no anuncies autonomía.
+- **B. Watch + aviso**: \`${r('vig_iniciar', { ROL: 'director' })}\` y, **lanzado como TAREA EN SEGUNDO PLANO de tu host**, \`${r('vig_despertar', { ROL: 'director' })}\`: imprime \`AGENT_LOOP_WAKE_director\` y termina cuando hay trabajo para ti (una entrega, un informe de revisor); tu host te lo entrega como notificación; haces la ronda y **lo vuelves a lanzar**. Sin trabajo no gasta turnos. Variante bloqueante (\`${r('vig_esperar', { ROL: 'director' })}\`) solo si tu host no tiene tareas en segundo plano.
+- Cuando termines una tarea o revisión, lee de inmediato: no esperes el tick. Estado real de lo que hay y lo que no: \`${r('vig_estado', { ROL: 'director' })}\`. Si dice EVENT_WAKE_UNSUPPORTED o MANUAL_ONLY, díselo tal cual al dueño; no anuncies una autonomía que no tienes.
 
 ## Cierre
 Pide el cierre solo si: entregas y criterios resueltos; correcciones verificadas o pendientes explícitos; los tres revisores concluyeron el sujeto FINAL; gates y registro KDD comprobados; sin jobs obligatorios ni resultados tardíos sin consumir. Estado final COMPLETED o COMPLETED_WITH_PENDING (nunca mezclados) y un reporte de lo que NO se implementó y por qué.

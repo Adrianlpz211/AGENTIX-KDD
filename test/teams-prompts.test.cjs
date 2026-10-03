@@ -53,7 +53,7 @@ test('prompt del CONSTRUCTOR: se pega una vez, no reactiva TEAMS, correcciones p
     assert.match(t, /Las correcciones van primero/); assert.match(t, /La auditoría nunca te detiene/); assert.match(t, /Nunca te marques como resuelto ni verificado/); assert.match(t, /No inventes trabajo/);
     // Dos vigilantes independientes, con el ritmo de 180 s.
     assert.match(t, /Tus DOS vigilantes/); assert.match(t, /A\. Loop del host, cada 180 s/); assert.match(t, /B\. Watch de cambios/); assert.match(t, /ninguno depende del otro/);
-    assert.match(t, /NO se reinicia por señales/); assert.match(t, /no despierta a tu chat por sí solo/); assert.match(t, /Una señal no es una tarea ni un ACK/);
+    assert.match(t, /NO se reinicia por señales/); assert.match(t, /TAREA EN SEGUNDO PLANO/); assert.match(t, /AGENT_LOOP_WAKE_builder/); assert.match(t, /esperar --rol=builder --despertar/); assert.match(t, /Una señal no es una tarea ni un ACK/);
     assert.match(t, /--loop=<si\|no>/); assert.match(t, /MANUAL_ONLY/, 'sin loop se declara, no se promete autonomía');
     // Incorporación, ronda, confirmación de lectura, reporte, cierre.
     for (const c of ['connect-builder', 'builder-ready', 'ronda --rol=builder', 'visto --rol=builder', 'reportar entrega', 'reportar correccion', 'reportar nota', 'teams-correcciones.cjs tomar', 'teams-correcciones.cjs reanudar', 'teams-cierre.cjs ack', 'teams-vigilancia.cjs iniciar --rol=builder', 'teams-vigilancia.cjs esperar --rol=builder --max=170', 'teams-vigilancia.cjs apagar --rol=builder', 'retomar --rol=builder']) assert.ok(t.includes(c), 'falta: ' + c);

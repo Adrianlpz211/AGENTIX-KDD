@@ -73,8 +73,11 @@ pendientes» y el constructor los atiende primero); cola vacía no es el fin
 dueño se registran y el trabajo independiente continúa. Cada tarea verificada pasa
 por el puente `teams-puente.cjs`: entra al MISMO núcleo que `aa:` (ciclos, memoria
 KDD, contratos, AST, layout, preservación, dashboard) con origen teams, sin pedir `aa:`.
-Los vigilantes detectan y miden pero NO despiertan al modelo (EVENT_WAKE_UNSUPPORTED):
-el loop del host cada 180 s es el respaldo que sí lo hace.
+El aviso al modelo lo da el HOST: `node .agentic/grafo/teams-vigilancia.cjs esperar --rol=<rol> --despertar`
+lanzado como TAREA EN SEGUNDO PLANO (Claude Code: Bash con run_in_background o Monitor; Cursor: proceso en
+segundo plano). Imprime `AGENT_LOOP_WAKE_<rol>` y termina cuando hay trabajo; el host se lo entrega a la sesión,
+que lee, trabaja y lo relanza. El loop del host cada 180 s es el respaldo. Agentix declara el despertar
+VERIFICADO solo tras una lectura (VISTO) posterior a un aviso (`teams-vigilancia.cjs capacidades`).
 
 ---
 

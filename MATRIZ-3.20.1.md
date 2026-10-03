@@ -2,7 +2,7 @@
 
 Matriz requisito → prueba. Cada 'titulo' es un fragmento del título de un test que EXISTE (test/matriz-requisitos.test.cjs lo comprueba). 'alcance' dice qué clase de evidencia es: proceso real (SQLite real, procesos node reales), fixture (datos de prueba etiquetados), simulado (receptor/constructor/director simulados), host real NO_EJECUTADO (no se probó dentro de Cursor/Claude Code). Implementado no es verificado, y verificado no es publicado.
 
-**Último release check:** FAIL · win32 · Node n/d · 2026-10-03T19:02:54.406Z
+**Último release check:** FAIL · win32 · Node n/d · 2026-10-03T20:53:17.586Z
 
 El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. Linux y Node 20/22 están en la matriz de CI y no se ejecutaron en esta máquina.
 
@@ -114,7 +114,7 @@ El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. L
 | H03-rollback | El rollback conserva los aprendizajes posteriores; un update interrumpido con tablas nuevas se recupera | `update-memoria-evidencia` › REAL: leer NO migra<br>`update-memoria-evidencia` › update INTERRUMPIDO | proceso real |  |
 | H03-docs | README y ayuda solo mencionan comandos que existen | `readme-comandos` › comandos documentados | proceso real |  |
 
-## TEAMS (26 requisitos)
+## TEAMS (27 requisitos)
 
 | Id | Requisito | Prueba (archivo › título) | Alcance | Nota |
 |---|---|---|---|---|
@@ -124,7 +124,7 @@ El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. L
 | TEAMS-T04 | El constructor avanza F1/F2/S2 sin esperar la auditoría ordinaria; una dependencia real sí bloquea | `teams-v2-flujo-y-correcciones` › Sprint1 F1 → F2 → Sprint2 F1<br>`teams-v2-flujo-y-correcciones` › una dependencia realmente sin satisfacer | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
 | TEAMS-T05 | Corrección tardía: prioridad, suspensión segura y reanudación exacta; línea movida se reubica | `teams-v2-flujo-y-correcciones` › corrección tardía<br>`teams-v2-flujo-y-correcciones` › línea movida | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
 | TEAMS-T06 | La cola vacía no cierra (WAITING_FINAL_AUDIT); un auditor tardío publica y el constructor atiende | `teams-v2-revision-y-cierre` › la cola vacía no cierra<br>`teams-v2-revision-y-cierre` › auditor tardío | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
-| TEAMS-T07 | Edición a +20 s tras el segundo loop vacío se detecta y entrega antes del próximo tick de 180 s, con tiempos medidos | `teams-vigilancia` › T07: tras el segundo loop vacío<br>`teams-vigilancia` › fs.watch REAL del sistema | simulado (reloj de 180 s) + fs.watch real del sistema; despertar real del modelo: host real NO_EJECUTADO | La detección es del proceso Node; que el chat de Cursor/Claude lea el archivo antes del próximo tick es nivel C y no se ejecutó (EVENT_WAKE_UNSUPPORTED). |
+| TEAMS-T07 | Edición a +20 s tras el segundo loop vacío se detecta y entrega antes del próximo tick de 180 s, con tiempos medidos | `teams-vigilancia` › T07: tras el segundo loop vacío<br>`teams-vigilancia` › fs.watch REAL del sistema | simulado (reloj de 180 s) + fs.watch real del sistema; despertar real del modelo: host real NO_EJECUTADO | La detección es del proceso Node; el aviso al modelo es una tarea en segundo plano del host (esperar --despertar → AGENT_LOOP_WAKE_<rol>), probada como proceso real; que Cursor/Claude Code la entreguen a su sesión en vivo y la sesión lea es nivel C y no se ejecutó (el despertar solo se declara VERIFICADO tras un VISTO posterior). |
 | TEAMS-T08 | Matar el watch: el loop independiente recoge; fallar el loop: el watch atiende | `teams-vigilancia` › T08: sin watch el respaldo recoge<br>`teams-vigilancia` › T08: el respaldo no se reinicia | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
 | TEAMS-T09 | Ambos roles reciben eventos y reportes; detectar no es recibir | `teams-vigilancia` › T09: los DOS roles | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
 | TEAMS-T10 | Duplicado, coalescing y desorden no pierden una corrección ni repiten una ejecución | `teams-v2-flujo-y-correcciones` › [T10]<br>`teams-vigilancia` › T10: ráfaga, duplicados | simulado (constructor y recibos de gate) sobre TEAMS, base y núcleo de memoria reales |  |
@@ -143,10 +143,11 @@ El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. L
 | TEAMS-web | Investigación en internet solo sobre las referencias del plan, con guardias SSRF y el contenido como dato | `teams-investigar` › SSRF: la URL se valida antes de conectar<br>`teams-investigar` › solo se consultan las referencias del plan | proceso real (servidor HTTP local) |  |
 | TEAMS-prompts | Prompts reales director/constructor/revisores con rutas absolutas y solo comandos que existen | `teams-prompts` › prompt del CONSTRUCTOR<br>`teams-prompts` › prompt del DIRECTOR<br>`teams-prompts` › incorporación del constructor TAL COMO la dicta el prompt | proceso real |  |
 | TEAMS-dashboard | Panel /teams: construidas/auditadas/verificadas/registradas por separado; dato faltante = desconocido; los grafos no cambian | `teams-dashboard` › etapas por separado<br>`teams-dashboard` › página /teams | proceso real (API y página) |  |
+| TEAMS-despertar | El aviso al modelo es una tarea en segundo plano del host: espera persistente que imprime AGENT_LOOP_WAKE_<rol> y termina solo cuando hay trabajo; se declara verificado solo tras un VISTO posterior | `teams-vigilancia` › esperar --despertar | proceso real; entrega por el host NO_EJECUTADO | La entrega del aviso a la sesión viva de Cursor/Claude Code es nivel C. |
 | TEAMS-nivelC | Campaña REAL Claude Code + Cursor con tres subagentes y vigilantes (T07/T08/T09/T13/T14/T18/T22 en hosts reales) | `(ninguna)` › pendiente: host real | host real NO_EJECUTADO | Pendiente esencial: requiere los dos hosts abiertos sobre un proyecto real y que el dueño pegue el prompt del constructor. No se sustituye por simulación. |
 
 ## Lo que NO está verificado
 
-- **Hosts reales (Cursor, Claude Code):** H02-11b, TEAMS-T07, TEAMS-nivelC quedan `NO_EJECUTADO`. Los receptores/constructores/directores de TEAMS en las pruebas son simulados; el protocolo y la base son reales.
+- **Hosts reales (Cursor, Claude Code):** H02-11b, TEAMS-T07, TEAMS-despertar, TEAMS-nivelC quedan `NO_EJECUTADO`. Los receptores/constructores/directores de TEAMS en las pruebas son simulados; el protocolo y la base son reales.
 - **Campañas con modelos reales:** `NO_EJECUTADO` (cuestan dinero y requieren autorización). El benchmark es determinista y mide payload.
 - **Publicación:** esta matriz no afirma que 3.20.1 esté publicada: `npm view agentic-kdd version` y `npm run release:verify` lo dicen.

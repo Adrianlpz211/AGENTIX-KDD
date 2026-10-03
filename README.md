@@ -239,7 +239,9 @@ akdd teams vigilancia estado    # what is installed, alive, detecting, and what 
 akdd teams investigar consultar --plan=P --url=... --pregunta="..."
 ```
 
-**Limits, said plainly.** The watchers detect and measure but do **not** wake a chat by themselves (`EVENT_WAKE_UNSUPPORTED`); without a confirmed host loop the mode is `MANUAL_ONLY` and no autonomy is announced. TEAMS is verified with simulated builder/receipts and real storage (levels A and B); the **real Claude Code + Cursor campaign (level C) is `NO_EJECUTADO`** until you run it. No Windows scheduled task is installed unless you approve it, and updating Agentix never installs one.
+**How the model is woken.** A file watcher cannot enter a chat by itself; the host does it. The director and the builder each launch `teams-vigilancia.cjs esperar --rol=<role> --despertar` as a **background task of their host** (Claude Code: a background command or Monitor; Cursor: a background process). It prints `AGENT_LOOP_WAKE_<role>` and exits when there is work, the host delivers that to the session as a notification, the session reads, works and relaunches it. It spends no turns while idle. The 180 s host loop stays as the backup. Agentix reports the wake as `EVENT_WAKE_POR_TAREA_DEL_HOST` while the wait is alive and only as `EVENT_WAKE_VERIFICADO` once the session confirmed a read after a notice.
+
+**Limits, said plainly.** Without that background task or a confirmed host loop the mode is `MANUAL_ONLY` (`EVENT_WAKE_UNSUPPORTED`) and no autonomy is announced. TEAMS is verified with simulated builder/receipts and real storage (levels A and B); the **real Claude Code + Cursor campaign (level C) is `NO_EJECUTADO`** until you run it. No Windows scheduled task is installed unless you approve it, and updating Agentix never installs one.
 
 ### The rest of the hammer
 
@@ -573,7 +575,7 @@ akdd locks release-all         # Release everything (session cleanup)
 9. **Memory with provenance sees what the host hands over.** Native passive capture needs the host hooks installed and only covers actions *before* they run; without them, only what goes through Agentix is recorded. A claim of "verified inside Cursor/Claude" is never made from a fixture; a smoke test in real hosts is `NO_EJECUTADO` unless you run it.
 10. **Compaction is a payload measure, not a promise.** The benchmark measures bytes Agentix controls, deterministically; tokens are `bytes/4` estimates. When recovering the original is needed, the saving shrinks — and in some cases it is zero by design.
 11. **The redactor reduces risk; it is not a DLP.** Regular expressions miss secrets that carry no context. Use `.agentic/privacy-policy.json` to deny paths and fields.
-12. **TEAMS watchers do not wake a chat by themselves.** They detect and measure; the host loop is what wakes the model, and where it isn't confirmed the mode is `MANUAL_ONLY`.
+12. **The wake-up is the host's, and is verified only by a read.** The watcher detects; the model is woken by the background task (or the loop) of its host. Agentix never calls the wake verified until the session confirms a read after a notice; where neither exists the mode is `MANUAL_ONLY`.
 
 ---
 

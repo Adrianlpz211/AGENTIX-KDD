@@ -695,6 +695,47 @@ test('esperar: devuelve TRABAJO en cuanto el rol tiene eventos nuevos, sin hacer
   } finally { p.limpiar(); }
 });
 
+test('esperar --despertar: tarea persistente del host — imprime AGENT_LOOP_WAKE_<rol> y termina SOLO cuando hay trabajo; la capacidad se verifica solo tras un VISTO posterior', { skip, timeout: 60000 }, async () => {
+  const p = proyectoTeams('despertar');
+  try {
+    vaciarColas(p);
+    const marcaWake = path.join(p.root, '.agentic', '_teams', 'wake-builder.json');
+    const h = spawn(process.execPath, [path.join(G, 'teams-vigilancia.cjs'), 'esperar', '--rol=builder', '--despertar'], { cwd: p.root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let out = ''; h.stdout.on('data', (d) => { out += d; });
+    const cerrado = new Promise((res) => h.on('close', (code) => res(code)));
+    try {
+      assert.ok(esperar(() => fs.existsSync(marcaWake), 20000), 'la espera activa dejó su marca');
+      // Sin trabajo NO sale (sin el tope de 170 s: un turno de modelo por cada salida vacía sería un gasto sin sentido).
+      await new Promise((r) => setTimeout(r, 2500));
+      assert.equal(h.exitCode, null, 'sin trabajo sigue esperando');
+      assert.equal(out, '', 'y no imprime nada');
+      const viva = vig.capacidades(p.root, 'builder');
+      assert.equal(viva.despertar_modelo.estado, 'EVENT_WAKE_POR_TAREA_DEL_HOST');
+      assert.equal(viva.despertar_modelo.verificado, false, 'un proceso vivo prueba que la espera existe, no que el host la entregue');
+      assert.match(viva.autonomia, /^POR_EVENTO_DECLARADA/); assert.equal(viva.capacidad_completa, false);
+      // Llega trabajo: línea fija de despertar + el detalle, y el proceso termina.
+      const t0 = Date.now();
+      p.tm.asignar(p.root, { owner_id: 'cursor-w' });
+      const code = await cerrado;
+      assert.equal(code, 0);
+      const lineas = out.split(/\r?\n/);
+      assert.equal(lineas[0], 'AGENT_LOOP_WAKE_builder');
+      assert.equal(JSON.parse(lineas.slice(1).join('\n')).estado, 'TRABAJO');
+      assert.ok(Date.now() - t0 < 8000, 'despertó con el evento: ' + (Date.now() - t0) + ' ms');
+      assert.ok(pendientes(p, 'builder') > 0, 'despertar NO hace ACK');
+      // Terminada la espera ya no hay proceso vivo, y mientras la sesión no lea, NO está verificado.
+      const tras = vig.capacidades(p.root, 'builder');
+      assert.equal(tras.despertar_modelo.estado, 'EVENT_WAKE_UNSUPPORTED');
+      // La sesión lee después del aviso (VISTO) → el despertar por evento queda verificado y con él la autonomía completa.
+      await new Promise((r) => setTimeout(r, 50));
+      md.visto(p.root, { rol: 'builder', hasta_seq: 99 });
+      const ok = vig.capacidades(p.root, 'builder');
+      assert.equal(ok.despertar_modelo.estado, 'EVENT_WAKE_VERIFICADO'); assert.equal(ok.despertar_modelo.verificado, true);
+      assert.match(ok.autonomia, /^POR_EVENTO_VERIFICADA/); assert.equal(ok.capacidad_completa, true);
+    } finally { try { h.kill(); } catch { /* ya terminó */ } }
+  } finally { p.limpiar(); }
+});
+
 test('esperar: sin trabajo no inventa nada: SIN_TRABAJO al agotar el tiempo', { skip, timeout: 60000 }, async () => {
   const p = proyectoTeams('esperar-vacio');
   try {

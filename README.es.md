@@ -239,7 +239,9 @@ akdd teams vigilancia estado    # qué está instalado, vivo, detectando, y qué
 akdd teams investigar consultar --plan=P --url=... --pregunta="..."
 ```
 
-**Límites, dichos con claridad.** Los vigilantes detectan y miden pero **no** despiertan un chat por sí solos (`EVENT_WAKE_UNSUPPORTED`); sin un loop del host confirmado el modo es `MANUAL_ONLY` y no se anuncia autonomía. TEAMS está verificado con constructor/recibos simulados y almacenamiento real (niveles A y B); la **campaña real Claude Code + Cursor (nivel C) es `NO_EJECUTADO`** hasta que tú la corras. No se instala ninguna tarea programada de Windows sin que lo apruebes, y actualizar Agentix nunca instala una.
+**Cómo se despierta al modelo.** Un watcher de archivos no puede entrar a un chat por sí solo; lo hace el host. El director y el constructor lanzan cada uno `teams-vigilancia.cjs esperar --rol=<rol> --despertar` como **tarea en segundo plano de su host** (Claude Code: un comando en segundo plano o Monitor; Cursor: un proceso en segundo plano). Imprime `AGENT_LOOP_WAKE_<rol>` y termina cuando hay trabajo, el host se lo entrega a la sesión como notificación, la sesión lee, trabaja y lo relanza. Sin trabajo no gasta turnos. El loop del host de 180 s queda como respaldo. Agentix lo reporta como `EVENT_WAKE_POR_TAREA_DEL_HOST` mientras la espera está viva y solo como `EVENT_WAKE_VERIFICADO` cuando la sesión confirmó una lectura posterior a un aviso.
+
+**Límites, dichos con claridad.** Sin esa tarea en segundo plano ni un loop del host confirmado el modo es `MANUAL_ONLY` (`EVENT_WAKE_UNSUPPORTED`) y no se anuncia autonomía. TEAMS está verificado con constructor/recibos simulados y almacenamiento real (niveles A y B); la **campaña real Claude Code + Cursor (nivel C) es `NO_EJECUTADO`** hasta que tú la corras. No se instala ninguna tarea programada de Windows sin que lo apruebes, y actualizar Agentix nunca instala una.
 
 ### El resto del martillo
 
@@ -573,7 +575,7 @@ akdd locks release-all         # Libera todo (limpieza de sesión)
 9. **La memoria con procedencia ve lo que el host le entrega.** La captura pasiva nativa necesita los hooks del host instalados y solo cubre acciones *antes* de ejecutarse; sin ellos, solo se registra lo que pasa por Agentix. Jamás se afirma "verificado dentro de Cursor/Claude" a partir de un fixture; un smoke en hosts reales es `NO_EJECUTADO` salvo que tú lo corras.
 10. **La compactación es una medida de payload, no una promesa.** El benchmark mide bytes que Agentix controla, de forma determinista; los tokens son estimaciones `bytes/4`. Cuando hace falta recuperar el original, el ahorro se encoge — y en algunos casos es cero por diseño.
 11. **El redactor reduce riesgo; no es un DLP.** Las expresiones regulares no atrapan secretos que no traen contexto. Usa `.agentic/privacy-policy.json` para denegar rutas y campos.
-12. **Los vigilantes de TEAMS no despiertan un chat por sí solos.** Detectan y miden; lo que despierta al modelo es el loop del host, y donde no está confirmado el modo es `MANUAL_ONLY`.
+12. **El despertar es del host, y solo se verifica con una lectura.** El watcher detecta; al modelo lo despierta la tarea en segundo plano (o el loop) de su host. Agentix nunca da el despertar por verificado hasta que la sesión confirma una lectura tras un aviso; donde no hay ninguno el modo es `MANUAL_ONLY`.
 
 ---
 

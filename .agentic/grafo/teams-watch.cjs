@@ -19,9 +19,11 @@
  * Promise se espera su resultado. Fallo, rechazo o cualquier otra respuesta: sin ACK, y el siguiente pase lo
  * reintenta (at-least-once; idempotente por event_id).
  *
- * LÍMITE HONESTO: este proceso DETECTA; no despierta al modelo del host. Que una sesión de Cursor o de Claude Code
+ * ALCANCE: este proceso DETECTA; por sí mismo no entra al chat. Al modelo lo despierta el host: una TAREA EN SEGUNDO
+ * PLANO cuya salida le llega como notificación (`teams-vigilancia.cjs esperar --despertar` imprime AGENT_LOOP_WAKE_<rol>
+ * y termina), más el loop de respaldo. Que una sesión de Cursor o de Claude Code
  * lea de verdad lo detectado depende de su loop propio o de un adapter que lo confirme (VISTO). Lo que el host sí
- * da o no da se declara en teams-vigilancia.capacidades (EVENT_WAKE_UNSUPPORTED / MANUAL_ONLY), no aquí.
+ * da o no da se declara en teams-vigilancia.capacidades (EVENT_WAKE_POR_TAREA_DEL_HOST / VERIFICADO / MANUAL_ONLY), no aquí.
  *
  * `cursor: 'propio'` es para diagnóstico: guarda su posición aparte y nunca consume el ACK del rol operativo.
  */

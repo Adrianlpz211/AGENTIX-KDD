@@ -1205,7 +1205,7 @@
           "fs.watch REAL del sistema"
         ]
       ],
-      "nota": "La detección es del proceso Node; que el chat de Cursor/Claude lea el archivo antes del próximo tick es nivel C y no se ejecutó (EVENT_WAKE_UNSUPPORTED)."
+      "nota": "La detección es del proceso Node; el aviso al modelo es una tarea en segundo plano del host (esperar --despertar → AGENT_LOOP_WAKE_<rol>), probada como proceso real; que Cursor/Claude Code la entreguen a su sesión en vivo y la sesión lea es nivel C y no se ejecutó (el despertar solo se declara VERIFICADO tras un VISTO posterior)."
     },
     {
       "id": "TEAMS-T08",
@@ -1541,6 +1541,19 @@
           "aa: individual — el dashboard"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-despertar",
+      "doc": "TEAMS",
+      "requisito": "El aviso al modelo es una tarea en segundo plano del host: espera persistente que imprime AGENT_LOOP_WAKE_<rol> y termina solo cuando hay trabajo; se declara verificado solo tras un VISTO posterior",
+      "alcance": "proceso real; entrega por el host NO_EJECUTADO",
+      "pruebas": [
+        [
+          "teams-vigilancia",
+          "esperar --despertar"
+        ]
+      ],
+      "nota": "La entrega del aviso a la sesión viva de Cursor/Claude Code es nivel C."
     },
     {
       "id": "TEAMS-nivelC",
