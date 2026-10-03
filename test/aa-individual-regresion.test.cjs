@@ -48,7 +48,7 @@ function montar(nombre) {
 
 const nodo = (p, ...args) => cp.spawnSync(process.execPath, args, { cwd: p.root, encoding: 'utf8', env: ENTORNO, timeout: 540000 });
 const sql = (p, q, ...a) => { const d = p.abrirR(); try { return d.all(q, ...a); } finally { d.close(); } };
-const n = (p, tabla, donde) => sql(p, 'SELECT count(*) AS n FROM ' + tabla + (donde ? ' WHERE ' + donde : ''))[0].n;
+const n = (p, TABLA, DONDE) => sql(p, ['SELECT count(*) AS n FROM', TABLA, DONDE ? ['WHERE', DONDE].join(' ') : ''].join(' '))[0].n;
 
 test('aa: individual — el ciclo completo sigue registrando TODO lo de siempre, y la memoria con procedencia se SUMA', { timeout: 900000 }, () => {
   const { p, git } = montar('ciclo');
