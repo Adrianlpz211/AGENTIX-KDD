@@ -98,7 +98,7 @@ function pagina(titulo, activo, js) {
   <span class="sub">· <span id="vivo">conectando…</span></span>
   <button id="recargar" type="button">Actualizar vista</button>
 </header>
-<nav>${link('/', 'Tablero de grafos', 'grafos')}${link('/memoria', 'Memoria', 'memoria')}${link('/contexto', 'Contexto y esfuerzo', 'contexto')}${link('/actualizacion', 'Actualización', 'actualizacion')}</nav>
+<nav>${link('/', 'Tablero de grafos', 'grafos')}${link('/memoria', 'Memoria', 'memoria')}${link('/contexto', 'Contexto y esfuerzo', 'contexto')}${link('/actualizacion', 'Actualización', 'actualizacion')}${link('/teams', 'Campaña TEAMS', 'teams')}</nav>
 <main id="raiz" aria-live="polite"></main>
 <div class="foot" id="pie"></div>
 <script>

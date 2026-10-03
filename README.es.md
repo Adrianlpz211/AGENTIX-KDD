@@ -317,6 +317,31 @@ Equivalente en CLI: `akdd teams <init|plan|run|status|pending|resolve|goal>`.
 
 ---
 
+### TEAMS nativo (3.20.1) — el director, tres revisores y el constructor, conectados con todo lo demás
+
+TEAMS ahora corre sobre el **mismo núcleo que `aa:`**. Cada tarea que el director verifica pasa por un puente (`teams-puente.cjs`) que la registra como ciclo, memoria, contratos, AST, layout y evidencia de preservación con `origen = teams` — no tienes que escribir `aa:`. El registro es un *outbox*: se encola en la misma transacción que el evento, se reintenta si falla, y la tarea queda `MEMORY_PENDING` hasta que se registre de verdad. Un registro fallido nunca bloquea tareas independientes, pero impide que el cierre final sea "completo".
+
+| Pieza | Qué hace |
+|---|---|
+| **Tú aterrizas, el director planifica** | Tú dices todo (alcance, reglas, links de referencia). El director lo convierte en sprints → fases → tareas con aceptación, archivos, dependencias, riesgos y criterios de revisión, te muestra un resumen y pregunta solo lo indispensable. El primer lote existe *antes* de que arranque el constructor. |
+| **La auditoría no frena el avance ordinario** | El constructor sigue Fase 1 → Fase 2 → Sprint 2 mientras los revisores trabajan. Un hallazgo tardío entra en **Correcciones pendientes**; el constructor lo lee primero, suspende su tarea de forma segura, corrige y retoma en la posición exacta. Una dependencia realmente incumplida sí bloquea su rama; seguridad y preservación nunca se relajan. |
+| **Tres revisores** | Frontend/UI-UX, backend y negocio (auditor general de la lógica del dominio). Cada veredicto va ligado al hash que revisó; un hash viejo no cuenta; la revisión secuencial se declara como tal. |
+| **Cierre** | Una cola vacía *no* es el fin: la campaña espera la auditoría final. El director cierra solo cuando los tres revisores concluyeron sobre el sujeto FINAL, los hallazgos están resueltos o listados y todo el registro de memoria está hecho. El constructor confirma (`close_id` + revisión) y detiene **su propio** loop y watch. Un hallazgo que llega entre el cierre y el ACK lo reabre. Estado final: `COMPLETED` o `COMPLETED_WITH_PENDING`. |
+| **Decisiones que son tuyas** | Se registran con la pregunta y las alternativas; el trabajo independiente continúa; y el director reporta *"el proyecto quedó en X % por estas decisiones tuyas"*. X se calcula del plan (tareas verificadas ÷ tareas planificadas), nunca se inventa. |
+| **Investigación en internet** | Tras aterrizar el plan, el director y el revisor de negocio pueden consultar los **links de referencia que diste** (o los que autorices). El contenido se guarda como evidencia (URL, fecha, hash), redactado, y se trata estrictamente como dato. Se rechazan redes privadas y redirecciones hacia ellas. |
+| **Dos vigilantes independientes** | El loop del host cada 180 s es el respaldo que sí despierta al modelo; un watch de archivos baja la latencia a segundos. Ninguno depende del otro. Una señal no es una tarea ni un ACK; Agentix mide detectado → solicitado → atendido → ACK. |
+
+```bash
+akdd teams prompt director      # los prompts de arranque reales, con tus rutas absolutas y el plan
+akdd teams prompt builder       # se pega UNA vez en Cursor
+akdd teams avance               # avance medido y las decisiones del dueño que lo frenan
+akdd teams correcciones listar  # hallazgos por prioridad   ·   akdd teams revision ...   ·   akdd teams cerrar
+akdd teams vigilancia estado    # qué está instalado, vivo, detectando y qué acepta realmente el host
+akdd teams investigar consultar --plan=P --url=... --pregunta="..."
+```
+
+**Límites, dichos sin rodeos.** Los vigilantes detectan y miden pero **no** despiertan un chat por sí solos (`EVENT_WAKE_UNSUPPORTED`); sin un loop del host confirmado el modo es `MANUAL_ONLY` y no se anuncia autonomía. Todo lo anterior está verificado con constructor/recibos simulados y almacenamiento real (niveles A y B); la **campaña real con Claude Code + Cursor (nivel C) no se ha ejecutado**. No se instala ninguna tarea programada de Windows sin tu aprobación, y actualizar Agentix nunca instala una.
+
 ## Puntos de restauración — deshacer con vista previa
 
 ```

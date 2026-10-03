@@ -222,6 +222,8 @@ function tick(root, { builder, verificador, puntos }) {
       if (typeof builder.alVerificar === 'function') builder.alVerificar(res, v);
       if (v.status === 'DONE_VERIFIED') {
         punto('AFTER_VERIFIED', res.task_id, { attempt: res.fencing, evidence: gates.map((g) => ({ gate: g.gate, status: g.status })) });
+        /* Puente al núcleo común: la tarea verificada se REGISTRA (ciclo, memoria, contratos, AST, layout) con origen teams. Outbox: no se pierde. */
+        try { const pu = require('./teams-puente.cjs').alVerificar(root, res.task_id); log.push({ paso: 'cierre-memoria', task_id: res.task_id, status: pu && (pu.status || (pu.ok ? 'OK' : 'DEGRADADO')) }); } catch { /* TEAMS sigue; el cierre final lo reportará pendiente */ }
         /* Cerrada y verificada: sus pins de evidencia se liberan (los de sprint/plan, solo al cerrar ese nivel). */
         try { const c = require('./teams-packets.cjs').cerrar(root, { task_id: res.task_id }); log.push({ paso: 'cerrar-paquetes', task_id: res.task_id, status: c.status || c.code }); } catch { /* auxiliar */ }
       }
@@ -229,6 +231,19 @@ function tick(root, { builder, verificador, puntos }) {
         const reproducible = falloReproducible(gates, (verificador(res) || []).concat(extras));
         const rb = rm.rollbackAutomatico(root, { task_id: res.task_id, attempt: res.fencing, fallo_reproducible: reproducible, side_effects: efectosDeTarea(root, res) });
         log.push({ paso: 'rollback', task_id: res.task_id, status: rb.status, motivos: rb.motivos || null, point_id: rb.point_id || null });
+      }
+    }
+  }
+  /* Entregas que esperaban a sus dependencias (se habilitaron por entrega, no por verificación): ahora que ya cerraron, se verifican.
+     Sin esto una tarea que empezó sobre una entrega aún sin verificar quedaría VERIFYING para siempre. */
+  if (typeof verificador === 'function') {
+    for (const w of tm.verificacionesEnEspera(root)) {
+      const res = { task_id: w.task_id, subject_hash: w.subject_hash, files: w.files, owner_id: w.owner_id, fencing: null, event_id: 'esp-' + w.task_id + '-r' + w.revision };
+      const gates = verificador(res) || [];
+      const v = tm.verificar(root, { task_id: w.task_id, expected_revision: w.revision, event_id: 'ver-' + res.event_id, gates });
+      log.push({ paso: 'verificar-en-espera', task_id: w.task_id, status: v.status, faltan: v.faltan || null });
+      if (v.status === 'DONE_VERIFIED') {
+        try { require('./teams-packets.cjs').cerrar(root, { task_id: w.task_id }); } catch { /* auxiliar */ }
       }
     }
   }

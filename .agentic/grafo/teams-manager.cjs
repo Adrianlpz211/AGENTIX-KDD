@@ -20,7 +20,9 @@ const crypto = require('crypto');
 const dba = require('./db-adapter.cjs');
 const { allowsVerifiedClose } = require('./gate-result.cjs');
 
-const SCHEMA_VERSION = 1;
+/* v2 (3.20.1): capa de flujo, correcciones, revisores, cierre y plan con referencias. Todo ADITIVO: tablas nuevas, ningún ALTER
+   sobre las de v1, de modo que un proyecto v1 migra con `init --aprobar-migracion` (con respaldo) y nada se reescribe al leer. */
+const SCHEMA_VERSION = 2;
 const ESTADOS = ['PENDING', 'READY', 'RUNNING', 'VERIFYING', 'DONE_VERIFIED', 'BLOCKED_HUMAN',
   'BLOCKED_DEPENDENCY', 'BLOCKED_TECHNICAL', 'FAILED', 'REVERTED', 'CANCELLED'];
 /* REVERTED no es final: la tarea no quedó implementada y puede reintentarse desde el punto sano. */
@@ -29,12 +31,17 @@ const ALCANCES = ['TASK', 'DEPENDENCY_CHAIN', 'GLOBAL', 'CHANNEL'];
 const RIESGOS = ['LOW', 'MEDIUM', 'HIGH'];
 /** Gates que TEAMS impone por sí mismo (alcance, leases, plan); el resto llega del controlador. */
 const GATES_PROPIOS = new Set(['scope', 'leases', 'plan']);
-const LIMITES_DEFECTO = { reparaciones: 3, replanificaciones: 2, max_intentos_plan: 60, max_minutos_plan: null, lease_ms: 10 * 60 * 1000, ack_ms: 2 * 60 * 1000 };
+/* advance_on_delivery: una entrega con comprobaciones básicas habilita la tarea siguiente sin esperar al cierre del director
+   (la auditoría corre por detrás, nunca gatea el avance ordinario). memory_closure_required: el cierre exige el registro de memoria. */
+const LIMITES_DEFECTO = { reparaciones: 3, replanificaciones: 2, max_intentos_plan: 60, max_minutos_plan: null, lease_ms: 10 * 60 * 1000, ack_ms: 2 * 60 * 1000, advance_on_delivery: true, memory_closure_required: true };
+/** Gates cuyo fallo frena la cadena (nunca se relajan por avanzar rápido). */
+const GATES_CRITICOS = new Set(['security', 'preservation', 'protected-files', 'blast-radius']);
+const ESTADOS_FLUJO = ['BUILDER_RUNNING', 'BUILDER_DELIVERED', 'AUDIT_PENDING', 'CORRECTION_PENDING', 'DIRECTOR_VERIFIED', 'MEMORY_PENDING', 'CLOSED'];
 const ROLES_DEFECTO = { director: { host: 'claude-code' }, builder: { host: 'cursor' } };
 /** Orígenes que prueban que la decisión la tomó una persona. */
 const ORIGEN_HOOK_TTL_MS = 30 * 60 * 1000;
 
-const SCHEMA = [
+const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS teams_meta (key TEXT PRIMARY KEY, value TEXT)`,
   `CREATE TABLE IF NOT EXISTS teams_sessions (id INTEGER PRIMARY KEY CHECK (id = 1), enabled INTEGER NOT NULL DEFAULT 0,
     paused INTEGER NOT NULL DEFAULT 0, session_generation INTEGER NOT NULL DEFAULT 0, project_id TEXT, roles TEXT, updated_at TEXT)`,
@@ -61,6 +68,42 @@ const SCHEMA = [
     expires_ms INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS teams_acks (role TEXT PRIMARY KEY, last_ack_seq INTEGER NOT NULL DEFAULT 0)`,
 ];
+
+const SCHEMA_V2 = [
+  /* Capa de flujo por tarea: no cambia el significado de teams_tasks.state; añade lo que ese estado no distingue. */
+  `CREATE TABLE IF NOT EXISTS teams_flow (task_id TEXT PRIMARY KEY, phase TEXT, review_criteria TEXT, risks TEXT, pending_decisions TEXT,
+    delivered_at TEXT, delivery_checks TEXT, current_hash TEXT, verified_at TEXT, memory_state TEXT NOT NULL DEFAULT 'NONE', memory_detail TEXT,
+    closed_at TEXT, revalidar TEXT, suspended INTEGER NOT NULL DEFAULT 0, espera_deps INTEGER NOT NULL DEFAULT 0, updated_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_findings (id TEXT PRIMARY KEY, seq INTEGER, plan_id TEXT, task_id TEXT, severity TEXT NOT NULL,
+    actionable INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, origin TEXT NOT NULL, reviewed_hash TEXT,
+    reviewed_revision INTEGER, location TEXT, impact TEXT, criterion TEXT, proposal TEXT, acceptance TEXT, depends_on TEXT, scope TEXT,
+    dedupe_key TEXT, recurrence INTEGER NOT NULL DEFAULT 1, provenance TEXT, assigned_to TEXT, owner_id TEXT, fencing INTEGER, base_hash TEXT,
+    resolved_hash TEXT, lease_until INTEGER, reopen_count INTEGER NOT NULL DEFAULT 0, reason TEXT, duplicate_of TEXT, decision_id TEXT, escalated INTEGER NOT NULL DEFAULT 0,
+    event_id TEXT UNIQUE, created_at TEXT, updated_at TEXT, published_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_teams_findings_state ON teams_findings(state)`,
+  `CREATE INDEX IF NOT EXISTS idx_teams_findings_task ON teams_findings(task_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_teams_findings_dedupe ON teams_findings(dedupe_key)`,
+  `CREATE TABLE IF NOT EXISTS teams_finding_log (n INTEGER PRIMARY KEY AUTOINCREMENT, finding_id TEXT NOT NULL, revision INTEGER, from_state TEXT,
+    to_state TEXT, actor TEXT, note TEXT, at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_suspended (id INTEGER PRIMARY KEY AUTOINCREMENT, finding_id TEXT NOT NULL, task_id TEXT, sprint_id TEXT, phase TEXT,
+    next_step TEXT, files TEXT, leases TEXT, state TEXT NOT NULL, created_at TEXT, resumed_at TEXT, resume_report TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_reviewers (role TEXT PRIMARY KEY, agent_id TEXT, session_id TEXT, modality TEXT NOT NULL, scope TEXT, coverage TEXT,
+    registered_at TEXT, updated_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, scope_kind TEXT NOT NULL, task_id TEXT, finding_id TEXT,
+    subject_hash TEXT, revision INTEGER, verdict TEXT NOT NULL, justification TEXT, evidence TEXT, agent_id TEXT, tipo TEXT, consumed INTEGER NOT NULL DEFAULT 0,
+    findings TEXT, event_id TEXT UNIQUE, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_teams_reviews_role ON teams_reviews(role, scope_kind, task_id)`,
+  `CREATE TABLE IF NOT EXISTS teams_builder (id INTEGER PRIMARY KEY CHECK (id = 1), session_id TEXT, host TEXT, model TEXT, state TEXT NOT NULL, capabilities TEXT,
+    watchers TEXT, project TEXT, protocol TEXT, connected_at TEXT, ready_at TEXT, updated_at TEXT, prev_session_id TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_plan_refs (plan_id TEXT NOT NULL, url TEXT NOT NULL, nota TEXT, added_revision INTEGER, downloaded INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (plan_id, url))`,
+  `CREATE TABLE IF NOT EXISTS teams_plan_deltas (id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id TEXT NOT NULL, revision INTEGER NOT NULL, kind TEXT, payload TEXT, created_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_closure (close_id TEXT PRIMARY KEY, plan_id TEXT, state TEXT NOT NULL, revision INTEGER, final_status TEXT, pending TEXT, not_done TEXT,
+    requested_at TEXT, ack_at TEXT, ack_session TEXT, ack_revision INTEGER, stop_report TEXT, reopened_reason TEXT, confirmed_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS teams_campaign (id INTEGER PRIMARY KEY CHECK (id = 1), run_id TEXT, started_at TEXT, ticks INTEGER NOT NULL DEFAULT 0, last_tick_at TEXT, mode TEXT)`,
+];
+
+const SCHEMA = SCHEMA_V1.concat(SCHEMA_V2);
 
 // ─── utilidades ──────────────────────────────────────────────────────────────
 
@@ -99,6 +142,18 @@ function tieneEsquema(db) {
   return !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='teams_meta'");
 }
 
+/** v2 = capa de flujo/correcciones/revisores/cierre. Una base v1 sigue funcionando; lo nuevo pide la migración aprobada. */
+function tieneEsquemaV2(db) {
+  return !!db && !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='teams_flow'");
+}
+
+/** 'NINGUNO' (sin tablas TEAMS) | 'V1' | 'V2'. Solo lee: nunca migra. */
+function versionEsquema(root) {
+  if (!fs.existsSync(dbPath(root))) return 'SIN_BASE';
+  const db = dba.openReadOnly(dbPath(root));
+  try { return !tieneEsquema(db) ? 'NINGUNO' : (tieneEsquemaV2(db) ? 'V2' : 'V1'); } finally { db.close(); }
+}
+
 /** Abre, exige esquema y corre `fn` en una transacción. Los avisos de despertar salen después del COMMIT. */
 function tx(root, fn) {
   const despertar = [];
@@ -110,10 +165,26 @@ function tx(root, fn) {
   return r;
 }
 
+/** Como `tx`, pero para operaciones de la capa v2: sin las tablas nuevas devuelve MIGRACION_PENDIENTE, jamás migra a escondidas. */
+function tx2(root, fn) {
+  const despertar = [];
+  const r = conDB(root, (db) => {
+    if (!tieneEsquemaV2(db)) throw errorTeams('MIGRACION_PENDIENTE', 'el esquema TEAMS v2 no está aplicado: akdd teams init --aprobar-migracion (con respaldo)', { desde: tieneEsquema(db) ? 'V1' : 'NINGUNO' });
+    return db.transaction(() => fn(db, despertar))();
+  });
+  for (const d of despertar) avisar(root, d.target, d.seq);
+  return r;
+}
+
 function lectura(root, fn) {
   if (!fs.existsSync(dbPath(root))) return fn(null);
   const db = dba.openReadOnly(dbPath(root));
   try { return fn(tieneEsquema(db) ? db : null); } finally { db.close(); }
+}
+
+/** Lectura de la capa v2: `fn(db)` solo si existen sus tablas; si no, `fn(null)` (se muestra como "sin datos", nunca como 0). */
+function lectura2(root, fn) {
+  return lectura(root, (db) => fn(tieneEsquemaV2(db) ? db : null));
 }
 
 /** Indicador de revisión para los vigilantes: la señal, nunca la fuente de verdad. */
@@ -141,6 +212,83 @@ const tarea = (db, id) => fila(db.get('SELECT * FROM teams_tasks WHERE id = ?', 
 const tareas = (db, planId) => (planId
   ? db.all('SELECT * FROM teams_tasks WHERE plan_id = ? ORDER BY orden', planId)
   : db.all('SELECT * FROM teams_tasks ORDER BY plan_id, orden')).map(fila);
+
+// ─── capa de flujo (v2) ──────────────────────────────────────────────────────
+
+const limitesDe = (db, planId) => {
+  const r = db.get('SELECT limits FROM teams_plans WHERE id = ?', planId);
+  return Object.assign({}, LIMITES_DEFECTO, pj(r && r.limits, {}));
+};
+
+function flujoFila(f) {
+  if (!f) return null;
+  return {
+    task_id: f.task_id, phase: f.phase, review_criteria: pj(f.review_criteria, []), risks: pj(f.risks, []), pending_decisions: pj(f.pending_decisions, []),
+    delivered_at: f.delivered_at, delivery_checks: pj(f.delivery_checks, []), current_hash: f.current_hash, verified_at: f.verified_at,
+    memory_state: f.memory_state, memory_detail: f.memory_detail, closed_at: f.closed_at, revalidar: pj(f.revalidar, []),
+    suspended: !!f.suspended, espera_deps: !!f.espera_deps,
+  };
+}
+
+/** Fila de flujo de una tarea; null si la base es v1 o la tarea no la tiene (planes anteriores a v2). */
+function flujoDe(db, taskId) {
+  if (!tieneEsquemaV2(db)) return null;
+  return flujoFila(db.get('SELECT * FROM teams_flow WHERE task_id = ?', taskId));
+}
+
+/** Escribe solo los campos pasados (los objetos se guardan como JSON). Crea la fila si falta. No hace nada en una base v1. */
+function upsertFlujo(db, taskId, patch) {
+  if (!tieneEsquemaV2(db)) return;
+  if (!db.get('SELECT 1 FROM teams_flow WHERE task_id = ?', taskId)) db.run('INSERT INTO teams_flow (task_id, updated_at) VALUES (?, ?)', taskId, ahoraIso());
+  const sets = ['updated_at = ?'];
+  const vals = [ahoraIso()];
+  for (const [k, v] of Object.entries(patch)) {
+    sets.push(k + ' = ?');
+    vals.push(v !== null && typeof v === 'object' ? js(v) : (typeof v === 'boolean' ? (v ? 1 : 0) : v));
+  }
+  db.run(`UPDATE teams_flow SET ${sets.join(', ')} WHERE task_id = ?`, ...vals, taskId);
+}
+
+/**
+ * Comprobaciones básicas que el constructor reporta al entregar. Acepta objetos {name,status} o strings "nombre=PASS".
+ * Lo que no se puede interpretar se descarta: una comprobación ilegible no habilita nada.
+ */
+function normalizarChecks(evidence) {
+  const out = [];
+  for (const e of Array.isArray(evidence) ? evidence : []) {
+    if (typeof e === 'string') {
+      const m = /^\s*([\w.:-]{1,60})\s*[=:]\s*(PASS|FAIL|ERROR|SKIP)\s*$/i.exec(e);
+      if (m) out.push({ name: m[1], status: m[2].toUpperCase() });
+    } else if (e && typeof e === 'object' && (e.status || e.result)) {
+      out.push({ name: String(e.name || e.kind || e.gate || 'check').slice(0, 60), status: String(e.status || e.result).toUpperCase().slice(0, 12) });
+    }
+  }
+  return out;
+}
+
+const hayBloqueantesAbiertos = (db, taskId) => tieneEsquemaV2(db) && !!db.get(
+  "SELECT 1 FROM teams_findings WHERE task_id = ? AND severity = 'BLOQUEANTE' AND actionable = 1 AND state NOT IN ('VERIFIED_RESOLVED','DISMISSED_WITH_REASON')", taskId);
+
+/**
+ * ¿Esta entrega (aún VERIFYING) habilita a sus dependientes? Solo con comprobaciones básicas reportadas y sin fallo,
+ * tarea no HIGH (auth/migración/seguridad conservan el cierre síncrono), sin hallazgo bloqueante abierto ni revalidación
+ * pendiente. NO la declara verificada: DONE_VERIFIED sigue exigiendo los gates del sujeto exacto, y un gate crítico que
+ * falle después abre el STOP de su cadena como siempre.
+ */
+function entregaHabilita(db, dep) {
+  if (!dep || dep.state !== 'VERIFYING' || !tieneEsquemaV2(db)) return false;
+  if (!limitesDe(db, dep.plan_id).advance_on_delivery) return false;
+  if ((dep.effort_policy.tier || 'MEDIUM') === 'HIGH' || dep.risk === 'HIGH') return false;
+  const f = flujoDe(db, dep.id);
+  if (!f || !f.delivered_at) return false;
+  const checks = f.delivery_checks;
+  if (!checks.some((c) => c.status === 'PASS') || checks.some((c) => c.status === 'FAIL' || c.status === 'ERROR')) return false;
+  if (f.revalidar.length || hayBloqueantesAbiertos(db, dep.id)) return false;
+  return true;
+}
+
+/** Una dependencia cuenta como satisfecha si está verificada, o entregada y habilitante (política advance_on_delivery). */
+const dependenciaSatisfecha = (db, dep) => !!dep && (dep.state === 'DONE_VERIFIED' || entregaHabilita(db, dep));
 
 function publicar(db, despertar, ev) {
   const s = sesion(db) || {};
@@ -189,13 +337,49 @@ function validarTarea(t) {
   else if (t.allowed_files.some((f) => /(^|[\\/])\.\.([\\/]|$)/.test(String(f)) || path.isAbsolute(String(f)))) errores.push('ALCANCE_FUERA_DEL_PROYECTO');
   if (t.depends_on != null && !Array.isArray(t.depends_on)) errores.push('DEPENDENCIAS_NO_LISTA');
   if (t.risk != null && !RIESGOS.includes(t.risk)) errores.push('RIESGO_DESCONOCIDO');
+  for (const campo of ['criterios_de_revision', 'riesgos', 'decisiones_pendientes']) {
+    if (t[campo] != null && (!Array.isArray(t[campo]) || t[campo].some((x) => typeof x !== 'string' && (!x || typeof x !== 'object')))) errores.push(campo.toUpperCase() + '_NO_LISTA');
+  }
+  if (t.phase != null && !/^[\w .:-]{1,60}$/.test(String(t.phase))) errores.push('FASE_INVALIDA');
   return errores;
+}
+
+/**
+ * Referencias del dueño (URLs que el plan puede consultar). Solo http/https bien formadas: un file:, javascript: o cadena
+ * suelta no es una referencia. Aquí SOLO se guardan; descargarlas es trabajo de la investigación web, no del plan.
+ */
+function normalizarReferencias(refs) {
+  const ok = [];
+  const errores = [];
+  for (const r of Array.isArray(refs) ? refs : []) {
+    const url = typeof r === 'string' ? r : r && r.url;
+    const nota = typeof r === 'object' && r ? String(r.nota || '').slice(0, 300) : '';
+    let u = null;
+    try { u = new URL(String(url)); } catch { /* inválida */ }
+    if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password) { errores.push({ code: 'REFERENCIA_INVALIDA', url: String(url).slice(0, 120) }); continue; }
+    if (!ok.some((x) => x.url === u.href)) ok.push({ url: u.href, nota });
+  }
+  return { ok, errores };
+}
+
+/**
+ * Un sprint puede traer `tasks` planas o `phases: [{ id, objective, tasks }]` (sprints → fases → tareas). Se aplana a tareas con
+ * `phase`, que es lo que el scheduler consume; la forma plana de v1 pasa intacta.
+ */
+function normalizarSprints(plan) {
+  const sprints = Array.isArray(plan && plan.sprints) ? plan.sprints : [];
+  return sprints.map((s) => {
+    if (!s || !Array.isArray(s.phases)) return s;
+    const tasks = [...(Array.isArray(s.tasks) ? s.tasks : [])];
+    for (const f of s.phases) for (const t of (f && Array.isArray(f.tasks) ? f.tasks : [])) tasks.push(Object.assign({}, t, { phase: t.phase || (f.id || f.objective || null) }));
+    return Object.assign({}, s, { tasks });
+  });
 }
 
 function validarPlan(plan) {
   const errores = [];
   if (!plan || !String(plan.objective || '').trim()) errores.push({ code: 'SIN_OBJETIVO' });
-  const sprints = Array.isArray(plan && plan.sprints) ? plan.sprints : [];
+  const sprints = normalizarSprints(plan);
   if (!sprints.length) errores.push({ code: 'SIN_SPRINTS' });
   const todas = [];
   sprints.forEach((s, i) => {
@@ -205,6 +389,10 @@ function validarPlan(plan) {
       for (const code of validarTarea(t)) errores.push({ code, task: t && t.id });
     }
   });
+  if (plan && plan.referencias != null) {
+    if (!Array.isArray(plan.referencias)) errores.push({ code: 'REFERENCIAS_NO_LISTA' });
+    else errores.push(...normalizarReferencias(plan.referencias).errores);
+  }
   const ids = new Set(todas.map((t) => t.id));
   const { validarGrafo } = require('./spec-manager.cjs');
   const grafo = validarGrafo(todas.map((t) => ({
@@ -231,20 +419,30 @@ function identificarProyecto(root) {
  * nada: no arranca una cola vacía.
  */
 function init(root, opciones = {}) {
+  const r = initNucleo(root, opciones);
+  /* Activar prepara el canal y la continuidad (vista derivada de la base). Si ya existía un canal manual, se copia antes de reemplazarlo. */
+  if (r && r.status === 'ACTIVO') {
+    try { const c = require('./teams-canal.cjs').regenerar(root); r.canal = { status: c.status, importado: c.importado || null }; } catch (e) { r.canal = { status: 'ERROR', detalle: String(e.message).slice(0, 120) }; }
+  }
+  return r;
+}
+
+function initNucleo(root, opciones = {}) {
   const proyecto = identificarProyecto(root);
   if (!proyecto) return { status: 'PROYECTO_NO_IDENTIFICADO', detalle: 'falta .agentic/config.md o package.json' };
   if (!fs.existsSync(dbPath(root))) return { status: 'NOT_INITIALIZED', detalle: 'no hay memoria.db (akdd init primero)' };
-  const existe = lectura(root, (db) => !!db);
+  const desde = versionEsquema(root);
   let migracion = null;
-  if (!existe) {
+  if (desde !== 'V2') {
+    /* El esquema nuevo SOLO entra por aquí, con aprobación y respaldo: nunca al leer ni a escondidas. Una base v1 recibe únicamente las tablas v2. */
     if (!opciones.aprobarMigracion) {
-      return { status: 'MIGRACION_PENDIENTE', tablas: SCHEMA.length, comando: 'akdd teams init --aprobar-migracion', detalle: 'TEAMS añade tablas teams_* a memoria.db; se aplica con respaldo y solo si lo apruebas' };
+      return { status: 'MIGRACION_PENDIENTE', desde, tablas: desde === 'V1' ? SCHEMA_V2.length : SCHEMA.length, comando: 'akdd teams init --aprobar-migracion', detalle: 'TEAMS añade tablas teams_* a memoria.db; se aplica con respaldo y solo si lo apruebas' };
     }
     const r = dba.migrate(dbPath(root), {
-      statements: SCHEMA,
+      statements: desde === 'V1' ? SCHEMA_V2 : SCHEMA,
       run: (db) => db.run("INSERT OR REPLACE INTO teams_meta (key, value) VALUES ('schema_version', ?)", String(SCHEMA_VERSION)),
     });
-    migracion = { status: r.status, respaldo: r.backupPath };
+    migracion = { status: r.status, respaldo: r.backupPath, desde };
   }
   const roles = Object.assign({}, ROLES_DEFECTO, opciones.roles || {});
   for (const [rol, def] of Object.entries(roles)) {
@@ -255,9 +453,18 @@ function init(root, opciones = {}) {
   }
   return tx(root, (db, despertar) => {
     const previa = sesion(db);
-    const gen = (previa ? previa.session_generation : 0) + 1;
     /* El modelo exacto lo informa cada adapter al conectarse; aquí no se inventa. */
     const guardados = Object.fromEntries(Object.entries(roles).map(([r, d]) => [r, { host: d.host, model: d.model || null }]));
+    if (previa && previa.enabled) {
+      /* Activar de nuevo con la misma configuración es idempotente: no sube la generación ni invalida la sesión del constructor. */
+      const mismos = Object.keys(guardados).every((r) => previa.roles[r] && previa.roles[r].host === guardados[r].host) && Object.keys(previa.roles).length === Object.keys(guardados).length;
+      if (mismos) return { status: 'ACTIVO', session_generation: previa.session_generation, roles: previa.roles, migracion, ejecutando: false, idempotente: true, paused: previa.paused };
+      /* Reconfigurar roles de verdad es otra cosa: transición explícita y sin tareas en vuelo. */
+      if (!opciones.reconfigurar) return { status: 'RECONFIGURACION_REQUIERE_TRANSICION', roles_actuales: previa.roles, roles_pedidos: guardados, comando: 'akdd teams init --reconfigurar' };
+      const vivas = db.all("SELECT id FROM teams_tasks WHERE state IN ('RUNNING','VERIFYING')").map((r) => r.id);
+      if (vivas.length) return { status: 'TAREAS_ACTIVAS', tareas: vivas, detalle: 'cierra o pausa las tareas en curso antes de reconfigurar los roles' };
+    }
+    const gen = (previa ? previa.session_generation : 0) + 1;
     db.run(`INSERT INTO teams_sessions (id, enabled, paused, session_generation, project_id, roles, updated_at) VALUES (1, 1, 0, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET enabled = 1, paused = 0, session_generation = excluded.session_generation,
       project_id = excluded.project_id, roles = excluded.roles, updated_at = excluded.updated_at`, gen, proyecto, js(guardados), ahoraIso());
@@ -282,6 +489,8 @@ function continuar(root, { ahora = Date.now() } = {}) {
     if (!s || !s.enabled) return { status: 'DESACTIVADO' };
     db.run('UPDATE teams_sessions SET paused = 0, updated_at = ? WHERE id = 1', ahoraIso());
     const recuperadas = reclamarVencidos(db, ahora);
+    /* Correcciones IN_PROGRESS cuyo constructor dejó de latir vuelven a la cola para que otra sesión las tome con otro fencing. */
+    if (tieneEsquemaV2(db)) require('./teams-correcciones.cjs').reclamarVencidasEn(db, ahora);
     recalcular(db);
     publicar(db, despertar, { kind: 'RESUMED', producer: 'humano', target: 'builder', payload: { recuperadas } });
     return { status: 'ACTIVO', recuperadas };
@@ -299,6 +508,13 @@ function desactivar(root) {
       transicionar(db, t.id, { a: 'READY', cambios: { owner_id: null } });
     }
     db.run("UPDATE teams_attempts SET state = 'CANCELLED', finished_at = ? WHERE state IN ('ASSIGNED','RUNNING')", ahoraIso());
+    /* Desactivar conserva la historia: las correcciones en curso vuelven a ASSIGNED sin dueño (su registro de cambios queda). */
+    if (tieneEsquemaV2(db)) {
+      for (const f of db.all("SELECT id, revision, state FROM teams_findings WHERE state = 'IN_PROGRESS'")) {
+        db.run("UPDATE teams_findings SET state = 'ASSIGNED', owner_id = NULL, lease_until = NULL, revision = revision + 1, updated_at = ? WHERE id = ?", ahoraIso(), f.id);
+        db.run('INSERT INTO teams_finding_log (finding_id, revision, from_state, to_state, actor, note, at) VALUES (?,?,?,?,?,?,?)', f.id, f.revision + 1, f.state, 'ASSIGNED', 'sistema', 'TEAMS desactivado', ahoraIso());
+      }
+    }
     publicar(db, despertar, { kind: 'SESSION_DISABLED', producer: 'humano', target: 'builder' });
     return { status: 'DESACTIVADO', leases_liberados: liberados, historial: 'conservado' };
   });
@@ -344,7 +560,8 @@ function crearPlan(root, plan) {
     const malGrafo = new Map();
     for (const e of v.grafo) if (!malGrafo.has(e.task)) malGrafo.set(e.task, e.code);
     let orden = 0;
-    plan.sprints.forEach((sp, i) => {
+    const v2 = tieneEsquemaV2(db);
+    normalizarSprints(plan).forEach((sp, i) => {
       const sprintId = sp.id || `${planId}-S${i + 1}`;
       db.run('INSERT INTO teams_sprints (id, plan_id, n, objective, state) VALUES (?,?,?,?,?)', sprintId, planId, i + 1, sp.objective || null, 'ACTIVE');
       for (const t of sp.tasks) {
@@ -355,13 +572,82 @@ function crearPlan(root, plan) {
         t.id, planId, sprintId, t.objective, js(t.acceptance), js(t.depends_on || []), js(t.allowed_files), decision.risk || t.risk || 'MEDIUM',
         js({ tier: decision.tier, required_gates: decision.required_gates, required_roles: decision.required_roles, policy_version: decision.policy_version, policy_id: decision.policy_id || null, no_aplica: decision.no_aplica || [], origen: 'teams' }),
         estado, Number(t.priority) || 0, orden++, malGrafo.get(t.id) || null, '[]', '[]', ahoraIso(), ahoraIso());
+        if (v2) {
+          upsertFlujo(db, t.id, {
+            phase: t.phase || null, review_criteria: t.criterios_de_revision || [], risks: t.riesgos || [], pending_decisions: t.decisiones_pendientes || [],
+          });
+        }
       }
     });
+    if (v2) {
+      /* Referencias del dueño: se guardan (no se descargan aquí). El plan nace en revisión 1. */
+      for (const r of normalizarReferencias(plan.referencias).ok) {
+        db.run('INSERT OR IGNORE INTO teams_plan_refs (plan_id, url, nota, added_revision) VALUES (?,?,?,1)', planId, r.url, r.nota);
+      }
+      db.run('INSERT INTO teams_plan_deltas (plan_id, revision, kind, payload, created_at) VALUES (?,?,?,?,?)', planId, 1, 'CREATED', js({ tareas: v.tareas.map((t) => t.id) }), ahoraIso());
+    }
     /* Lo que depende de un nodo roto tampoco arranca. */
     propagarBloqueoGrafo(db, planId);
     recalcular(db);
     publicar(db, despertar, { kind: 'PLAN_CREATED', producer: 'director', target: 'builder', payload: { plan_id: planId } });
-    return { status: 'PLAN_GUARDADO', plan_id: planId, tareas: tareas(db, planId).map((t) => ({ id: t.id, state: t.state, tier: t.effort_policy.tier, blocked_reason: t.blocked_reason })) };
+    const lista = tareas(db, planId);
+    /* El primer lote existe ANTES de arrancar al constructor: es lo que ya está READY al guardar el plan. */
+    return {
+      status: 'PLAN_GUARDADO', plan_id: planId, revision: 1,
+      primer_lote: lista.filter((t) => t.state === 'READY').map((t) => t.id),
+      referencias: v2 ? normalizarReferencias(plan.referencias).ok.length : 0,
+      tareas: lista.map((t) => ({ id: t.id, state: t.state, tier: t.effort_policy.tier, blocked_reason: t.blocked_reason })),
+    };
+  });
+}
+
+/**
+ * Cambio de plan = nueva revisión con delta, NUNCA un reemplazo silencioso: las tareas ya aceptadas (cualquier estado distinto de
+ * PENDING/READY sin dueño) no se tocan. Admite añadir tareas y referencias; cancelar una tarea aún sin empezar. Pide la capa v2.
+ */
+function revisarPlan(root, { plan_id, agregar = [], cancelar = [], referencias = [], motivo = null }) {
+  const errores = [];
+  for (const t of agregar) for (const code of validarTarea(t)) errores.push({ code, task: t && t.id });
+  const refs = normalizarReferencias(referencias);
+  errores.push(...refs.errores);
+  if (errores.length) return { status: 'PLAN_INVALIDO', errores };
+  return tx2(root, (db, despertar) => {
+    const s = sesion(db);
+    if (!s || !s.enabled) return { status: 'DESACTIVADO' };
+    const plan = db.get(plan_id ? 'SELECT * FROM teams_plans WHERE id = ?' : 'SELECT * FROM teams_plans ORDER BY created_at DESC LIMIT 1', ...(plan_id ? [plan_id] : []));
+    if (!plan) return { status: 'PLAN_DESCONOCIDO' };
+    const existentes = new Set(tareas(db).map((t) => t.id));
+    for (const t of agregar) if (existentes.has(t.id)) return { status: 'PLAN_INVALIDO', errores: [{ code: 'ID_DUPLICADO_EN_BASE', task: t.id }] };
+    const todas = tareas(db, plan.id).concat(agregar.map((t) => ({ id: t.id, depends_on: t.depends_on || [] })));
+    const ids = new Set(todas.map((t) => t.id));
+    const { validarGrafo } = require('./spec-manager.cjs');
+    const grafo = validarGrafo(todas.map((t) => ({ id: t.id, dep_ids: (t.depends_on || []).filter((d) => ids.has(d)), missing_deps: (t.depends_on || []).filter((d) => !ids.has(d)) })));
+    if (grafo.length) return { status: 'PLAN_INVALIDO', errores: grafo.map((e) => ({ code: e.code, task: e.task })) };
+    for (const id of cancelar) {
+      const t = tarea(db, id);
+      if (!t || t.plan_id !== plan.id) return { status: 'TAREA_DESCONOCIDA', task: id };
+      if (!['PENDING', 'READY'].includes(t.state) || t.owner_id) return { status: 'TAREA_YA_ACEPTADA', task: id, estado: t.state, detalle: 'una tarea en curso o cerrada no se reemplaza en silencio' };
+    }
+    const rev = plan.revision + 1;
+    const sprintId = (db.get('SELECT id FROM teams_sprints WHERE plan_id = ? ORDER BY n DESC LIMIT 1', plan.id) || {}).id || null;
+    let orden = (db.get('SELECT MAX(orden) AS o FROM teams_tasks WHERE plan_id = ?', plan.id).o || 0) + 1;
+    for (const t of agregar) {
+      const decision = decidirEsfuerzo(root, t);
+      db.run(`INSERT INTO teams_tasks (id, plan_id, sprint_id, objective, acceptance, depends_on, allowed_files, risk, effort_policy,
+        state, priority, orden, failed_hashes, evidence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      t.id, plan.id, t.sprint_id || sprintId, t.objective, js(t.acceptance), js(t.depends_on || []), js(t.allowed_files), decision.risk || t.risk || 'MEDIUM',
+      js({ tier: decision.tier, required_gates: decision.required_gates, required_roles: decision.required_roles, policy_version: decision.policy_version, policy_id: decision.policy_id || null, no_aplica: decision.no_aplica || [], origen: 'teams' }),
+      'PENDING', Number(t.priority) || 0, orden++, '[]', '[]', ahoraIso(), ahoraIso());
+      upsertFlujo(db, t.id, { phase: t.phase || null, review_criteria: t.criterios_de_revision || [], risks: t.riesgos || [], pending_decisions: t.decisiones_pendientes || [] });
+    }
+    for (const id of cancelar) transicionar(db, id, { a: 'CANCELLED', cambios: { blocked_reason: 'CANCELADA_POR_REVISION_DE_PLAN:' + rev } });
+    for (const r of refs.ok) db.run('INSERT OR IGNORE INTO teams_plan_refs (plan_id, url, nota, added_revision) VALUES (?,?,?,?)', plan.id, r.url, r.nota, rev);
+    db.run('UPDATE teams_plans SET revision = ?, updated_at = ? WHERE id = ?', rev, ahoraIso(), plan.id);
+    db.run('INSERT INTO teams_plan_deltas (plan_id, revision, kind, payload, created_at) VALUES (?,?,?,?,?)', plan.id, rev, 'REVISED',
+      js({ agregadas: agregar.map((t) => t.id), canceladas: cancelar, referencias: refs.ok.map((r) => r.url), motivo }), ahoraIso());
+    recalcular(db);
+    publicar(db, despertar, { kind: 'PLAN_REVISED', producer: 'director', target: 'builder', payload: { plan_id: plan.id, revision: rev, agregadas: agregar.map((t) => t.id), canceladas: cancelar } });
+    return { status: 'PLAN_REVISADO', plan_id: plan.id, revision: rev, agregadas: agregar.map((t) => t.id), canceladas: cancelar };
   });
 }
 
@@ -378,6 +664,26 @@ function descendientes(db, ids) {
   return [...fuera];
 }
 
+/**
+ * Una dependencia dejó de estar entregada-y-sana (falló su verificación o recibió un hallazgo): lo que ya EMPEZÓ sobre ella queda
+ * marcado para revalidar. No se cancela ni se revierte nada: el trabajo continúa, pero no puede cerrarse sin rehacer su verificación.
+ */
+function marcarDependientesRevalidar(db, despertar, taskId, motivo) {
+  if (!tieneEsquemaV2(db)) return [];
+  const marcadas = [];
+  for (const id of descendientes(db, [taskId]).filter((x) => x !== taskId)) {
+    const t = tarea(db, id);
+    if (!t || !['RUNNING', 'VERIFYING'].includes(t.state)) continue; /* lo aún no empezado se construirá sobre el código ya corregido */
+    const f = flujoDe(db, id);
+    const prev = f ? f.revalidar : [];
+    if (prev.includes(motivo)) continue;
+    upsertFlujo(db, id, { revalidar: prev.concat(motivo) });
+    marcadas.push(id);
+  }
+  if (marcadas.length) publicar(db, despertar, { kind: 'REVALIDATE', producer: 'teams', target: 'director', task_id: taskId, payload: { motivo, tareas: marcadas } });
+  return marcadas;
+}
+
 function propagarBloqueoGrafo(db, planId) {
   const rotas = tareas(db, planId).filter((t) => t.state === 'BLOCKED_DEPENDENCY').map((t) => t.id);
   for (const id of descendientes(db, rotas)) {
@@ -386,14 +692,18 @@ function propagarBloqueoGrafo(db, planId) {
   }
 }
 
-/** PENDING con todas sus dependencias DONE_VERIFIED pasa a READY. Nada más promueve. */
+/**
+ * PENDING con todas sus dependencias satisfechas pasa a READY. Satisfecha = DONE_VERIFIED, o entregada con comprobaciones
+ * básicas bajo la política advance_on_delivery (la auditoría corre por detrás). Una dependencia realmente sin satisfacer
+ * (sin entregar, fallida, bloqueada) sigue bloqueando su rama. Nada más promueve.
+ */
 function recalcular(db) {
   const todas = tareas(db);
   const porId = new Map(todas.map((t) => [t.id, t]));
   const promovidas = [];
   for (const t of todas) {
     if (t.state !== 'PENDING') continue;
-    if (t.depends_on.every((d) => porId.get(d) && porId.get(d).state === 'DONE_VERIFIED')) {
+    if (t.depends_on.every((d) => dependenciaSatisfecha(db, porId.get(d)))) {
       transicionar(db, t.id, { de: ['PENDING'], a: 'READY' });
       promovidas.push(t.id);
     }
@@ -461,9 +771,15 @@ function asignar(root, { owner_id, rol = 'builder', ahora = Date.now() } = {}) {
     if (!s || !s.enabled) return { status: 'DESACTIVADO' };
     if (s.paused) return { status: 'PAUSADO' };
     if (stopGlobalAbierto(db)) return { status: 'STOP_GLOBAL' };
+    /* Cierre solicitado o aceptado: el constructor no toma trabajo nuevo (un hallazgo en carrera reabre el cierre y lo libera). */
+    const cierre = tieneEsquemaV2(db) && db.get("SELECT close_id, state FROM teams_closure WHERE state IN ('REQUESTED','ACKED') ORDER BY requested_at DESC LIMIT 1");
+    if (cierre) return { status: cierre.state === 'ACKED' ? 'CERRADO' : 'CIERRE_SOLICITADO', close_id: cierre.close_id };
     reclamarVencidos(db, ahora);
     recalcular(db);
-    const propia = db.get("SELECT id FROM teams_tasks WHERE owner_id = ? AND state IN ('READY','RUNNING','VERIFYING')", owner_id);
+    /* Una entrega habilitante (VERIFYING con comprobaciones) NO ocupa al constructor: puede seguir con lo siguiente mientras el director
+       verifica y los revisores auditan. Sin esas comprobaciones, o en tareas HIGH, sigue ocupándolo como siempre. */
+    const propia = db.all("SELECT * FROM teams_tasks WHERE owner_id = ? AND state IN ('READY','RUNNING','VERIFYING')", owner_id).map(fila)
+      .find((t) => t.state !== 'VERIFYING' || !entregaHabilita(db, t));
     if (propia) return { status: 'OCUPADO', task_id: propia.id };
     const cuarentena = recursosEnCuarentena(db);
     const candidatas = db.all("SELECT * FROM teams_tasks WHERE state = 'READY' AND owner_id IS NULL ORDER BY priority DESC, orden ASC").map(fila);
@@ -563,6 +879,10 @@ function entregarResultado(root, r, { ahora = Date.now() } = {}) {
     db.run("UPDATE teams_attempts SET state = 'DELIVERED', subject_hash = ?, result = ? WHERE task_id = ? AND fencing = ? AND state = 'RUNNING'",
       r.subject_hash, js({ files: r.files || [], evidence: r.evidence || [] }), t.id, r.fencing);
     const v = transicionar(db, t.id, { de: ['RUNNING'], a: 'VERIFYING', cambios: { subject_hash: r.subject_hash } });
+    /* Estado de flujo: BUILDER_DELIVERED. Las comprobaciones básicas que trae la entrega pueden habilitar lo siguiente (advance_on_delivery). */
+    const flujoPrevio = flujoDe(db, t.id);
+    upsertFlujo(db, t.id, { delivered_at: ahoraIso(), delivery_checks: normalizarChecks(r.evidence), current_hash: r.subject_hash, espera_deps: false, revalidar: flujoPrevio && flujoPrevio.revalidar.length ? flujoPrevio.revalidar : [] });
+    recalcular(db);
     return registrarDesenlace(db, despertar, r, v, { status: 'VERIFICANDO', revision: v.revision });
   });
 }
@@ -599,6 +919,15 @@ function verificar(root, { task_id, expected_revision, event_id, gates = [] }) {
     };
     if (t.state !== 'VERIFYING') return cerrar({ status: 'TRANSICION_INVALIDA', estado: t.state });
     if (expected_revision != null && expected_revision !== t.revision) return cerrar({ status: 'REVISION_OBSOLETA', actual: t.revision });
+    /* Una tarea puede EMPEZAR sobre una entrega aún sin verificar (advance_on_delivery), pero no cerrarse sobre ella: DONE_VERIFIED exige
+       las dependencias verificadas. No se publica evento con event_id: el reintento posterior, ya con las dependencias cerradas, debe poder correr. */
+    const sinVerificar = t.depends_on.filter((d) => { const x = tarea(db, d); return !x || x.state !== 'DONE_VERIFIED'; });
+    if (sinVerificar.length) {
+      upsertFlujo(db, task_id, { espera_deps: true });
+      return { status: 'ESPERA_DEPENDENCIAS', faltan: sinVerificar, estado: 'VERIFYING' };
+    }
+    upsertFlujo(db, task_id, { espera_deps: false });
+    if (hayBloqueantesAbiertos(db, task_id)) return { status: 'BLOQUEADO_POR_CORRECCION', estado: 'VERIFYING', detalle: 'hay una corrección BLOQUEANTE de esta tarea sin verificar' };
     const porGate = new Map(gates.map((g) => [g.gate, g]));
     const testGate = gates.find(g => ['tdd','tests'].includes(g.gate));
     if (testGate) for (const name of ['relevant-check','affected-tests','full-suite','tests']) if (!porGate.has(name)) porGate.set(name,testGate);
@@ -616,7 +945,10 @@ function verificar(root, { task_id, expected_revision, event_id, gates = [] }) {
       return cerrar({ status: 'STOP', motivo: 'PROTECTED_ROTO', stop_id: s.id, afectadas: s.afectadas });
     }
     if (fallidos.length) {
-      return cerrar(fallo(db, despertar, t, 'GATE_FAIL:' + fallidos.map((g) => g.gate).join(','), t.subject_hash));
+      const r = cerrar(fallo(db, despertar, t, 'GATE_FAIL:' + fallidos.map((g) => g.gate).join(','), t.subject_hash));
+      /* Lo que ya empezó sobre esta entrega queda marcado: su verificación tendrá que rehacerse contra lo que salga de la reparación. */
+      marcarDependientesRevalidar(db, despertar, t.id, 'DEP_FALLO_VERIFICACION:' + t.id);
+      return r;
     }
     const faltan = gatesRequeridos(t).filter((g) => {
       const r = porGate.get(g);
@@ -626,6 +958,11 @@ function verificar(root, { task_id, expected_revision, event_id, gates = [] }) {
     if (faltan.length) return cerrar({ status: 'SIN_EVIDENCIA_SUFICIENTE', faltan, estado: 'VERIFYING' });
     const evidencia = gatesRequeridos(t).map((g) => ({ gate: g, subject_hash: t.subject_hash, execution_id: porGate.get(g).execution_id || null }));
     const v = transicionar(db, task_id, { de: ['VERIFYING'], a: 'DONE_VERIFIED', cambios: { evidence: evidencia } });
+    /* DIRECTOR_VERIFIED. El registro de memoria queda PENDIENTE hasta que el puente de cierre lo marque (REGISTERED / NO_LEARNING):
+       verificado y registrado son estados distintos, y el cierre final exige los dos. Sin la cola de memoria de 3.20.1 no hay nada que registrar. */
+    const conMemoria = tieneEsquemaV2(db) && limitesDe(db, t.plan_id).memory_closure_required
+      && !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mem_jobs'");
+    upsertFlujo(db, task_id, { verified_at: ahoraIso(), revalidar: [], espera_deps: false, memory_state: conMemoria ? 'PENDING' : 'NO_APLICA' });
     db.run('DELETE FROM teams_leases WHERE task_id = ?', task_id);
     db.run("UPDATE teams_attempts SET state = 'VERIFIED', finished_at = ? WHERE task_id = ? AND state = 'DELIVERED'", ahoraIso(), task_id);
     const liberadas = recalcular(db);
@@ -837,16 +1174,88 @@ function estado(root) {
     const ts = tareas(db);
     const conteo = Object.fromEntries(ESTADOS.map((e) => [e, 0]));
     for (const t of ts) conteo[t.state] = (conteo[t.state] || 0) + 1;
-    const plan = db.get("SELECT id, objective, state FROM teams_plans ORDER BY created_at DESC LIMIT 1");
+    const plan = db.get("SELECT id, objective, state, revision FROM teams_plans ORDER BY created_at DESC LIMIT 1");
     const ultimo = db.get('SELECT MAX(seq) AS seq FROM teams_events');
-    return {
+    const v2 = tieneEsquemaV2(db);
+    const cierre = v2 ? require('./teams-cierre.cjs') : null;
+    const base = {
       inicializado: true, enabled: s.enabled, paused: !!s.paused, session_generation: s.session_generation || 0, roles: s.roles || {},
       plan: plan || null, conteo,
-      tareas: ts.map((t) => ({ id: t.id, sprint_id: t.sprint_id, state: t.state, owner_id: t.owner_id, tier: t.effort_policy.tier, risk: t.risk, depends_on: t.depends_on, blocked_reason: t.blocked_reason })),
+      tareas: ts.map((t) => {
+        const o = { id: t.id, sprint_id: t.sprint_id, state: t.state, owner_id: t.owner_id, tier: t.effort_policy.tier, risk: t.risk, depends_on: t.depends_on, blocked_reason: t.blocked_reason };
+        if (v2) { const fl = cierre.flujoDeTarea(db, t); if (fl) { o.flujo = fl.estado; o.fase = fl.fase; o.audit_pending = fl.audit_pending; o.correction_pending = fl.correction_pending; o.memory_state = fl.memory_state; o.sujeto_vigente = fl.sujeto_vigente; if (fl.revalidar.length) o.revalidar = fl.revalidar; } }
+        return o;
+      }),
       leases: db.all('SELECT resource, owner_id, task_id, fencing, expires_ms FROM teams_leases'),
       pendientes: db.all('SELECT id, scope, reason_code FROM teams_decisions WHERE resolved_at IS NULL'),
       ultimo_seq: (ultimo && ultimo.seq) || 0,
+      esquema: v2 ? 'V2' : 'V1',
     };
+    if (!v2) return Object.assign(base, { v2: false, nota: 'esquema TEAMS v2 sin aplicar: correcciones, revisores, cierre y avance medido requieren akdd teams init --aprobar-migracion' });
+    const corr = require('./teams-correcciones.cjs').resumen(db);
+    const bld = require('./teams-builder.cjs').estadoBuilder(db);
+    const R = require('./teams-revision.cjs');
+    const regs = R.revisores(db);
+    const refs = db.all('SELECT url, nota, added_revision, downloaded FROM teams_plan_refs ORDER BY added_revision').map((r) => ({ url: r.url, nota: r.nota, revision: r.added_revision, descargada: !!r.downloaded }));
+    const camp = db.get('SELECT run_id, started_at, ticks, last_tick_at, mode FROM teams_campaign WHERE id = 1');
+    const pendientesDueno = db.all('SELECT id, reason_code, question, affected_tasks FROM teams_decisions WHERE resolved_at IS NULL AND decision_required = 1')
+      .map((d) => ({ id: d.id, pregunta: d.question, reason_code: d.reason_code, bloquea: pj(d.affected_tasks, []) }));
+    return Object.assign(base, {
+      v2: true, campana: cierre.campanaDe(db), avance: cierre.avanceDe(db), ejecucion: camp || null, builder: bld,
+      revisores: regs, revisiones_sin_consumir: R.sinConsumir(db).length,
+      correcciones: { por_estado: corr.por_estado, por_triar: corr.por_triar, abiertas_accionables: corr.abiertas_accionables, bloqueadas_humano: corr.bloqueadas_humano,
+        activas: corr.activas.slice(0, 20).map((f) => ({ id: f.id, severity: f.severity, state: f.state, task_id: f.task_id, criterio: f.criterion, prioridad: f.prioridad })) },
+      cierre: cierre.cierreVigente(db), referencias: refs, pendientes_dueno: pendientesDueno,
+      auditoria: {
+        sin_registrar: R.ROLES.filter((r) => !regs[r]), degradados: R.ROLES.filter((r) => regs[r] && regs[r].degradado),
+        tareas_con_auditoria_pendiente: base.tareas.filter((t) => t.audit_pending).map((t) => t.id), informes_sin_consumir: R.sinConsumir(db).length,
+      },
+    });
+  });
+}
+
+/**
+ * Revalida una tarea ya DONE_VERIFIED cuyo código o cuyas dependencias cambiaron (corrección entregada, dependencia reparada).
+ * Exige los gates de la tarea con PASS y evidencia sobre el sujeto VIGENTE (el hash tras la corrección), o una declaración
+ * explícita de "sin efecto" con su razón. Un FAIL no limpia nada: la tarea sigue marcada y el director decide.
+ */
+function revalidar(root, { task_id, gates = [], sin_efecto = null, event_id = null }) {
+  return tx2(root, (db, despertar) => {
+    const t = tarea(db, task_id);
+    if (!t) return { status: 'TAREA_DESCONOCIDA' };
+    const f = flujoDe(db, task_id);
+    if (!f || !f.revalidar.length) return { status: 'NADA_QUE_REVALIDAR' };
+    if (t.state !== 'DONE_VERIFIED') return { status: 'TRANSICION_INVALIDA', estado: t.state, detalle: 'una tarea en curso o en verificación se revalida con su verificación normal' };
+    const sujeto = f.current_hash || t.subject_hash;
+    if (sin_efecto) {
+      const razon = String(sin_efecto).trim().slice(0, 300);
+      if (!razon) return { status: 'SIN_RAZON' };
+      upsertFlujo(db, task_id, { revalidar: [] });
+      publicar(db, despertar, { event_id, kind: 'REVALIDATED', producer: 'director', target: 'builder', task_id, payload: { sin_efecto: razon, motivos: f.revalidar } });
+      return { status: 'REVALIDADA', sin_efecto: razon };
+    }
+    const fallidos = gates.filter((g) => g.status === 'FAIL' && (!g.subject_hash || g.subject_hash === sujeto));
+    if (fallidos.length) {
+      publicar(db, despertar, { kind: 'REVALIDATION_FAILED', producer: 'director', target: 'director', task_id, payload: { gates: fallidos.map((g) => g.gate) } });
+      return { status: 'REVALIDACION_FALLIDA', gates: fallidos.map((g) => g.gate), detalle: 'la tarea sigue marcada: el director abre una corrección sobre ella' };
+    }
+    const porGate = new Map(gates.map((g) => [g.gate, g]));
+    const faltan = gatesRequeridos(t).filter((g) => { const r = porGate.get(g); return !r || r.subject_hash !== sujeto || !allowsVerifiedClose(r, { root, paths: t.allowed_files, gate: g }); });
+    if (faltan.length) return { status: 'SIN_EVIDENCIA_SUFICIENTE', faltan, sujeto };
+    db.run('UPDATE teams_tasks SET subject_hash = ?, evidence = ?, updated_at = ? WHERE id = ?', sujeto, js(gatesRequeridos(t).map((g) => ({ gate: g, subject_hash: sujeto, execution_id: porGate.get(g).execution_id || null, revalidada: true }))), ahoraIso(), task_id);
+    upsertFlujo(db, task_id, { revalidar: [] });
+    publicar(db, despertar, { event_id, kind: 'REVALIDATED', producer: 'director', target: 'builder', task_id, payload: { sujeto, motivos: f.revalidar } });
+    return { status: 'REVALIDADA', sujeto };
+  });
+}
+
+/** Tareas VERIFYING cuya verificación esperaba a sus dependencias y que ya pueden verificarse (las dependencias cerraron). */
+function verificacionesEnEspera(root) {
+  return lectura2(root, (db) => {
+    if (!db) return [];
+    return db.all('SELECT task_id FROM teams_flow WHERE espera_deps = 1').map((r) => tarea(db, r.task_id))
+      .filter((t) => t && t.state === 'VERIFYING' && t.depends_on.every((d) => { const x = tarea(db, d); return x && x.state === 'DONE_VERIFIED'; }))
+      .map((t) => ({ task_id: t.id, subject_hash: t.subject_hash, revision: t.revision, owner_id: t.owner_id, files: t.allowed_files }));
   });
 }
 
@@ -904,56 +1313,12 @@ function seccionHumana(archivo) {
   return txt.slice(i + MARCA_HUMANA_INICIO.length, j).replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 }
 
-/** Regenera `.legion/CONTINUIDAD.md` y `.legion/AUDITORIA-CURSOR.md`: un solo escritor, escritura atómica. */
+/**
+ * Regenera `.legion/CONTINUIDAD.md` y `.legion/AUDITORIA-CURSOR.md`. El render determinista vive en teams-canal.cjs (secciones del
+ * canal, un solo escritor, publicaciones serializadas con bloqueo y escritura atómica con revisión).
+ */
 function regenerarVistas(root) {
-  const e = estado(root);
-  if (!e.inicializado) return { status: 'SIN_TEAMS' };
-  const ps = pendientes(root);
-  const aviso = '<!-- Vista generada por akdd teams. No editar: se reescribe. Las órdenes van por `teams:` o `akdd teams`. -->\n';
-  const lista = (arr) => (arr.length ? arr.map((x) => '- ' + x).join('\n') : '- (ninguna)');
-  const por = (st) => e.tareas.filter((t) => st.includes(t.state));
-  const continuidad = aviso + `# Continuidad — foto del momento\n\n**TEAMS:** ${e.enabled ? (e.paused ? 'activo, en pausa' : 'activo') : 'desactivado'} · sesión ${e.session_generation}\n`
-    + `**Roles:** ${Object.entries(e.roles).map(([r, d]) => `${r} = ${d.host}${d.model ? ' (' + d.model + ')' : ''}`).join(' · ') || '(sin roles)'}\n`
-    + `**Plan:** ${e.plan ? e.plan.id + ' — ' + e.plan.objective : '(sin plan)'}\n\n`
-    + `## Cerrado y verificado\n${lista(por(['DONE_VERIFIED']).map((t) => t.id))}\n\n`
-    + `## Corriendo ahora\n${lista(por(['RUNNING', 'VERIFYING']).map((t) => `${t.id} (${t.state}, ${t.owner_id || 'sin dueño'})`))}\n\n`
-    + `## Preguntas sin responder\n${lista(ps.map((p) => `${p.id} [${p.scope}] ${p.question || p.reason_code} → bloquea ${p.affected_tasks.join(', ') || 'nada'}`))}\n\n`
-    + `## Pendiente, sin arrancar\n${lista(por(['PENDING', 'READY']).map((t) => t.id))}\n\n`
-    + `## Bloqueado o revertido\n${lista(por(['BLOCKED_HUMAN', 'BLOCKED_DEPENDENCY', 'BLOCKED_TECHNICAL', 'REVERTED']).map((t) => `${t.id} (${t.state}: ${t.blocked_reason || ''})`))}\n\n`
-    + `## Última actualización\n${ahoraIso()} (reloj del sistema, evento ${e.ultimo_seq})\n`;
-  const fCanal = path.join(root, '.legion', 'AUDITORIA-CURSOR.md');
-  const humano = seccionHumana(fCanal);
-  /* Envoltorios por rol: cada sesión lee los suyos desde el canal sin que nadie se los pegue. */
-  const envoltorios = (rol) => {
-    const evs = delta(root, { rol, limite: 50 }).eventos;
-    if (!evs.length) return '- (nada nuevo)\n';
-    return evs.map((ev) => '```\n<<<AKDD-TEAMS v1\n' + JSON.stringify({ kind: 'EVENT', rol, seq: ev.seq, event_kind: ev.kind, task_id: ev.task_id, revision: ev.revision, payload: ev.payload })
-      + '\nAKDD-TEAMS>>>\n```').join('\n') + '\n';
-  };
-  /* H02: paquetes de contexto aún sin ACK, para la sesión que no tiene otra vía. Solo los pendientes (compacto); fail-soft. */
-  const paquetes = () => {
-    try {
-      const tp = require('./teams-packets.cjs');
-      const out = [];
-      for (const rol of ['builder', 'director']) {
-        for (const w of (tp.paquetesPendientes(root, { recipient_role: rol }).paquetes || [])) {
-          out.push('```\n<<<AKDD-TEAMS v1\n' + JSON.stringify({ kind: 'PACKET', rol, packet: w }) + '\nAKDD-TEAMS>>>\n```');
-        }
-      }
-      return out.length ? out.join('\n') + '\n' : '- (ninguno pendiente de ACK)\n';
-    } catch { return '- (no disponible)\n'; }
-  };
-  const auditoria = aviso + `# Canal TEAMS — vista\n\nLa cola real vive en la base. Para responder desde fuera, pega un bloque:\n\n`
-    + '```\n<<<AKDD-TEAMS v1\n{"kind":"RESULT","task_id":"...","event_id":"...","owner_id":"...","fencing":0,"subject_hash":"...","files":[]}\nAKDD-TEAMS>>>\n```\n\n'
-    + `## Tareas para el constructor\n${lista(por(['READY']).map((t) => `${t.id} [${t.tier}]`))}\n\n`
-    + `## En verificación del director\n${lista(por(['VERIFYING']).map((t) => t.id))}\n\n`
-    + `## Entregas para el constructor (envoltorio)\n${envoltorios('builder')}\n`
-    + `## Entregas para el director (envoltorio)\n${envoltorios('director')}\n`
-    + `## Paquetes de contexto pendientes de ACK (envoltorio)\n${paquetes()}\n`
-    + `## Notas de la persona\n${MARCA_HUMANA_INICIO}\n${humano}\n${MARCA_HUMANA_FIN}\n`;
-  escribirAtomico(path.join(root, '.legion', 'CONTINUIDAD.md'), continuidad);
-  escribirAtomico(fCanal, auditoria);
-  return { status: 'OK', archivos: ['.legion/CONTINUIDAD.md', '.legion/AUDITORIA-CURSOR.md'] };
+  return require('./teams-canal.cjs').regenerar(root);
 }
 
 const BLOQUE = /<<<AKDD-TEAMS v1\r?\n([\s\S]*?)\r?\nAKDD-TEAMS>>>/g;
@@ -980,7 +1345,23 @@ function importarRespuesta(root, texto) {
 const ACCIONES = {
   activar: 'init', plan: 'plan', ejecutar: 'run', estado: 'status', pausa: 'pause', pausar: 'pause',
   continuar: 'resume', desactivar: 'disable', pendientes: 'pending', resolver: 'resolve',
+  avance: 'progress', cerrar: 'close',
 };
+
+/** Nombres en español (CLI y chat) a accion canonica. Una sola tabla: CLI, MCP y chat comparten el mismo backend. */
+const ALIAS = {
+  'conectar-builder': 'connect-builder', 'builder-listo': 'builder-ready', correcciones: 'findings', revision: 'review',
+  cerrar: 'close', 'cerrar-ack': 'close-ack', 'confirmar-cierre': 'close-confirm', 'reabrir-campana': 'reopen-campaign', avance: 'progress',
+  ronda: 'round', reportar: 'report', revalidar: 'revalidate', 'revisar-plan': 'revise-plan', 'importar-canal': 'import-channel', memoria: 'memory-mark',
+};
+
+/** Sub-acciones de `findings` y `review` (espanol o ingles) a funcion del modulo. */
+const SUB_CORRECCIONES = {
+  'añadir': 'añadir', anadir: 'añadir', add: 'añadir', publicar: 'publicarCorreccion', promover: 'promover', descartar: 'descartar', tomar: 'tomar', entregar: 'entregar',
+  reanudar: 'reanudar', latido: 'latido', soltar: 'soltar', verificar: 'verificar', reabrir: 'reabrir', bloquear: 'bloquear', desbloquear: 'desbloquear',
+  reubicar: 'reubicar', siguiente: 'siguiente', listar: 'listar',
+};
+const SUB_REVISION = { registrar: 'registrar', informar: 'informar', consumir: 'consumir', estado: 'estadoRevision', pendientes: 'pendientes', 'sujeto-final': 'sujetoFinalDe' };
 
 /** `teams: <acción> [args]` escrito por la persona. Fuera del inicio del mensaje no es una orden. */
 function parsearIntencion(texto) {
@@ -1000,32 +1381,99 @@ function parsearIntencion(texto) {
  * Entrada única para chat, CLI y MCP: misma acción → misma función → mismo estado.
  * `origen` de resolve lo fija quien llama (terminal interactiva o rastro del hook).
  */
-function ejecutarAccion(root, accion, a = {}) {
+/** Acciones que cambian estado: tras ellas el canal MD se refresca (vista derivada, un solo escritor). */
+const ESCRIBEN = new Set(['plan', 'revise-plan', 'run', 'connect-builder', 'builder-ready', 'pause', 'resume', 'disable', 'resolve', 'import', 'verify', 'revalidate', 'stop',
+  'close', 'close-ack', 'close-confirm', 'reopen-campaign', 'memory-mark', 'report', 'import-channel']);
+const SUB_LECTURA = new Set(['listar', 'siguiente', 'reubicar', 'estado', 'pendientes', 'sujeto-final', 'suspendidas']);
+
+function ejecutarAccion(root, accionPedida, a = {}) {
+  const accion = ALIAS[accionPedida] || accionPedida;
+  const r = ejecutarSinRefrescar(root, accionPedida, a);
+  const escribe = ESCRIBEN.has(accion) || ((accion === 'findings' || accion === 'review') && !SUB_LECTURA.has(String(a.sub || (a.params && a.params.sub) || (accion === 'findings' ? 'listar' : 'estado'))));
+  if (escribe && r && typeof r === 'object' && !Array.isArray(r) && !/DESCONOCID|MIGRACION_PENDIENTE|NO_AUTORIZADO|INVALID/.test(String(r.status || ''))) {
+    try { require('./teams-canal.cjs').refrescar(root); } catch { /* el canal es derivado */ }
+  }
+  return r;
+}
+
+function ejecutarSinRefrescar(root, accionPedida, a = {}) {
+  const accion = ALIAS[accionPedida] || accionPedida;
+  const P = a.params || {};
   switch (accion) {
-    case 'init': return init(root, { aprobarMigracion: !!a.aprobar_migracion, roles: a.roles, mismoHost: !!a.mismo_host });
+    case 'init': return init(root, { aprobarMigracion: !!a.aprobar_migracion, roles: a.roles, mismoHost: !!a.mismo_host, reconfigurar: !!a.reconfigurar });
     case 'plan': {
       const plan = a.plan || (a.archivo ? JSON.parse(fs.readFileSync(path.resolve(root, a.archivo), 'utf8')) : { objective: a.objetivo, sprints: [] });
       return crearPlan(root, plan);
     }
-    case 'run': {
-      const adapters = require('./teams-adapters.cjs');
-      const builder = adapters.adaptersDe(root).builder;
-      return { capabilities: builder.capabilities(), pasos: adapters.tick(root, { builder }) };
-    }
+    case 'revise-plan': return revisarPlan(root, Object.assign({}, P, a.plan_id ? { plan_id: a.plan_id } : {}));
+    /* run = validar (primer lote + builder READY + vigilancia + verificador) y correr un pase con el verificador REAL, no una pasada vacia. */
+    case 'run': return require('./teams-builder.cjs').ejecutar(root, {});
+    case 'connect-builder': return require('./teams-builder.cjs').conectar(root, { session_id: a.sesion || a.session_id || P.session_id, host: a.host || P.host, model: a.modelo || a.model || P.model, proyecto: a.proyecto || P.proyecto, protocolo: a.protocolo || P.protocolo || 'v2', loop: a.loop != null ? a.loop : P.loop, watch: a.watch != null ? a.watch : P.watch, capacidades: P.capacidades, listo: !!(a.listo || P.listo) });
+    case 'builder-ready': return require('./teams-builder.cjs').listo(root, { session_id: a.sesion || a.session_id || P.session_id, loop: a.loop != null ? a.loop : P.loop, watch: a.watch != null ? a.watch : P.watch });
     case 'status': return Object.assign(estado(root), { goal: require('./goal-check.cjs').evaluar(root, { sprint_id: a.sprint || null }) });
+    case 'progress': return require('./teams-cierre.cjs').avance(root);
     case 'pause': return pausar(root);
     case 'resume': return continuar(root);
     case 'disable': return desactivar(root);
     case 'pending': return pendientes(root);
     case 'resolve': return resolver(root, { pending_id: a.pending_id, decision: a.decision, decided_by: a.decided_by || 'humano', origen: a.origen });
     case 'import': return importarRespuesta(root, a.texto != null ? a.texto : fs.readFileSync(path.resolve(root, a.archivo), 'utf8'));
-    case 'verify': return verificar(root, { task_id: a.task_id, expected_revision: a.expected_revision, event_id: a.event_id, gates: a.gates || [] });
+    case 'revalidate': return revalidar(root, { task_id: a.task_id || P.task_id, gates: a.gates || P.gates || [], sin_efecto: a.sin_efecto || P.sin_efecto || null, event_id: a.event_id || P.event_id || null });
+    case 'verify': {
+      const r = verificar(root, { task_id: a.task_id, expected_revision: a.expected_revision, event_id: a.event_id, gates: a.gates || [] });
+      // Verificada → su cierre entra al núcleo común de Agentix (outbox, idempotente). Un fallo del puente no cambia el veredicto.
+      if (r && r.status === 'DONE_VERIFIED') { try { r.memoria = require('./teams-puente.cjs').alVerificar(root, a.task_id).status || 'EN_COLA'; } catch { r.memoria = 'PUENTE_NO_DISPONIBLE'; } }
+      return r;
+    }
     case 'stop': return stop(root, a);
     case 'views': return regenerarVistas(root);
-    default: return { status: 'ACCION_DESCONOCIDA', accion };
+    case 'findings': {
+      const fn = SUB_CORRECCIONES[String(a.sub || P.sub || 'listar')];
+      const m = require('./teams-correcciones.cjs');
+      return fn ? m[fn](root, P) : { status: 'SUBACCION_DESCONOCIDA', validas: Object.keys(SUB_CORRECCIONES) };
+    }
+    case 'review': {
+      const fn = SUB_REVISION[String(a.sub || P.sub || 'estado')];
+      const m = require('./teams-revision.cjs');
+      const r = fn ? m[fn](root, P) : { status: 'SUBACCION_DESCONOCIDA', validas: Object.keys(SUB_REVISION) };
+      // Un informe de revisor se enlaza al ciclo de la entrega revisada (no crea otro ciclo).
+      if (r && r.review_id && !r.duplicado && P.verdict && P.task_id) {
+        try { const t = leerTarea(root, P.task_id); if (t) require('./teams-puente.cjs').alRevisar(root, { plan_id: t.plan_id, task_id: P.task_id, revisor: P.role, subject_hash: P.subject_hash, veredicto: P.verdict, scope: P.scope_kind || 'TASK', motivo: P.justification || undefined }); } catch { /* auxiliar */ }
+      }
+      return r;
+    }
+    case 'close': return require('./teams-cierre.cjs').cerrar(root, P);
+    case 'close-ack': return require('./teams-cierre.cjs').ack(root, P);
+    case 'close-confirm': return require('./teams-cierre.cjs').confirmar(root, P);
+    case 'reopen-campaign': return require('./teams-cierre.cjs').reabrirCampana(root, P);
+    case 'memory-mark': return require('./teams-cierre.cjs').marcarMemoria(root, P);
+    case 'round': return require('./teams-md-session.cjs').ronda(root, P);
+    case 'report': return require('./teams-md-session.cjs').reportar(root, P);
+    case 'import-channel': return require('./teams-canal.cjs').importarManual(root, P);
+    default: return { status: 'ACCION_DESCONOCIDA', accion: accionPedida };
   }
 }
 
+module.exports = {
+  ejecutarAccion,
+  SCHEMA, SCHEMA_V1, SCHEMA_V2, SCHEMA_VERSION, ESTADOS, ESTADOS_FLUJO, ALCANCES, LIMITES_DEFECTO, ROLES_DEFECTO, GATES_CRITICOS,
+  init, pausar, continuar, desactivar, activo, versionEsquema,
+  validarTarea, validarPlan, crearPlan, revisarPlan, normalizarReferencias,
+  asignar, ack, heartbeat, entregarResultado, verificar, revalidar, gatesRequeridos, verificacionesEnEspera,
+  stop, pendientes, resolver, registrarOrigenHumano, restauracionFallida,
+  enlazarPunto, marcarRevertida, reintentar, invalidarPorRestore, actividadConstructor,
+  estado, leerTarea, delta, ackSeq, regenerarVistas, importarRespuesta, parsearIntencion,
+  normalizarRecurso,
+  /* Interno de la capa v2 (correcciones, revisores, cierre, canal): mismas primitivas transaccionales, una sola fuente de verdad. */
+  _i: {
+    tx, tx2, lectura, lectura2, sesion, publicar, tarea, tareas, fila, transicionar, siguienteFencing, normalizarRecurso, js, pj, sha, ahoraIso, errorTeams,
+    tieneEsquemaV2, flujoDe, upsertFlujo, limitesDe, entregaHabilita, hayBloqueantesAbiertos, marcarDependientesRevalidar, recalcular, descendientes, abrirStop,
+    dbPath, dirTeams, escribirAtomico, seccionHumana, MARCA_HUMANA_INICIO, MARCA_HUMANA_FIN, normalizarChecks,
+  },
+};
+
+// El CLI va DESPUÉS de module.exports: los módulos v2 (builder, cierre, correcciones...) leen `tm._i` al cargarse y,
+// ejecutado como script, el bloque anterior los cargaba con las exportaciones aún vacías (connect-builder fallaba).
 if (require.main === module) {
   const args = process.argv.slice(2);
   const opt = Object.fromEntries(args.filter((x) => x.startsWith('--')).map((x) => { const [k, ...v] = x.slice(2).split('='); return [k.replace(/-/g, '_'), v.length ? v.join('=') : true]; }));
@@ -1036,21 +1484,11 @@ if (require.main === module) {
   if (accion === 'plan' && pos[1]) { if (/\.json$/i.test(pos[1])) a.archivo = pos[1]; else a.objetivo = pos.slice(1).join(' '); }
   if (accion === 'resolve') Object.assign(a, { pending_id: pos[1], decision: pos.slice(2).join(' '), origen: process.stdin.isTTY ? 'cli-tty' : 'hook-prompt' });
   if (accion === 'import') a.archivo = pos[1];
+  if (accion === 'revise-plan' || accion === 'revisar-plan') a.params = JSON.parse(fs.readFileSync(path.resolve(root, opt.archivo), 'utf8'));
+  if (accion === 'revalidate' || accion === 'revalidar') { a.task_id = pos[1]; if (opt.gates) a.gates = JSON.parse(fs.readFileSync(path.resolve(root, opt.gates), 'utf8')); }
   if (accion === 'verify') { a.task_id = pos[1]; if (opt.gates) a.gates = JSON.parse(fs.readFileSync(path.resolve(root, opt.gates), 'utf8')); }
   let r;
   try { r = ejecutarAccion(root, accion, a); } catch (e) { r = { status: e.code || 'ERROR', detalle: e.message }; }
   console.log(JSON.stringify(r, null, 2));
   if (r && /INVALIDO|DESCONOCID|ERROR|NO_VERIFICADO/.test(String(r.status || ''))) process.exitCode = 1;
 }
-
-module.exports = {
-  ejecutarAccion,
-  SCHEMA, SCHEMA_VERSION, ESTADOS, ALCANCES, LIMITES_DEFECTO, ROLES_DEFECTO,
-  init, pausar, continuar, desactivar, activo,
-  validarTarea, validarPlan, crearPlan,
-  asignar, ack, heartbeat, entregarResultado, verificar, gatesRequeridos,
-  stop, pendientes, resolver, registrarOrigenHumano, restauracionFallida,
-  enlazarPunto, marcarRevertida, reintentar, invalidarPorRestore, actividadConstructor,
-  estado, leerTarea, delta, ackSeq, regenerarVistas, importarRespuesta, parsearIntencion,
-  normalizarRecurso,
-};

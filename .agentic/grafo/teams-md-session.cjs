@@ -214,6 +214,102 @@ class AdapterMdSesion {
   health() { const c = this.capabilities(); return { status: c.status, transport: c.transport, motivo: c.motivo || null }; }
 }
 
+/* ─── ayudantes sin JSON (v2): reportar y ronda ───────────────────────────── */
+
+const U = require('./teams-util.cjs');
+
+/**
+ * Reporte del constructor sin armar JSON: entrega de una tarea, de una corrección o una nota. Todo lo que dice es DATO: se
+ * redacta y se acota, y el director lo verifica con sus propios gates; el reporte no cierra nada.
+ *
+ *   entrega     { tarea, archivos?, comprobaciones? ("tests=PASS,build=PASS"), sesion? }
+ *               owner y fencing los toma del lease vigente de la tarea; si hay un constructor conectado, la sesión debe ser la suya.
+ *   correccion  { id, archivos?, nota?, dueno?, fencing?, sesion? }
+ *   nota        { texto }
+ */
+function reportar(root, o = {}) {
+  const tipo = String(o.tipo || '').toLowerCase();
+  const I = tm._i;
+  const sesionOk = () => I.lectura2(root, (db) => {
+    const b = db && db.get('SELECT session_id FROM teams_builder WHERE id = 1');
+    if (!b || !b.session_id) return null;
+    return o.sesion && o.sesion === b.session_id ? null : { status: 'SESION_NO_REGISTRADA', detalle: 'la sesión no es el constructor conectado (conectar-builder)' };
+  });
+  if (tipo === 'entrega') {
+    const t = tm.leerTarea(root, o.tarea);
+    if (!t) return { status: 'TAREA_DESCONOCIDA', tarea: o.tarea };
+    const mala = sesionOk();
+    if (mala) return mala;
+    if (t.state !== 'RUNNING') return { status: 'TRANSICION_INVALIDA', estado: t.state, detalle: 'solo se reporta una tarea en curso (RUNNING)' };
+    const act = tm.actividadConstructor(root).find((x) => x.task_id === t.id);
+    const archivos = U.lista(o.archivos).map(U.normRel);
+    const permitidos = new Set(t.allowed_files.map(tm.normalizarRecurso));
+    const fuera = archivos.filter((f) => !permitidos.has(tm.normalizarRecurso(f)));
+    if (fuera.length) return { status: 'FUERA_DE_ALCANCE', fuera, detalle: 'tocaste archivos fuera del alcance de la tarea: no se reporta como entrega' };
+    const files = archivos.length ? archivos : t.allowed_files;
+    const evidence = U.lista(o.comprobaciones);
+    const hash = U.hashArchivos(root, files);
+    const event_id = 'res-' + t.id + '-' + (act ? act.fencing : 0) + '-' + hash.slice(0, 8);
+    entregar(root, { rol: 'builder', resultado: { task_id: t.id, event_id, owner_id: t.owner_id, fencing: act ? act.fencing : null, expected_revision: t.revision, subject_hash: hash, files, evidence } });
+    /* El aviso por la base despierta al director (vigilantes): la cola es transporte, el evento es la señal. */
+    I.tx(root, (db, desp) => { I.publicar(db, desp, { kind: 'BUILDER_REPORT', producer: 'builder', target: 'director', task_id: t.id, payload: { tipo: 'entrega', event_id } }); });
+    return { status: 'REPORTADO', tipo: 'entrega', event_id, subject_hash: hash, archivos: files, comprobaciones: evidence.length };
+  }
+  if (tipo === 'correccion') {
+    const mala = sesionOk();
+    if (mala) return mala;
+    return require('./teams-correcciones.cjs').entregar(root, { id: o.id, owner_id: o.dueno, fencing: o.fencing != null ? o.fencing : null, session_id: o.sesion || null, files: o.archivos, nota: o.nota, event_id: o.evento || null, actor: 'builder' });
+  }
+  if (tipo === 'nota') {
+    const texto = U.limpiar(root, o.texto || '', 300);
+    if (!texto) return { status: 'SIN_TEXTO' };
+    I.tx(root, (db, desp) => { I.publicar(db, desp, { kind: 'BUILDER_NOTE', producer: 'builder', target: 'director', payload: { texto } }); });
+    return { status: 'REPORTADO', tipo: 'nota' };
+  }
+  return { status: 'TIPO_DESCONOCIDO', validos: ['entrega', 'correccion', 'nota'] };
+}
+
+/**
+ * Lo que un rol hace en CADA despertar, en una sola llamada: correcciones primero, luego la ejecución pendiente; sin trabajo no
+ * inventa nada (accion ESPERAR). Es una lectura: no cambia estado. La cola de eventos del canal se atiende con `visto` aparte.
+ */
+function ronda(root, { rol = 'builder', owner_id = null } = {}) {
+  const e = tm.estado(root);
+  if (!e.inicializado) return { status: 'SIN_TEAMS', accion: 'ESPERAR' };
+  if (!e.enabled) return { status: 'DESACTIVADO', accion: 'ESPERAR', detalle: 'TEAMS está desactivado: un MD viejo no lo reactiva' };
+  const base = { status: 'OK', rol, revision_canal: e.ultimo_seq, campana: e.campana ? e.campana.estado : null, pausa: e.paused };
+  if (!e.v2) return Object.assign(base, { accion: 'MIGRACION_PENDIENTE', comando: 'akdd teams init --aprobar-migracion' });
+  const corr = require('./teams-correcciones.cjs');
+  const cierre = e.cierre && e.cierre.state === 'REQUESTED' ? { close_id: e.cierre.close_id, revision: e.cierre.revision, final_status: e.cierre.final_status } : null;
+  if (rol === 'builder') {
+    const compacta = (f) => ({ id: f.id, severity: f.severity, state: f.state, task_id: f.task_id, ubicacion: f.location, criterio: f.criterion, solucion: f.proposal, aceptacion: f.acceptance, revision: f.revision, prioridad: Math.round(f.prioridad) });
+    const lista = corr.listar(root, { activas: true }).filter((f) => ['IN_PROGRESS', 'REOPENED', 'ASSIGNED'].includes(f.state)).map(compacta);
+    const enCurso = e.tareas.find((t) => t.state === 'RUNNING' && (!owner_id || t.owner_id === owner_id)) || null;
+    const susp = corr.suspendidas(root);
+    const nuevos = leerCanal(root, { rol: 'builder' }).eventos.filter((x) => x.event_kind === 'TASK_ASSIGNED');
+    let accion = 'ESPERAR';
+    if (cierre) accion = 'CIERRE_ACK';
+    else if (lista.length) accion = 'CORRECCION';
+    else if (susp.length) accion = 'REANUDAR';
+    else if (enCurso) accion = 'CONTINUAR_TAREA';
+    else if (nuevos.length) accion = 'TAREA_NUEVA';
+    return Object.assign(base, { accion, correcciones: lista, tarea_en_curso: enCurso && { id: enCurso.id, fase: enCurso.fase || null }, suspendidas: susp, asignaciones_nuevas: nuevos.map((x) => x.task_id), cierre,
+      nota: accion === 'ESPERAR' ? 'sin trabajo: no inventes tareas ni gastes turnos de modelo; la próxima señal o el loop te despiertan' : null });
+  }
+  const verificar = e.tareas.filter((t) => t.state === 'VERIFYING').map((t) => t.id);
+  const implementadas = corr.listar(root, { estado: 'IMPLEMENTED_PENDING_REVIEW' }).map((f) => ({ id: f.id, origen: f.origin, resolved_hash: f.resolved_hash }));
+  const porTriar = corr.listar(root, { estado: 'OPEN' }).filter((f) => f.actionable).map((f) => f.id);
+  const rev = require('./teams-revision.cjs').pendientes(root);
+  let accion = 'ESPERAR';
+  if (porTriar.length) accion = 'TRIAR_HALLAZGOS';
+  else if (implementadas.length) accion = 'VERIFICAR_CORRECCIONES';
+  else if (verificar.length) accion = 'VERIFICAR_ENTREGAS';
+  else if (e.campana && e.campana.estado === 'WAITING_FINAL_AUDIT') accion = 'REVISION_FINAL_O_CIERRE';
+  else if (rev.disponible && rev.pendientes.some((x) => x.aplica)) accion = 'ESPERAR_REVISORES';
+  return Object.assign(base, { accion, entregas_por_verificar: verificar, correcciones_por_verificar: implementadas, hallazgos_por_triar: porTriar,
+    revisiones_pendientes: rev.disponible ? rev.pendientes.length : null, cierre, avance: e.avance ? e.avance.porcentaje : null });
+}
+
 /**
  * Activación inicial: prepara archivos y explica qué falta. No migra la base:
  * eso es `teams: activar` con aprobación explícita, y se muestra aparte.
@@ -226,6 +322,10 @@ function preparar(root, { mecanica = 'INVERTIDA' } = {}) {
     + '- Constructor, en cada pase: `node .agentic/grafo/teams-md-session.cjs canal --rol=builder` → aceptar con `ack` → implementar → `resultado` → `visto`.\n'
     + '- Director: `akdd teams run` consume la cola del constructor y verifica.\n'
     + '- Tras compactar el chat: `node .agentic/grafo/teams-md-session.cjs retomar --rol=<rol> --session=<id>`.\n'
+    + '- Esquema v2: constructor, en cada despertar: `node .agentic/grafo/teams-md-session.cjs ronda --rol=builder` (correcciones PRIMERO; sin trabajo = ESPERAR, no inventes tareas). '
+    + 'Corrección: `akdd teams correcciones tomar --sesion=<id> --siguiente-paso="..."` → editar → `correcciones entregar --sesion=<id> --fencing=N --archivos=a,b` → `correcciones reanudar`. '
+    + 'Entrega de tarea: `teams-md-session.cjs reportar entrega --tarea=ID --archivos=a,b --comprobaciones=tests=PASS --sesion=<id>`. Cierre: `akdd teams cerrar-ack --close=ID --revision=N --sesion=<id> --vigilantes=apagados`.\n'
+    + '- Director: `teams-md-session.cjs ronda --rol=director` dice qué atender (triar hallazgos, verificar correcciones, esperar revisores, cierre). Los revisores informan con `akdd teams revision informar`; solo el director publica correcciones.\n'
     + '- El canal no despierta a nadie: cada sesión lo lee en su siguiente pase.\n';
   escribirAtomico(path.join(dirLegion(root), 'ROLES-MD.md'), instr);
   const primerLote = e.inicializado ? e.tareas.filter((t) => t.state === 'READY').map((t) => t.id) : [];
@@ -250,8 +350,14 @@ if (require.main === module) {
   else if (cmd === 'visto') r = visto(root, { rol: opt.rol || 'builder', hasta_seq: opt.seq });
   else if (cmd === 'retomar') r = retomar(root, { rol: opt.rol || 'builder', session_id: opt.session });
   else if (cmd === 'preparar') r = preparar(root, { mecanica: opt.mecanica });
+  else if (cmd === 'reportar') {
+    const sub = args.filter((a) => !a.startsWith('--'))[1];
+    r = reportar(root, { tipo: sub, tarea: opt.tarea, archivos: opt.archivos, comprobaciones: opt.comprobaciones, sesion: opt.sesion, id: opt.id, nota: opt.nota, dueno: opt.dueno, fencing: opt.fencing, evento: opt.evento, texto: opt.texto });
+    if (r && r.status === 'REPORTADO' || r && r.status === 'IMPLEMENTADA_PENDIENTE_REVISION') require('./teams-canal.cjs').refrescar(root);
+  }
+  else if (cmd === 'ronda') r = ronda(root, { rol: opt.rol || 'builder', owner_id: opt.dueno || null });
   else r = new AdapterMdSesion(root, { rol: opt.rol || 'builder' }).capabilities();
   console.log(JSON.stringify(r, null, 2));
 }
 
-module.exports = { AdapterMdSesion, registrar, latido, leerCanal, ackear, entregar, visto, retomar, preparar, sesiones, VIGENCIA_SESION_MS };
+module.exports = { AdapterMdSesion, registrar, latido, leerCanal, ackear, entregar, visto, retomar, preparar, sesiones, reportar, ronda, VIGENCIA_SESION_MS };

@@ -30,7 +30,8 @@ function comprobar() {
   const docs = new Set();
   for (const r of datos.requisitos) {
     docs.add(r.doc);
-    if (!r.pruebas || !r.pruebas.length) huecos.push({ id: r.id, motivo: 'sin pruebas' });
+    // Un requisito NO_EJECUTADO (host real) puede no tener prueba: se DECLARA pendiente, no se cubre con una prueba que no es suya.
+    if ((!r.pruebas || !r.pruebas.length) && !/NO_EJECUTADO/.test(r.alcance)) huecos.push({ id: r.id, motivo: 'sin pruebas' });
     for (const [archivo, titulo] of r.pruebas || []) {
       const f = archivoDe(archivo);
       if (!f) { huecos.push({ id: r.id, motivo: 'no existe el archivo ' + archivo }); continue; }
@@ -60,14 +61,14 @@ function markdown() {
     l.push('**Último release check:** no hay informe en `_output/` (ejecuta `npm run release:check`). Sin informe no hay plataforma ni artefacto certificados.');
   }
   l.push('');
-  for (const doc of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03']) {
+  for (const doc of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03', 'TEAMS']) {
     const lista = datos.requisitos.filter((r) => r.doc === doc);
     l.push('## ' + doc + ' (' + lista.length + ' requisitos)');
     l.push('');
     l.push('| Id | Requisito | Prueba (archivo › título) | Alcance | Nota |');
     l.push('|---|---|---|---|---|');
     for (const r of lista) {
-      const pruebas = r.pruebas.map(([a, t]) => '`' + a + '` › ' + t.replace(/\|/g, '\\|')).join('<br>');
+      const pruebas = (r.pruebas.length ? r.pruebas : [['(ninguna)', 'pendiente: host real']]).map(([a, t]) => '`' + a + '` › ' + t.replace(/\|/g, '\\|')).join('<br>');
       l.push('| ' + r.id + ' | ' + r.requisito.replace(/\|/g, '\\|') + ' | ' + pruebas + ' | ' + r.alcance + ' | ' + (r.nota || '') + ' |');
     }
     l.push('');

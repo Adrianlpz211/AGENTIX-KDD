@@ -370,3 +370,7 @@ function operativa({ ciclos, eventos, grupos, totalFriccion, locks, fases, modul
 }
 
 module.exports = { incidentes, retrabajo, friccion, topN, actividad, tiempos, union, medir, operativa, leerTeams, CONSULTAS, SEVERIDAD, CIERRE, UMBRAL_HEURISTICO_MS };
+
+/* 3.20.1 — panel de la campaña TEAMS (aditivo): etapas construidas / auditadas / verificadas / registradas por separado, cobertura de
+   registro, vigilancia y auditoría, con filtros origen / plan / sprint / fase / rol / corrección. Se carga al pedirlo: sin TEAMS no cuesta nada. */
+Object.defineProperty(module.exports, 'teamsPanel', { enumerable: true, get() { return require('./teams-panel.cjs'); } });

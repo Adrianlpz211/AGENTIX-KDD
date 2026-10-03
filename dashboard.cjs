@@ -5153,6 +5153,12 @@ const server = require('http').createServer((req, res) => {
     res.end(req.method === 'HEAD' ? undefined : (ruta === '/memoria' ? pag.MEMORIA_HTML : pag.CONTEXTO_HTML));
     return;
   }
+  if (ruta === '/teams') {
+    // Página propia (solo lectura) de la campaña TEAMS: etapas, cobertura de registro, vigilancia y auditoría. No toca el tablero de grafos.
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+    res.end(req.method === 'HEAD' ? undefined : cargarGrafo('teams-pagina.cjs').TEAMS_HTML);
+    return;
+  }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
   res.end(req.method === 'HEAD' ? undefined : HTML);

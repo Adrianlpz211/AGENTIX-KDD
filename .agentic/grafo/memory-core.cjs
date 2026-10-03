@@ -233,7 +233,9 @@ function capturar(root, ev, opts = {}) {
       db.run(
         `INSERT INTO mem_jobs (job_id, project_id, kind, state, required, attempts, next_attempt_at, created_at, updated_at)
          VALUES (?,?,?,?,?,0,?,?,?)`,
-        job_id, pid, ev.event_type === 'decision' ? 'decision' : 'observe', rutaDenegada ? 'SUPPRESSED' : 'PENDING', opts.required ? 1 : 0, recibido, recibido, recibido,
+        // `job_kind` solo lo usan productores con su PROPIO procesador (p. ej. el cierre de TEAMS): esos jobs no los
+        // reclama el drenaje genérico (memory-queue.DEDICADOS), porque un drenaje sin su regla los daría por hechos.
+        job_id, pid, typeof opts.job_kind === 'string' && /^[a-z_]{1,40}$/.test(opts.job_kind) ? opts.job_kind : (ev.event_type === 'decision' ? 'decision' : 'observe'), rutaDenegada ? 'SUPPRESSED' : 'PENDING', opts.required ? 1 : 0, recibido, recibido, recibido,
       );
       db.run('INSERT INTO mem_job_events (job_id, event_id) VALUES (?, ?)', job_id, event_id);
       resultado = { ok: true, status: 'CAPTURED', event_id, job_id, attempts: 1, sequence: secuencia, privacy_class: clase, truncated: grande || undefined };

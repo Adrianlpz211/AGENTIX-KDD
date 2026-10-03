@@ -56,15 +56,23 @@ function conBase(root, write, fn) {
   } finally { try { db.close(); } catch { /* ya cerrada */ } }
 }
 
+/**
+ * Jobs con procesador PROPIO (kind distinto de observe/decision). El drenaje genérico no los reclama:
+ * no tiene su regla y los daría por hechos sin haber ejecutado nada. Solo se reclaman pidiéndolos en `kinds`.
+ */
+const DEDICADOS = Object.freeze(['teams_cierre']);
+
 /** Reclama el siguiente job disponible. Devuelve { ok:true, job } | { ok:true, job:null } | { ok:false }. */
-function reclamar(root, { owner, lease_ms = DEFAULTS.lease_ms, now } = {}) {
+function reclamar(root, { owner, lease_ms = DEFAULTS.lease_ms, now, kinds } = {}) {
   if (!owner) return { ok: false, code: 'OWNER_REQUERIDO' };
   return conBase(root, true, (db) => {
     const t = ahoraMs({ now }); const ahora = iso(t); const hasta = iso(t + lease_ms);
+    const pedidos = Array.isArray(kinds) && kinds.length ? kinds.filter((k) => /^[a-z_]{1,40}$/.test(String(k))) : null;
+    const filtroKind = pedidos ? 'kind IN (' + pedidos.map((k) => "'" + k + "'").join(',') + ')' : 'kind NOT IN (' + DEDICADOS.map((k) => "'" + k + "'").join(',') + ')';
     for (let intento = 0; intento < 8; intento++) {
       const cand = db.get(
         `SELECT job_id, state, attempts, max_attempts FROM mem_jobs
-         WHERE (state IN ('PENDING','RETRY') AND next_attempt_at <= ?) OR (state = 'RUNNING' AND lease_until < ?)
+         WHERE ((state IN ('PENDING','RETRY') AND next_attempt_at <= ?) OR (state = 'RUNNING' AND lease_until < ?)) AND ${filtroKind}
          ORDER BY required DESC, next_attempt_at ASC, job_id ASC LIMIT 1`, ahora, ahora);
       if (!cand) return { ok: true, job: null };
       // Un lease vencido cuenta como intento: si ya agotó los suyos, va a dead-letter, no vuelve a correr.
@@ -270,4 +278,4 @@ async function drenar(root, opts = {}) {
   return salida;
 }
 
-module.exports = { DEFAULTS, ESTADOS, reclamar, completar, fallar, renovar, reintentar, estadisticas, procesarDeterminista, drenar, backoff };
+module.exports = { DEFAULTS, ESTADOS, DEDICADOS, reclamar, completar, fallar, renovar, reintentar, estadisticas, procesarDeterminista, drenar, backoff };

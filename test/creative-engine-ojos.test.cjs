@@ -77,7 +77,8 @@ test('el gate no se llama con un initDB que no existe', () => {
      invisible. */
   assert.ok(!/cg\.initDB/.test(PC_COD),
     'contract-guard no exporta initDB: la base se abre con el helper de post-cycle');
-  const i = PC_COD.indexOf('runPreservationGate');
+  // El inventario PASOS de post-cycle también nombra la función: se busca la LLAMADA, no la primera mención.
+  const i = PC_COD.indexOf('cg.runPreservationGate(');
   const antes = PC_COD.slice(Math.max(0, i - 900), i);
   assert.match(antes, /openDB\(\)/,
     'el paso debe abrir la base con openDB() antes de llamar al gate');

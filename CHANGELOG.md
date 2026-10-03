@@ -6,6 +6,9 @@
 comandos (`update` y `update --migrate`) y nada demostraba, de forma comprobable, que la
 memoria había sobrevivido.
 
+### TEAMS nativo: director + tres revisores + constructor, conectado al núcleo de `aa:`
+Esquema TEAMS v2 aditivo (11 tablas, solo con `init --aprobar-migracion`): estados de flujo derivados (entregado → en revisión → con corrección → verificado → memoria pendiente → cerrado), `advance_on_delivery` (la auditoría no frena el avance ordinario), **Correcciones pendientes** con prioridad, suspensión segura y reanudación exacta, tres revisores (frontend/backend/negocio) con veredictos ligados a hash, cierre explícito (`WAITING_FINAL_AUDIT` → `COMPLETED` / `COMPLETED_WITH_PENDING`, el constructor confirma y apaga SU loop y watch) y avance medido («quedó en X % por estas decisiones tuyas»). Canal `.legion/AUDITORIA-CURSOR.md` con las 8 secciones y escritura serializada. **Puente al núcleo común** (`teams-puente.cjs` + `teams-nucleo.cjs`): cada tarea verificada se registra con origen teams (ciclo, memoria, contratos, AST, layout, preservación) mediante outbox idempotente, sin pedir `aa:`; un fallo queda `MEMORY_PENDING` y bloquea el cierre final completo. Vigilantes independientes (loop de 180 s + watch) con métricas detectado→atendido→ACK y capacidades declaradas con honestidad (`EVENT_WAKE_UNSUPPORTED`, `MANUAL_ONLY`); prompts reales para director, constructor y revisores; investigación web con guardias SSRF sobre las referencias del plan; página `/teams` del dashboard. No verificado: la campaña real Claude Code + Cursor (nivel C).
+
 ### Memoria con procedencia (C01) — nivel de esquema 3
 Actividad → observación → conocimiento → evidencia, en 14 tablas nuevas `mem_*` que entran SOLO
 por el catálogo del update seguro (nivel 3; una base nueva las trae completas). Lectura sin

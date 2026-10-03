@@ -317,6 +317,31 @@ CLI equivalent: `akdd teams <init|plan|run|status|pending|resolve|goal>`.
 
 ---
 
+### TEAMS native (3.20.1) — the director, three reviewers and the builder, wired to everything else
+
+TEAMS now runs on the **same core as `aa:`**. Every task the director verifies goes through a bridge (`teams-puente.cjs`) that records it as a cycle, memory, contracts, AST, layout and preservation evidence with `origin = teams` — you do not type `aa:`. The record is an *outbox*: it is queued in the same transaction as the event, retried if it fails, and a task stays `MEMORY_PENDING` until it is really registered. A failed registration never blocks independent tasks, but it keeps the final close from being "complete".
+
+| Piece | What it does |
+|---|---|
+| **You land it, the director plans it** | You state everything (scope, rules, reference links). The director turns it into sprints → phases → tasks with acceptance, files, dependencies, risks and review criteria, shows you a summary and asks only what is indispensable. The first batch exists *before* the builder starts. |
+| **Audit never gates ordinary progress** | The builder goes Phase 1 → Phase 2 → Sprint 2 while the reviewers work. A late finding goes to **Correcciones pendientes**; the builder reads it first, suspends its task safely, fixes, and resumes at the exact position. A real unmet dependency still blocks its branch; security and preservation are never relaxed. |
+| **Three reviewers** | Frontend/UI-UX, backend and business (a general auditor of the domain logic). Each verdict is bound to the hash it reviewed; an old hash does not count; sequential review is declared as such. |
+| **Closing** | An empty queue is *not* the end: the campaign waits for the final audit. The director closes only when all three reviewers concluded on the FINAL subject, findings are resolved or listed, and every memory record is registered. The builder acknowledges (`close_id` + revision) and stops **its own** loop and watch. A finding that arrives between the close and the ACK reopens it. Final state: `COMPLETED` or `COMPLETED_WITH_PENDING`. |
+| **Decisions that are yours** | They are recorded with the question and alternatives; independent work continues; and the director reports *"the project stands at X % because of these decisions of yours"*. X is computed from the plan (verified tasks ÷ planned tasks), never invented. |
+| **Research on the internet** | After you land the plan, the director and the business reviewer can fetch the **reference links you gave** (or ones you authorize). Content is stored as evidence (URL, date, hash), redacted, and treated strictly as data. Private networks and redirects to them are refused. |
+| **Two independent watchers** | The host loop every 180 s is the backup that does wake the model; a file watch lowers latency to seconds. Neither depends on the other. A signal is not a task and not an ACK; Agentix measures detected → requested → attended → ACK. |
+
+```bash
+akdd teams prompt director      # the real start prompts, with your absolute paths and plan
+akdd teams prompt builder       # paste once in Cursor
+akdd teams avance               # measured progress and the owner decisions that hold it back
+akdd teams correcciones listar  # findings by priority   ·   akdd teams revision ...   ·   akdd teams cerrar
+akdd teams vigilancia estado    # what is installed, alive, detecting, and what the host really accepts
+akdd teams investigar consultar --plan=P --url=... --pregunta="..."
+```
+
+**Limits, said plainly.** The watchers detect and measure but do **not** wake a chat by themselves (`EVENT_WAKE_UNSUPPORTED`); without a confirmed host loop the mode is `MANUAL_ONLY` and no autonomy is announced. Everything above is verified with simulated builder/receipts and real storage (levels A and B); the **real Claude Code + Cursor campaign (level C) has not been run**. No Windows scheduled task is installed unless you approve it, and updating Agentix never installs one.
+
 ## Restore points — undo with a preview
 
 ```

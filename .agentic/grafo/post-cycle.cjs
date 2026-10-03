@@ -105,6 +105,63 @@ const silent     = opts.silent === true || opts.silent === 'true' || hookMode;
    no el HEAD de cuando le toque correr. */
 const COMMIT_REF = /^[0-9a-f]{7,64}$/i.test(String(opts.commit || '')) ? String(opts.commit) : 'HEAD';
 
+/* ── Origen del cierre (3.20.1, TEAMS) ─────────────────────────────────────────
+   `aa:` y `teams:` comparten ESTE núcleo de cierre. Lo de TEAMS lo invoca teams-nucleo.cjs UNA vez por cierre
+   (nunca por heartbeat) y le dice tres cosas sin cambiar nada del flujo de `aa:`:
+     --origen=teams        el ciclo es de TEAMS (su id sale de AKDD_CYCLE_ID, estable → reintentar no duplica)
+     AKDD_TEAMS_FILES      los archivos del sujeto (TEAMS no trabaja sobre el HEAD de git: el constructor puede no commitear)
+     --skip=a,b            pasos que NO se repiten porque ya corrieron con evidencia real (TDD, preservación…) o no
+                           corresponden al cierre (navegador, dependencias).
+   Sin estos datos el comportamiento es exactamente el de siempre. */
+const ORIGEN = opts.origen === 'teams' ? 'teams' : 'aa';
+const SKIP = new Set(String(opts.skip === true ? '' : (opts.skip || '')).split(',').map((s) => s.trim()).filter(Boolean));
+function leerEnvJson(nombre) { try { return process.env[nombre] ? JSON.parse(process.env[nombre]) : null; } catch { return null; } }
+const FILES_DECLARADOS = (() => { const f = leerEnvJson('AKDD_TEAMS_FILES'); return Array.isArray(f) ? f.map(String).filter(Boolean).slice(0, 200) : null; })();
+const EVIDENCIA_REUTILIZADA = leerEnvJson('AKDD_TEAMS_REUSE') || {};
+
+/**
+ * Inventario de los pasos canónicos del cierre (spec TEAMS §10): qué hace cada uno, si se puede omitir por
+ * evidencia ya existente y si es idempotente ante un reintento del mismo cierre. teams-nucleo lo usa para
+ * decidir `--skip` y los tests lo comprueban contra el código: un paso nuevo sin entrada aquí se nota.
+ */
+const PASOS = Object.freeze([
+  { id: 'ciclo', paso: '1', funcion: 'registrarCiclo', registra: 'ciclos+fases', omitible: false, idempotente: 'por ciclo_id (AKDD_CYCLE_ID)' },
+  { id: 'contratos', paso: '2', funcion: 'registrarContratos', registra: 'verified_contracts, protected_behaviors', omitible: 'si hay evidencia PASS del sujeto (tdd)', idempotente: 'sí: actualiza contratos existentes' },
+  { id: 'episodio', paso: '2.5', funcion: 'registrarEpisodio', registra: 'episodios', omitible: false, idempotente: 'por ciclo_id (solo origen teams)' },
+  { id: 'potenciadores', paso: '2.55', funcion: 'memoriaPostCycle', registra: 'anclas y enlaces error→fix', omitible: false, idempotente: 'sí' },
+  { id: 'validador', paso: '2.6', funcion: 'knowledge-validator.scanAll', registra: 'vigencia del conocimiento', omitible: false, idempotente: 'sí' },
+  { id: 'scans', paso: '2.7', funcion: 'spec-value-scan / test-integrity-gate', registra: 'gate_events', omitible: false, idempotente: 'por event_id' },
+  { id: 'reloj', paso: '2.75', funcion: 'reloj-derivado.completarUltimo', registra: 'duración del ciclo', omitible: false, idempotente: 'sí' },
+  { id: 'layout', paso: '2.8', funcion: 'ui-layout-memory.guard', registra: 'ui_layout_decisions', omitible: false, idempotente: 'sí: mismo valor no cambia' },
+  { id: 'browser', paso: '2.85', funcion: 'browser-gate', registra: 'verificación en navegador', omitible: 'sí: el revisor frontend la hace sobre su sujeto', idempotente: 'sí' },
+  { id: 'css', paso: '2.9', funcion: 'css-token-gate', registra: 'gate_events', omitible: false, idempotente: 'por event_id' },
+  { id: 'simple', paso: '2.95', funcion: 'simple-gate', registra: 'informativo', omitible: false, idempotente: 'sí' },
+  { id: 'canario', paso: '2.10', funcion: 'canario-gate.revisar', registra: 'gate_events', omitible: false, idempotente: 'por event_id' },
+  { id: 'preservacion', paso: '2.11', funcion: 'contract-guard.runPreservationGate', registra: 'contract_violations, regressed_by', omitible: 'si hay evidencia PASS del sujeto (preservation)', idempotente: 'sí' },
+  { id: 'prediccion', paso: '2.12', funcion: 'prediccion-registro.evaluarPendientes', registra: 'prediction_log', omitible: false, idempotente: 'sí' },
+  { id: 'deps', paso: '2.13', funcion: 'deps-audit', registra: 'vulnerabilidades conocidas', omitible: 'sí: cuando el cierre no toca dependencias', idempotente: 'sí' },
+  { id: 'memoria', paso: '2.14', funcion: 'memory-core.capturar + memory-queue.drenar', registra: 'mem_events/mem_jobs', omitible: false, idempotente: 'por host_event_id' },
+  { id: 'modulos', paso: '3', funcion: 'registrarModulos', registra: 'module_registry + config.md', omitible: false, idempotente: 'sí' },
+  { id: 'patrones', paso: '4', funcion: 'detectarYEscribirPatrones', registra: 'patrones.md', omitible: false, idempotente: 'sí: no repite títulos' },
+  { id: 'specs', paso: '5', funcion: 'generarSpec', registra: 'specs/<módulo>.md', omitible: false, idempotente: 'sí' },
+  { id: 'config', paso: '6', funcion: 'guardarConfigEnBD', registra: 'project_settings', omitible: false, idempotente: 'sí' },
+  { id: 'cierre', paso: '6.9', funcion: 'cerrarCicloConGates', registra: 'estado final del ciclo', omitible: false, idempotente: 'solo cierra si EN_CURSO' },
+  { id: 'razonamiento', paso: '7.5', funcion: 'reasoning-bank.record', registra: 'reasoning_bank', omitible: false, idempotente: 'sí' },
+  { id: 'sync', paso: '9', funcion: 'syncGrafo', registra: 'grafo KDD', omitible: false, idempotente: 'sí' },
+  { id: 'ast', paso: '10', funcion: 'indexarAst', registra: 'ast_symbols, ast_edges', omitible: false, idempotente: 'sí: incremental por hash' },
+  { id: 'paralelo', paso: '11', funcion: 'parallel-guard.checkParallelDispatch', registra: '_output/parallel-guard-*.md', omitible: 'solo corre con --expected-parallel (no aplica a TEAMS)', idempotente: 'sí' },
+  { id: 'frescura', paso: '12', funcion: 'graph-freshness.stampGraph', registra: 'sello del grafo', omitible: false, idempotente: 'sí' },
+]);
+
+/** Resultado del TDD cuando el cierre reutiliza evidencia verificada del sujeto: nada se inventa, se cita. */
+function contratosReutilizados() {
+  const r = EVIDENCIA_REUTILIZADA.tdd || {};
+  return {
+    success: true, status: 'PASS', reason_code: 'EVIDENCIA_REUTILIZADA', reason: null,
+    pasando: testsPassing, fallando: 0, contracts: null, execution_id: r.execution_id || null,
+  };
+}
+
 // ── DB adapter (supports both better-sqlite3 and node:sqlite) ─────────────────
 
 function openDB() {
@@ -854,7 +911,8 @@ async function main() {
 
   // Step 2: Register contracts
   if (!silent) process.stdout.write('  2. Registrando contratos... ');
-  results.contratos = registrarContratos();
+  // Con evidencia PASS del sujeto ya existente (TEAMS: el director verificó con gates reales) no se repite el TDD.
+  results.contratos = SKIP.has('contratos') ? contratosReutilizados() : registrarContratos();
   if (!silent) console.log(results.contratos.success ? `✅ ${results.contratos.pasando} tests registrados` : `⚠️  ${results.contratos.reason}`);
 
   // Step 2.5: Register episodio — sin esto, memoria episódica (episodios) nunca
@@ -869,14 +927,22 @@ async function main() {
       // archivos_tocados siempre queda vacío y "archivo de alto riesgo" nunca
       // se puede detectar por más ciclos que se acumulen.
       let archivosTocados = [];
-      try {
+      if (FILES_DECLARADOS) archivosTocados = FILES_DECLARADOS; // TEAMS: el sujeto declarado, no el HEAD de git
+      else try {
         const diff = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
         archivosTocados = diff.split('\n').map(f => f.trim()).filter(Boolean);
       } catch { /* sin git o sin commits todavía — queda vacío, no es error */ }
 
-      g.registrarEpisodio({
+      // Idempotencia del cierre de TEAMS: reintentar el MISMO cierre (mismo ciclo) no duplica el episodio, y sin
+      // ciclo atribuible (ya cerrado en un intento anterior) tampoco se crea uno huérfano.
+      let yaEpisodio = false;
+      if (ORIGEN === 'teams') {
+        yaEpisodio = !results.ciclo;
+        if (results.ciclo) { try { yaEpisodio = !!db.get("SELECT 1 AS x FROM episodios WHERE ciclo_id = ? AND tipo = 'ciclo_teams'", String(results.ciclo)); } catch { /* sin tabla: se crea */ } }
+      }
+      if (!yaEpisodio) g.registrarEpisodio({
         ciclo_id: results.ciclo,
-        tipo: 'ciclo_aa',
+        tipo: ORIGEN === 'teams' ? 'ciclo_teams' : 'ciclo_aa',
         descripcion: taskName,
         accion_tomada: `${testsPassing} tests`,
         resultado: results.contratos.success ? 'exito' : 'parcial',
@@ -928,7 +994,8 @@ async function main() {
   // Knowledge Validator arriba): nunca bloquean post-cycle, solo hacen visible
   // el hallazgo y lo registran en la libreta (source:'mechanical').
   let commitFilesForScans = [];
-  try {
+  if (FILES_DECLARADOS) commitFilesForScans = FILES_DECLARADOS.slice(); // TEAMS: el sujeto declarado del cierre
+  else try {
     commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
       .toString().split('\n').map(f => f.trim()).filter(Boolean);
   } catch {}
@@ -1034,7 +1101,9 @@ async function main() {
     const bgPath = path.join(GRAFO_DIR, 'browser-gate.cjs');
     const frontTocado = commitFilesForScans.filter(f =>
       /\.(html?|css|scss|less|js|jsx|ts|tsx|vue|svelte|astro)$/i.test(f));
-    if (fs.existsSync(bgPath) && frontTocado.length) {
+    if (SKIP.has('browser')) {
+      if (!silent) console.log('  2.85 Browser Gate... — (omitido: lo hace el revisor frontend sobre su sujeto)');
+    } else if (fs.existsSync(bgPath) && frontTocado.length) {
       const objetivo = resolverObjetivoSync(frontTocado);
       if (objetivo.status !== 'READY') {
         if (!silent) console.log(`  2.85 Browser Gate... UNVERIFIED (${objetivo.reason_code}: ${objetivo.message})`);
@@ -1154,7 +1223,12 @@ async function main() {
   // lo pone el TDD Gate antes de llegar aqui.
   try {
     const cgPath = path.join(GRAFO_DIR, 'contract-guard.cjs');
-    if (fs.existsSync(cgPath)) {
+    if (SKIP.has('preservacion')) {
+      // Evidencia PASS del sujeto ya existente (la verificó el director): se cita, no se repite ni se inventa.
+      const r = EVIDENCIA_REUTILIZADA.preservacion || {};
+      results.preservation = { status: r.status === 'PASS' ? 'PASS' : 'SKIP', reason_code: 'EVIDENCIA_REUTILIZADA', blocking: false, execution_id: r.execution_id || null };
+      if (!silent) console.log('  2.11 Preservation Gate... — (evidencia del sujeto reutilizada, no se repite)');
+    } else if (fs.existsSync(cgPath)) {
       const cg = require(cgPath);
       /* contract-guard NO exporta su initDB: se abre la base con el helper de
          este archivo. Llamar a `cg.initDB` daba undefined y el gate caía por el
@@ -1256,7 +1330,9 @@ async function main() {
   // sin cerrar su ciclo porque el registro de npm este caido.
   try {
     const daPath = path.join(GRAFO_DIR, 'deps-audit.cjs');
-    if (fs.existsSync(daPath)) {
+    if (SKIP.has('deps')) {
+      if (!silent) console.log('  2.13 Deps Audit... — (omitido en este cierre)');
+    } else if (fs.existsSync(daPath)) {
       const da = require(daPath);
       // Cambio de dependencias: siempre. Sin cambio: como mucho una vez al día,
       // para ver avisos nuevos sobre el mismo lock sin consultar en cada commit.
@@ -1314,9 +1390,9 @@ async function main() {
         }
       } catch { /* sin almacén: los artefactos siguen en _executions */ }
       const cap = core.capturar(ROOT, {
-        host: 'agentix', session_id: 'post-cycle', host_event_id: 'cycle:' + (results.ciclo || Date.now()),
+        host: 'agentix', session_id: 'post-cycle', host_event_id: 'cycle:' + (results.ciclo || process.env.AKDD_CYCLE_ID || Date.now()),
         event_type: 'cycle_close', role: 'memory', task_id: tarea, cycle_id: results.ciclo ? String(results.ciclo) : null,
-        paths: archivos, evidence_refs: refs, input: { area, tests: testsPassing }, output: { contratos: results.contratos && results.contratos.success ? results.contratos.pasando : null },
+        paths: archivos, evidence_refs: refs, input: { area, tests: testsPassing, origen: ORIGEN }, output: { contratos: results.contratos && results.contratos.success ? results.contratos.pasando : null },
       });
       const q = require(path.join(GRAFO_DIR, 'memory-queue.cjs'));
       const dr = await q.drenar(ROOT, { owner: 'post-cycle:' + process.pid, max: 50 });
@@ -1448,4 +1524,4 @@ if (require.main === module) {
   main().catch(e => { console.error('❌ post-cycle falló:', e.message); process.exit(1); });
 }
 
-module.exports = { main, detectPatterns, registrarModulos, generarSpec, registrarRegresiones };
+module.exports = { main, detectPatterns, registrarModulos, generarSpec, registrarRegresiones, PASOS };

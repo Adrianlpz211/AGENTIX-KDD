@@ -18,8 +18,8 @@ const MARCO = '# ============================================================';
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-instr-'));
 
 /** CLAUDE.md = plantilla real + lo que escribió el usuario debajo del marcador. */
-function conUsuario(texto, { eol = '\n', pegar = '\n' } = {}) {
-  const base = PLANTILLA.replace(/\s+$/, '\n');
+function conUsuario(texto, { eol = '\n', pegar = '\n', plantilla = PLANTILLA } = {}) {
+  const base = plantilla.replace(/\s+$/, '\n');
   return (base + pegar + texto).split('\n').join(eol);
 }
 function migrar(contenido) {
@@ -107,7 +107,10 @@ test('update de punta a punta: INSTRUCCIONES existente DISTINTO al texto de CLAU
   const claude = path.join(p.root, 'CLAUDE.md');
   const textoEnClaude = '## Regla que vivía en CLAUDE.md\nNunca usar SELECT *.';
   const textoEnArchivo = '# Instrucciones del proyecto\n\n## Regla del archivo propio\nSiempre revisar tenant_id.';
-  fs.writeFileSync(claude, conUsuario(textoEnClaude));
+  // Un consumidor REAL de 3.20.0 tiene la plantilla PUBLICADA de 3.20.0 (no la del árbol de trabajo, que cambia en cada release):
+  // solo así el update la reconoce como «sin cambios propios» y la reemplaza reponiendo lo del usuario.
+  const publicada = fs.readFileSync(path.join(legacy.paquete('3.20.0'), 'CLAUDE.md'), 'utf8').replace(/\r\n/g, '\n');
+  fs.writeFileSync(claude, conUsuario(textoEnClaude, { plantilla: publicada }));
   fs.writeFileSync(path.join(p.root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), textoEnArchivo);
   const claudeOriginal = fs.readFileSync(claude, 'utf8');
   const r = await update({ projectPath: p.root, salir: false, silent: true, __sinFuncional: true });

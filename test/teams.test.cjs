@@ -443,7 +443,10 @@ test('valores de debounce y respaldo se acotan a lo documentado', () => {
   const root = proyecto();
   const v = new Vigilancia(root, { rol: 'b', debounceMs: 5, intervaloMs: 999999, onTrabajo: () => true });
   assert.equal(v.debounceMs, 300);
-  assert.equal(v.intervaloMs, 60000);
+  assert.equal(v.intervaloMs, 300000, 'techo del respaldo: 300 s (el ritmo pedido es 180 s)');
+  assert.equal(new Vigilancia(root, { rol: 'b', intervaloMs: 180000, onTrabajo: () => true }).intervaloMs, 180000, 'el respaldo de 180 s es válido');
+  assert.equal(new Vigilancia(root, { rol: 'b', onTrabajo: () => true }).intervaloMs, 180000, 'por defecto 180 s');
+  assert.equal(new Vigilancia(root, { rol: 'b', intervaloMs: 1000, onTrabajo: () => true }).intervaloMs, 30000, 'piso: 30 s');
   const s = require(path.join(G, 'teams-watch.cjs')).scriptTareaWindows(root, 'builder');
   assert.match(s.instalar, /Register-ScheduledTask/);
   assert.doesNotMatch(s.instalar, /-Password|-User /);

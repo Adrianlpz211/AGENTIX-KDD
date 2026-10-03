@@ -24,7 +24,7 @@ const operativa = require('./operativa.cjs');
 const SCHEMA_VERSION = 1;
 const LIMITE_MAX = 200;
 const LIMITE_DEF = 50;
-const FILTROS_TEXTO = ['kind', 'id', 'type', 'host', 'status', 'state', 'provenance', 'task', 'role'];
+const FILTROS_TEXTO = ['kind', 'id', 'type', 'host', 'status', 'state', 'provenance', 'task', 'role', 'origen', 'plan', 'sprint', 'phase', 'correction'];
 const hash = (x) => crypto.createHash('sha256').update(typeof x === 'string' ? x : JSON.stringify(x)).digest('hex').slice(0, 16);
 const iso = (x) => { const d = fu.fechaUtc(x); return d ? d.toISOString() : null; };
 
@@ -169,16 +169,20 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       const r = leerResumen();
       return { status: r.data ? r.status : 'UNAVAILABLE', data: r.data, reason_code: r.reason_code, errors: r.faltan.map((t) => ({ code: 'TABLA_AUSENTE', source: t })) };
     } },
-    tasks: { params: ['project_id', 'plan_id', 'from', 'to', 'cursor', 'limit', 'estado'], fn: (q) => {
+    tasks: { params: ['project_id', 'plan_id', 'from', 'to', 'cursor', 'limit', 'estado', 'origen'], fn: (q) => {
+      if ('origen' in q && !['aa', 'teams', 'todos'].includes(q.origen)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'origen: aa | teams | todos' }] };
       if ('plan_id' in q) return { status: 'UNAVAILABLE', data: [], reason_code: 'PLAN_SIN_FUENTE', errors: [{ code: 'PLAN_SIN_FUENTE', message: 'este proyecto no tiene planes registrados en la base' }] };
       const r = datos.filas(dbPath, { ciclos: { tabla: 'ciclos', sql: 'SELECT id, ciclo_id, tarea, modulo, tipo_tarea, estado, tests_generados, tests_pasando, stops_count, fecha_inicio, fecha_fin FROM ciclos' } }, Object.assign({ snapshot: true }, opts));
       if (r.status !== 'OK') return { status: 'UNAVAILABLE', data: null, reason_code: r.reason_code };
       if ((r.faltan || []).includes('ciclos')) return { status: 'UNAVAILABLE', data: null, reason_code: 'TABLA_AUSENTE' };
       let lista = r.value.ciclos.filter((c) => enVentana(q, c.fecha_inicio));
       if (q.estado) lista = lista.filter((c) => ec.clasificar(c.estado) === q.estado);
+      // 3.20.1: el mismo backend de ciclos para `aa` y `teams`; el origen se distingue por el prefijo determinista del id (teams-nucleo).
+      const origenDe = (c) => (String(c.ciclo_id).startsWith('teams_') ? 'teams' : 'aa');
+      if (q.origen && q.origen !== 'todos') lista = lista.filter((c) => origenDe(c) === q.origen);
       lista.sort((a, b) => -fu.compararPorFecha(a, b, 'fecha_inicio'));
       const { pagina, coverage } = paginar(lista, q);
-      return { status: lista.length ? 'OK' : 'EMPTY', coverage, data: pagina.map((c) => Object.assign({}, c, { clase: ec.clasificar(c.estado), fecha_inicio: iso(c.fecha_inicio), fecha_fin: iso(c.fecha_fin) })) };
+      return { status: lista.length ? 'OK' : 'EMPTY', coverage, data: pagina.map((c) => Object.assign({}, c, { clase: ec.clasificar(c.estado), origen: origenDe(c), fecha_inicio: iso(c.fecha_inicio), fecha_fin: iso(c.fecha_fin) })) };
     } },
     contracts: { params: ['project_id', 'cursor', 'limit', 'estado'], fn: (q) => {
       const r = datos.filas(dbPath, { c: { tabla: 'verified_contracts', sql: "SELECT id, module, name, status, verification_count, failure_count, updated_at FROM verified_contracts WHERE status IS NULL OR status != 'deprecated' ORDER BY id" } }, Object.assign({ snapshot: true }, opts));
@@ -232,6 +236,27 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
         const r = require('./contexto-panel.cjs').resumen(projectPath, { cursor: q.cursor, limit: q.limit, task: q.task, role: q.role });
         return { status: r.status, data: r.data, coverage: r.coverage || null, reason_code: r.reason_code || null, source: 'contexto-panel' };
       } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
+    // 3.20.1 — panel TEAMS (solo lectura, ADITIVO): las cuatro etapas por separado y la cobertura de registro.
+    // Filtros: origen (aa|teams|todos), plan, sprint, phase, role, correction. Lo que no se puede leer es null, no 0.
+    teams: { params: ['project_id', 'origen', 'plan', 'sprint', 'phase', 'role', 'correction', 'cursor', 'limit'], fn: (q) => {
+      if ('origen' in q && !['aa', 'teams', 'todos'].includes(q.origen)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'origen: aa | teams | todos' }] };
+      if ('role' in q && !['frontend', 'backend', 'negocio', 'builder', 'director'].includes(q.role)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'role: frontend | backend | negocio | builder | director' }] };
+      try {
+        const r = require('./teams-panel.cjs').resumen(projectPath, q);
+        if (r.status !== 'OK' || !r.data) return { status: 'UNAVAILABLE', data: null, reason_code: r.reason_code || 'ERROR', source: 'teams-panel' };
+        const pg = require('./teams-panel.cjs').paginarTareas(r.data, q);
+        return { status: 'OK', data: Object.assign({}, r.data, { tareas: pg.tareas }), coverage: pg.coverage, reason_code: r.reason_code || null, source: 'teams-panel', errors: (r.faltan || []).map((t) => ({ code: 'TABLA_AUSENTE', source: t })) };
+      } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
+    'teams-vigilancia': { params: ['project_id', 'role'], fn: (q) => {
+      if ('role' in q && !['builder', 'director'].includes(q.role)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'role: builder | director' }] };
+      try { const r = require('./teams-panel.cjs').vigilancia(projectPath, { role: q.role }); return { status: r.status, data: r.data, reason_code: r.reason_code || null, source: 'teams-panel' }; }
+      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
+    'teams-auditoria': { params: ['project_id', 'plan', 'role', 'correction', 'cursor', 'limit'], fn: (q) => {
+      try { const r = require('./teams-panel.cjs').auditoria(projectPath, q, { cursor: q.cursor, limit: q.limit }); return { status: r.status, data: r.data, coverage: r.coverage || null, reason_code: r.reason_code || null, source: 'teams-panel' }; }
+      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
     incidents: { params: ['project_id', 'cursor', 'limit'], fn: (q) => {
       const r = datos.filas(dbPath, { e: operativa.CONSULTAS.eventosOperativos }, Object.assign({ snapshot: true }, opts));
