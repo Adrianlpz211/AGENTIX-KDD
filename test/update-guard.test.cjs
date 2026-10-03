@@ -132,7 +132,10 @@ test('servicios con conexión persistente: pausan, cierran y CONFIRMAN; el que n
   let s2 = ''; mudo.stdout.on('data', (d) => { s2 += d; });
   try {
     for (let i = 0; i < 60 && !s2.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
-    await new Promise((r) => setTimeout(r, 500)); // deja que escriba su primer latido
+    // Con la máquina cargada (la suite corre en paralelo) el primer latido puede tardar: se espera a que EXISTA, no un tiempo fijo.
+    const dirEscritores = path.join(root, '.agentic', '_update', 'writers');
+    for (let i = 0; i < 100 && !(fs.existsSync(dirEscritores) && fs.readdirSync(dirEscritores).some((n) => n.endsWith('-mudo.json'))); i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
     const w = await guard.waitForWriters(root, 'op2', 700);
     assert.equal(w.ok, false);
     assert.equal(w.sinAck[0].name, 'mudo');
