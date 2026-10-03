@@ -1161,6 +1161,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .mode-tab{padding:11px 18px;font-size:13px;font-weight:500;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .mode-tab:hover{color:var(--text2)}
 .mode-tab.active{color:var(--pl);border-bottom-color:var(--purple)}
+.mode-link{padding:11px 18px;font-size:13px;font-weight:500;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s;display:flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none}
+.mode-link:hover{color:var(--text2)}
 
 .content{flex:1;overflow:hidden;display:flex}
 
@@ -1471,10 +1473,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
   <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
-  <a class="mode-tab" href="/memoria" style="text-decoration:none" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</a>
-  <a class="mode-tab" href="/contexto" style="text-decoration:none" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</a>
-  <a class="mode-tab" href="/teams" style="text-decoration:none" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</a>
-  <a class="mode-tab" href="/actualizacion" style="text-decoration:none" title="Estado de la última actualización y de la memoria">🔄 Actualización</a>
+  <a class="mode-link" href="/memoria" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</a>
+  <a class="mode-link" href="/contexto" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</a>
+  <a class="mode-link" href="/teams" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</a>
+  <a class="mode-link" href="/actualizacion" title="Estado de la última actualización y de la memoria">🔄 Actualización</a>
 </div>
 
 <div class="content">

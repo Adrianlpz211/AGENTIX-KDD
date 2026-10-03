@@ -260,7 +260,7 @@ test('página /teams: servida con CSP, sin recursos externos, nada interpreta da
     assert.ok(j.json.data.plan.objective.includes('<script>alert(1)</script>'));
     // Los grafos: el tablero no cambia ni enlaza al panel.
     const raiz = (await get(d, '/')).texto;
-    assert.match(raiz, /<a class="mode-tab" href="\/teams"/, 'la barra de pestañas enlaza a /teams (solo una ancla)');
+    assert.match(raiz, /<a class="mode-link" href="\/teams"/, 'la barra de pestañas enlaza a /teams (solo una ancla)');
     assert.ok(!/teams-pagina|api\/v1\/teams/.test(raiz), 'los grafos no cargan nada de TEAMS');
     // La navegación de las páginas propias sí lo incluye.
     assert.match((await get(d, '/memoria')).texto, /href="\/teams"/);

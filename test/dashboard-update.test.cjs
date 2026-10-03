@@ -127,7 +127,8 @@ test('dashboard: la página /actualizacion se sirve con CSP, sin tocar el tabler
     assert.match(pag.texto, /Actualización y memoria/);
     assert.match(pag.texto, /\/api\/v1\/update/);
     const raiz = await pedir(base(d) + '/');
-    assert.ok(!/actualizacion|Actualización y memoria/i.test(raiz.texto), 'el tablero de grafos no cambió: ningún control nuevo en él');
+    assert.match(raiz.texto, /<a class="mode-link" href="\/actualizacion"/, 'la barra de pestañas solo ENLAZA a la página (una ancla)');
+    assert.ok(!/Actualización y memoria|api\/v1\/update/i.test(raiz.texto), 'el tablero de grafos no cargó nada de la página: ni su contenido ni su API');
     assert.equal((await pedir(base(d) + '/actualizacion/../../etc/passwd')).status, 404);
   } finally { d.cerrar(); }
 });
