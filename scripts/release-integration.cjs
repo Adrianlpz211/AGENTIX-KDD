@@ -1,4 +1,5 @@
 'use strict';
+const TARGET=require('../package.json').version; // el piloto actualiza 3.19.0 -> la versión que se va a publicar
 const fs=require('fs'),path=require('path'),os=require('os'),crypto=require('crypto'),assert=require('assert/strict');
 const {spawn}=require('child_process'),readline=require('readline');
 const {herramienta,nodo}=require('../src/run-safe'),{extractTarGz}=require('../src/tar-extract'),{update,rollback}=require('../src/update');
@@ -23,11 +24,11 @@ async function rpc(root){
 }
 async function check(tgz,lab,baselineArchive){
  const bundle=path.join(lab,'package');fs.mkdirSync(bundle,{recursive:true});extractTarGz(tgz,bundle);
- assert.equal(require(path.join(bundle,'package.json')).version,'3.20.0');
+ assert.equal(require(path.join(bundle,'package.json')).version,TARGET);
  const installRoot=path.join(lab,'clean-install');
  herramienta('npm',['install','--prefix',installRoot,tgz,'--omit=dev','--omit=optional','--ignore-scripts','--no-audit','--no-fund'],{encoding:'utf8',timeout:240000});
  const installedBin=path.join(installRoot,'node_modules','agentic-kdd','bin','akdd.js');
- assert.equal(nodo(installedBin,['--version'],{encoding:'utf8'}).trim(),'3.20.0');
+ assert.equal(nodo(installedBin,['--version'],{encoding:'utf8'}).trim(),TARGET);
  const old=path.join(lab,'baseline');fs.mkdirSync(old);extractTarGz(baselineArchive,old);assert.equal(require(path.join(old,'package.json')).version,'3.19.0');
  const project=path.join(lab,'consumer');fs.mkdirSync(project);fs.cpSync(path.join(old,'.agentic'),path.join(project,'.agentic'),{recursive:true});
  const write=(rel,s)=>{const f=path.join(project,rel);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,s);return f;};
@@ -41,7 +42,7 @@ async function check(tgz,lab,baselineArchive){
  try{for(let i=0;i<50;i++)db.run('INSERT INTO nodos(tipo,titulo,contenido,area,confianza) VALUES(?,?,?,?,?)',['patron','PRIVATE_'+i,'Memoria original '+i,'release','ALTA']);db.exec('CREATE TABLE release_private(id INTEGER PRIMARY KEY,value TEXT);');for(let i=0;i<500;i++)db.run('INSERT INTO release_private VALUES(?,?)',[i,'PRESERVE_'+i]);}finally{db.close();}
  const untouched=[dbPath,...privateFiles.map(f=>path.join(project,f))],before=untouched.map(hash);
  nodo(installedBin,['update'],{cwd:project,encoding:'utf8',timeout:180000}); let r={ok:true};
- assert.equal(JSON.parse(fs.readFileSync(path.join(project,'.agentic/grafo/framework.json'))).version,'3.20.0');
+ assert.equal(JSON.parse(fs.readFileSync(path.join(project,'.agentic/grafo/framework.json'))).version,TARGET);
  assert.deepEqual(untouched.map(hash),before,'update debe conservar bytes de DB, memoria y negocio');
  r=await update({projectPath:project,bundleRoot:bundle,salir:false});assert.ok(r.ok);assert.deepEqual(untouched.map(hash),before,'update idempotente');
  const rolled=rollback({projectPath:project});assert.ok(rolled.ok);assert.deepEqual(untouched.map(hash),before,'rollback conserva memoria');
@@ -52,6 +53,6 @@ async function check(tgz,lab,baselineArchive){
  nodo(path.join(project,'.agentic/grafo/grafo.cjs'),['migrate'],{cwd:project,env:{...process.env,NODE_PATH:path.join(ROOT,'node_modules')},encoding:'utf8',timeout:60000});
  db=dba.openReadOnly(dbPath);try{assert.equal(db.get('PRAGMA integrity_check').integrity_check,'ok');assert.equal(db.get('SELECT count(*) AS n FROM nodos').n,50);assert.equal(db.get('SELECT count(*) AS n FROM release_private').n,500);}finally{db.close();}
  const attacks=require('../sandbox/probes.cjs').run(bundle,512,211),native=require('../sandbox/native-probes.cjs').run(bundle);assert.equal(attacks.failures.length,0,JSON.stringify(attacks.failures));assert.equal(native.failures.length,0,JSON.stringify(native.failures));fs.writeFileSync(path.join(lab,'adversarial-results.json'),JSON.stringify({attacks,native},null,2));
- return{adversarial:{cases:attacks.results.length+native.results.length,failures:0,seed:211},clean_npm_install_core:true,published_baseline:'3.19.0',target:'3.20.0',sqlite_integrity:'ok',original_nodes_preserved:50,private_rows_preserved:500,db_bytes_preserved_on_update:true,idempotent:true,rollback:true,migration_preserves_rows:true,mcp:await rpc(project)};
+ return{adversarial:{cases:attacks.results.length+native.results.length,failures:0,seed:211},clean_npm_install_core:true,published_baseline:'3.19.0',target:TARGET,sqlite_integrity:'ok',original_nodes_preserved:50,private_rows_preserved:500,db_bytes_preserved_on_update:true,idempotent:true,rollback:true,migration_preserves_rows:true,mcp:await rpc(project)};
 }
 module.exports={check,rpc};
