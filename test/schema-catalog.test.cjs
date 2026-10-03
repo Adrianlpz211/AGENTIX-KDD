@@ -1,6 +1,8 @@
 'use strict';
 /* Catálogo de esquema (3.20.1): inspección, migración estricta, registro. */
 const test = require('node:test');
+const { SIN_DRIVER } = require('./helpers/db-real.cjs');
+if (SIN_DRIVER) { require('node:test').test(require('node:path').basename(__filename) + ' (omitido: ' + SIN_DRIVER + ')', { skip: SIN_DRIVER }, () => {}); return; }
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

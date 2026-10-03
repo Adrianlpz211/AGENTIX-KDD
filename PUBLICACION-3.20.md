@@ -1,53 +1,52 @@
-# Publicar Agentix 3.20
+# Publicar Agentix 3.20.x
 
-La versión local está preparada; este documento no afirma que ya esté publicada.
+Este documento prepara la publicación; **no afirma que una versión ya esté publicada**. Para saber qué hay publicado: `npm view agentic-kdd version`.
 
 ## Antes de publicar
 
-1. Revisar los cambios de Cursor y de esta revisión. No incluir memoria.db, sesiones, telemetría, credenciales ni reportes privados en Git.
-2. Ejecutar `npm ci` y `npm run release:check`. Exigir PASS en verification.json. Revisar también las limitaciones del reporte.
-3. Revisar y subir los archivos de código, tests, scripts, README, package.json, package-lock.json y vendor del dashboard. La excepción de .gitignore permite incluir los vendors locales; no omitirlos del commit.
-4. El paquete agentic-kdd contiene el servidor MCP. Este procedimiento publica ese paquete; no publica otro paquete agentic-kdd-mcp.
-5. No ejecutar npm publish hasta decidir publicar la versión revisada. No es posible reutilizar un número ya publicado.
+1. Revisar los cambios. No incluir `memoria.db`, respaldos (`.agentic/_update/`), sesiones, telemetría, credenciales ni reportes privados en Git.
+2. Ejecutar `npm ci` y `npm run release:check`. Exigir `PASS` en `_output/release-<versión>/verification.json` y leer las limitaciones del reporte. El reporte dice en qué plataforma y Node corrió: **no se infiere de otras**.
+3. El paquete `agentic-kdd` contiene el servidor MCP; no existe otro paquete.
+4. No ejecutar `npm publish` hasta decidir publicar la versión revisada. Un número publicado no se puede reutilizar.
 
-## Configuración recomendada: GitHub Actions con OIDC
+### Qué certifica `release:check` (y qué no)
 
-Archivo preparado: .github/workflows/publish-npm.yml. Corre sólo manualmente desde main. El workflow anterior (`publish.yml`, disparado por tag `v*` con un `NPM_TOKEN` y un job para un `packages/mcp` que no existe) se retiró en esta revisión: publicaba sin pasar por la barrera, y con los dos archivos un `git push --tags` habría publicado por el camino viejo. Si en GitHub quedó guardado el secreto `NPM_TOKEN`, ya no lo usa nada; se puede borrar. Verifica Windows y Linux con Node 22/24; después la tarea de publicación vuelve a validar y publica exactamente el tarball cuyo SHA está en el reporte.
+Suite completa sin omitidas; el tarball sin datos privados; el tarball **instalado en limpio** actualizando consumidores construidos con los motores **publicados** 3.19.0 y 3.20.0 (`--check`, `update`, repetición idempotente, MCP por stdio, `--rollback` con el motor anterior leyendo la base migrada); y sondas adversariales. **No** certifica una sesión real de Cursor/Claude, WhatsApp ni sistemas consumidores distintos de esos.
 
-En GitHub, crear el environment `npm-production` y configurar revisión humana antes de la tarea publish.
+## Publicar: flujo recomendado (GitHub Actions con OIDC)
 
-En npmjs.com, iniciar sesión con una cuenta que administre agentic-kdd. Abrir el paquete → Settings → Trusted publishing → GitHub Actions e indicar:
+Archivo: `.github/workflows/publish-npm.yml`. Corre sólo manualmente desde `main`, verifica en Windows y Linux con Node 22/24 (donde existe un conector SQLite apto) y publica **exactamente el tarball cuyo SHA está en el reporte**.
 
-- Organization or user: Adrianlpz211
-- Repository: AGENTIX-KDD
-- Workflow filename: publish-npm.yml
-- Environment name: npm-production
-- Allowed actions: permitir `npm publish` para este workflow.
+En GitHub crea el environment `npm-production` con revisión humana. En npmjs.com, con una cuenta que administre `agentic-kdd`: Settings → Trusted publishing → GitHub Actions:
 
-Esta asociación se debe guardar en npm; crear el YAML local no la crea. No hace falta guardar un token de escritura en el repositorio. Requisitos oficiales: npm >=11.5.1 y Node >=22.14; el workflow usa Node 24.
+- Organization or user: `Adrianlpz211`
+- Repository: `AGENTIX-KDD`
+- Workflow filename: `publish-npm.yml`
+- Environment name: `npm-production`
 
-Una vez revisado y subido el cambio, abrir Actions → Publish npm (manual) → Run workflow, versión 3.20.0. Aprobar el environment únicamente si las verificaciones y los cambios son aceptables.
-
-Fuente: [Trusted publishing, documentación oficial npm](https://docs.npmjs.com/trusted-publishers/).
+Después: Actions → **Publish npm (manual)** → Run workflow con la versión.
 
 ## Alternativa local
 
-No hay autenticación npm confirmada en esta máquina. Usar `npm login` de forma interactiva; no pegar contraseñas ni tokens en un chat. Comprobar `npm whoami` y que la cuenta administre el paquete.
+`npm login` de forma interactiva (no pegues contraseñas ni tokens en un chat); comprobar `npm whoami`. `npm publish` ejecuta `prepublishOnly` (la barrera completa). Para inspeccionar sin publicar: `node scripts/publish-verified.cjs --dry-run`. Si tu cuenta pide verificación en dos pasos, npm abre el navegador para autenticarte: no se puede automatizar.
 
-Desde el checkout, repetir `npm run release:check`. Inspeccionar sin publicar con `node scripts/publish-verified.cjs --dry-run`.
+## Después de publicar — verificar lo publicado
 
-Para una publicación local expresamente aprobada, publicar el tarball revisado de _output/release-3.20.0/ con npm publish, --access public y --registry https://registry.npmjs.org/. Los tarballs no ejecutan la barrera del checkout: por eso validar antes es obligatorio. La opción recomendada sigue siendo el workflow con aprobación y comparación de SHA.
+```bash
+npm run release:verify
+```
 
-## Después de publicar
+Descarga de npm lo que de verdad se publicó y comprueba que (1) la versión está y es `latest`, (2) el tarball es **byte a byte** el que verificó `release:check` (mismo sha256 e integridad), y (3) ese paquete descargado actualiza un consumidor real 3.19.0 con un solo comando: `VERIFIED`, memoria conservada por contenido y repetición `NO_CHANGES_VERIFIED`. Deja `published-verification.json` junto al reporte.
 
-Comprobar `npm view agentic-kdd version` y probar una instalación limpia. En cada consumidor:
+## Para los usuarios
 
-```powershell
-npm install -g agentic-kdd@3.20.0
-akdd mcp --global          # una vez por máquina: refresca el lanzador global
-cd "ruta-del-consumidor"
-akdd update
+```bash
+npm install -g agentic-kdd@latest
+akdd mcp --global              # una vez por máquina: refresca el lanzador global
+cd "ruta-del-proyecto"
+akdd update --check            # opcional: el plan, sin cambiar nada
+akdd update                    # respalda, migra de forma compatible y verifica
 akdd health
 ```
 
-Para habilitar el nuevo esquema de memoria en proyectos 3.19, detener agentes y autorizar `akdd update --migrate`. Revisar el respaldo y el resultado; conservarlo hasta completar la prueba del consumidor. La actualización del código sola mantiene la base byte por byte y no migra automáticamente.
+`akdd update` migra el esquema por sí mismo y sale con código 0 sólo si el resultado es verificable. Estados, qué puede bloquearlo y los límites del rollback están en el README. Un conector SQLite apto (`node:sqlite` en Node ≥ 22.13, o un `better-sqlite3` compatible) es requisito del update; sin él se niega antes de escribir y explica cómo resolverlo.

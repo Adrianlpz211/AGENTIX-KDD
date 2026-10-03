@@ -1,6 +1,8 @@
 'use strict';
 /* akdd update 3.20.1: un solo comando, verificado. Consumidores REALES de 3.19.0 y 3.20.0. */
 const test = require('node:test');
+const { SIN_DRIVER } = require('./helpers/db-real.cjs');
+if (SIN_DRIVER) { require('node:test').test(require('node:path').basename(__filename) + ' (omitido: ' + SIN_DRIVER + ')', { skip: SIN_DRIVER }, () => {}); return; }
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

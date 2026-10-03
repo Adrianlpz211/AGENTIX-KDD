@@ -10,6 +10,7 @@ const { migrarInstruccionesUsuario } = require('../src/update.js');
 const { partirInstrucciones } = require('../src/update-classify.js');
 const { update } = require('../src/update.js');
 const legacy = require('./helpers/legacy-real.cjs');
+const { SIN_DRIVER } = require('./helpers/db-real.cjs');
 
 const REPO = path.resolve(__dirname, '..');
 const PLANTILLA = fs.readFileSync(path.join(REPO, 'CLAUDE.md'), 'utf8').replace(/\r\n/g, '\n');
@@ -101,7 +102,7 @@ test('instrucciones: la lógica del actualizador y la del clasificador cortan en
   }
 });
 
-test('update de punta a punta: INSTRUCCIONES existente DISTINTO al texto de CLAUDE.md — se conservan AMBOS originales y no desaparece nada', async () => {
+test('update de punta a punta: INSTRUCCIONES existente DISTINTO al texto de CLAUDE.md — se conservan AMBOS originales y no desaparece nada', { skip: SIN_DRIVER }, async () => {
   const p = legacy.proyectoReal('3.20.0', 'instr');
   const claude = path.join(p.root, 'CLAUDE.md');
   const textoEnClaude = '## Regla que vivía en CLAUDE.md\nNunca usar SELECT *.';

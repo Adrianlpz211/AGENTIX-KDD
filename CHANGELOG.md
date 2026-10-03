@@ -1,5 +1,77 @@
 # Changelog — Agentic KDD
 
+## [3.20.1] — 2026-10-03
+
+**Un solo `akdd update`, seguro y verificable.** Hasta la 3.20.0 actualizar eran dos
+comandos (`update` y `update --migrate`) y nada demostraba, de forma comprobable, que la
+memoria había sobrevivido.
+
+### `akdd update` migra, respalda y verifica
+Inspecciona → excluye escritores → respalda → aplica → verifica → informa. Estados:
+`VERIFIED`, `VERIFIED_WITH_WARNINGS`, `NO_CHANGES_VERIFIED` (salida 0) y `BLOCKED`,
+`UNVERIFIED`, `ROLLED_BACK`, `RECOVERY_REQUIRED` (salida distinta de 0). Opciones nuevas:
+`--check` (plan sin modificar nada), `--json`, `--no-migrate` (nunca se presenta como
+completo), `--ack-recovery=<id>`. `--migrate`, `--from`, `--sha256`, `--ref` y
+`--rollback` se conservan.
+
+### Catálogo de esquema (`schema-catalog.cjs`)
+La versión del esquema ya no se deduce de `config.md` ni de npm: se inspecciona la
+estructura real y cada migración queda en `agentix_schema_migrations` (id estable, checksum,
+versión, fecha, resultado). Solo migraciones compatibles y aditivas, en UNA transacción, con
+postcondiciones verificadas. El catálogo sale de bases reales de 3.19.0 y 3.20.0. Se acabó
+"ALTER y callar el error": SQLite no admite `ADD COLUMN ... DEFAULT (datetime('now'))` y 45
+columnas con ese default fallaban en silencio en bases antiguas; ahora se migran con relleno
+declarado y un trigger. `grafo.cjs`, `schema-columns.cjs` y `health --fix` usan el catálogo;
+abrir para trabajar ya no migra en silencio (`SCHEMA_PENDING` → `akdd update`).
+
+### Conservación de memoria demostrada por contenido
+`memory-inventory.cjs`: huella de multiconjunto por tabla (distingue NULL / '' / BLOB / número,
+conserva INTEGER de 64 bits, filas duplicadas, claves compuestas, WITHOUT ROWID), en streaming.
+Compara también índices, triggers y vistas propios, secuencias, foreign_key_check y archivos
+propios. Lo que no se puede comparar es `NO_VERIFICADO`, nunca PASS.
+
+### Exclusión de escritores, respaldo y recuperación
+Bloqueo por proyecto (token, latido, recuperación de abandonados, raíz canónica). El db-adapter,
+el servidor MCP, la cola de commits, post-cycle, telemetría, locks y el vigilante de TEAMS lo
+respetan; un servicio persistente pausa, cierra su conexión y confirma con un ack. Respaldo
+`VACUUM INTO` (incluye el WAL), abierto y con integrity_check antes del primer cambio. Journal
+persistente con las fases PREPARADO → RESPALDO_VERIFICADO → APLICANDO → VALIDANDO → CONFIRMADO.
+La transacción de archivos ya no se cierra como aplicada antes de conocer el resultado de la
+migración. Una recuperación no sobrescribe una edición externa. El adaptador comprueba
+capacidades REALES de cada conector; `sql.js` no se acepta para actualizar.
+
+### Personalizaciones
+Cada archivo del framework se clasifica contra una base verificable (owned.json o los hashes de
+las versiones PUBLICADAS 3.15.0–3.20.0): lo cambiado por la persona o sin base fiable se
+conserva y la versión nueva queda aparte; si es indispensable para el motor, el update bloquea
+antes de aplicar. La extracción del texto de usuario bajo el marcador de `CLAUDE.md` ya no se
+come encabezados `#`, soporta CRLF, varios marcadores, Unicode y un `INSTRUCCIONES-PROYECTO.md`
+distinto (se conservan ambos originales). Un enlace del proyecto que apunte fuera bloquea el update.
+
+### Rollback
+Revierte los archivos de la última actualización y conserva la memoria (nunca restaura una base
+antigua sobre aprendizajes nuevos); se bloquea si el esquema cambió después. Si falla una
+verificación posterior a la migración, la base conserva su estructura aditiva (la lee el motor
+anterior) y solo se restaura desde el respaldo si queda corrupta.
+
+### Dashboard
+Página `/actualizacion` y `/api/v1/update` (solo lectura, paginados, sin secretos): versión,
+compatibilidad de esquema, última verificación, memoria y personalizaciones conservadas,
+respaldo, conflictos y acción. Separa "el servicio responde" de "la memoria puede trabajar".
+Los grafos no cambian (las 11 vistas siguen idénticas a su referencia).
+
+### Publicación
+`release-check` instala el tarball en limpio y, con esa CLI instalada, actualiza consumidores
+reales 3.19.0 y 3.20.0 (check, update, idempotencia, MCP, rollback). `npm run release:verify`
+descarga lo publicado, comprueba que son los mismos bytes y repite la actualización desde 3.19.0.
+`engines.node` pasa a `>=20` (la matriz real del CI).
+
+### Limitaciones declaradas
+Un archivo de bloqueo no controla a un programa externo que abre la base por su cuenta (se apoya en
+el bloqueo de escritura de SQLite y bloquea con DB_OCUPADA). Decenas de módulos del motor abren
+SQLite directamente: están listados y bloqueados por un test. `better-sqlite3` no está verificado
+en Node 24 (no instala). Verificado en Windows con Node 24.
+
 ## [3.20.0] — 2026-10-03
 
 **Versión del blindaje.** La pregunta detrás de cada cambio: *¿se puede

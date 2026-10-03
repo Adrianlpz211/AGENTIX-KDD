@@ -11,7 +11,8 @@
     "test": "node scripts/run-tests.cjs",
     "test:smoke": "node bin/akdd.js --version",
     "prepare": "node -e \"var fs=require('fs');fs.chmodSync('bin/akdd.js','755')\"",
-    "release:check": "node scripts/release-check.cjs"
+    "release:check": "node scripts/release-check.cjs",
+    "release:verify": "node scripts/verify-published.cjs"
   },
   "keywords": [
     "ai",
@@ -39,7 +40,7 @@
   },
   "homepage": "https://github.com/Adrianlpz211/AGENTIX-KDD",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",

@@ -1,6 +1,8 @@
 'use strict';
 /* Dashboard: tarjeta "Actualización y memoria" (3.20.1). Solo lectura, estados reales, sin secretos. */
 const test = require('node:test');
+const { SIN_DRIVER } = require('./helpers/db-real.cjs');
+if (SIN_DRIVER) { require('node:test').test(require('node:path').basename(__filename) + ' (omitido: ' + SIN_DRIVER + ')', { skip: SIN_DRIVER }, () => {}); return; }
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

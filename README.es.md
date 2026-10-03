@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.20.0-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.20.1-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -36,6 +36,49 @@ No estás programando — estás cuidando el contexto a mano. **Agentix se encar
 
 ---
 
+## 🆕 3.20.1 — una actualización segura, que demuestra lo que hizo
+
+Hasta ahora, actualizar un proyecto eran dos comandos y un acto de fe: `akdd update` reemplazaba el motor, un segundo `--migrate` tocaba la base, y nada te decía — de forma comprobable — que tu memoria había sobrevivido. La 3.20.1 lo cierra:
+
+```bash
+npm install -g agentic-kdd@latest
+cd tu-proyecto
+akdd update
+```
+
+Esa es toda la actualización. `akdd update` ahora **inspecciona → respalda → aplica → verifica → informa**, y solo sale con código `0` cuando el resultado se puede sostener con evidencia:
+
+| Paso | Qué ocurre |
+|---|---|
+| **Inspeccionar** | Lee el paquete que instalaste, tus archivos y la estructura *real* de `memoria.db` (tablas, columnas, índices) — no solo `config.md` ni la versión de npm. Una base antigua sin registro de migraciones se inspecciona por capacidades; `user_version = 0` nunca se toma por "vacía". |
+| **Excluir escritores** | Un bloqueo por proyecto (token de dueño, latido, recuperación de bloqueos abandonados). Los escritores del motor, los workers de los hooks de git y el servidor MCP pausan y **confirman**; si un servicio vivo no confirma, el update se detiene antes de tocar nada. Cursor, Claude y tus otros procesos jamás se matan. |
+| **Respaldar** | Un respaldo SQLite coherente (`VACUUM INTO`, que incluye los commits que aún viven en el `-wal`), **abierto y con `integrity_check`** antes del primer cambio. Antes se comprueban espacio y permisos. |
+| **Aplicar** | Migraciones de esquema compatibles y **aditivas** en **una transacción**, anotadas en un registro (id estable, checksum, versión que la introdujo, fecha, resultado). Nada destructivo y nada escondido tras un `catch` vacío. Los archivos del framework se reemplazan con un journal; los tuyos no. |
+| **Verificar** | `integrity_check`, `foreign_key_check` contra lo que ya existía, el esquema completo requerido, tus registros **comparados por contenido** (una huella de multiconjunto por tabla que distingue `NULL` de `''`, un `BLOB` de un texto, y conserva exactos los enteros de 64 bits), tus tablas / índices / triggers / vistas propios, tus archivos propios, y luego una búsqueda real, un handshake MCP y una escritura revertida en una copia aislada. |
+| **Informar** | `.agentic/_update/last-result.json` y un `verification.json` por operación, un estado de la tabla de abajo y una tarjeta en el dashboard. |
+
+| Estado | Significado | Salida |
+|---|---|---|
+| `VERIFIED` | Actualizado y verificado | 0 |
+| `VERIFIED_WITH_WARNINGS` | Actualizado y verificado; las advertencias no afectan la compatibilidad (p. ej. se conservó un archivo tuyo) | 0 |
+| `NO_CHANGES_VERIFIED` | Ya estaba al día, y se comprobó | 0 |
+| `BLOCKED` | No se aplicó nada — y dice por qué | 1 |
+| `UNVERIFIED` | Algo no se pudo demostrar (p. ej. `--no-migrate` dejó el esquema incompleto) | 2 |
+| `ROLLED_BACK` | Falló y la recuperación quedó **verificada** | 3 |
+| `RECOVERY_REQUIRED` | La recuperación necesita a una persona; el siguiente update se niega a correr hasta que la resuelvas | 4 |
+
+Opciones: `--check` (solo el plan — no cambia nada), `--json` (un único documento JSON por stdout), `--no-migrate` (el resultado **nunca** se presenta como completo si falta esquema), `--migrate` (se conserva por compatibilidad; migrar ya es lo normal), `--from=` / `--sha256=` / `--ref=` (sin cambios), `--rollback`.
+
+**Qué se conserva.** El contenido de `memoria.db`, los Markdown de memoria, `config.md`, el conocimiento, `PLAN.md`, tus instrucciones, tu código y cualquier regla que hayas añadido (`.cursor/rules/`, `.audit/`, …). Cada archivo del framework se clasifica contra una base *verificable* — los hashes que Agentix registró al instalarlo, o los de las versiones publicadas. Un archivo con cambios tuyos (o sin base fiable) se **conserva** y la versión nueva se guarda a su lado. Si un archivo conservado es indispensable para el motor nuevo, el update **se bloquea antes de aplicar nada** en lugar de dejar un motor a medias. El texto bajo el marcador `INSTRUCCIONES DEL PROYECTO` de `CLAUDE.md` se mueve sin perder un encabezado, un comentario ni un segmento; si existen dos versiones de tus instrucciones, se conservan ambos originales y se fusionan.
+
+**Qué lo puede bloquear.** Un esquema más nuevo que este motor; una base ilegible o corrupta; una base tomada por un proceso que no sigue el protocolo; un servicio que no pausa; poco espacio en disco; una carpeta del framework que es un enlace hacia fuera del proyecto; un archivo indispensable del motor que personalizaste; ningún conector SQLite que supere las pruebas reales de capacidad.
+
+**Rollback, y su límite.** `akdd update --rollback` revierte los **archivos** de la última actualización y nunca restaura una base antigua encima de aprendizajes nuevos. Se niega si el esquema cambió después de esa actualización. Restaurar datos históricos es otra operación explícita y distinta — el respaldo verificado queda en disco para eso.
+
+**Verlo.** `akdd dashboard` también sirve **/actualizacion**: versión instalada, compatibilidad del esquema, última verificación, memoria y personalizaciones conservadas, respaldo disponible, conflictos y qué hacer. Separa "el servicio responde" de "la memoria puede trabajar", es de solo lectura, paginada, y nunca muestra el contenido de tus archivos. Tus grafos no cambian.
+
+**Requisitos.** El update necesita un conector SQLite que supere las pruebas reales (solo lectura, transacciones, bloqueo, respaldo con WAL, BLOB, enteros de 64 bits, multiproceso, cierre limpio): `node:sqlite` en Node ≥ 22.13, o un `better-sqlite3` compatible. `sql.js` reexporta el archivo completo desde memoria y **no** se acepta para actualizar. Sin conector, el update se niega antes de escribir y explica cómo resolverlo. En esta versión el conector verificado es `node:sqlite`: el `better-sqlite3@^9` opcional no tiene binario precompilado para Node 24 y falló al compilar ahí, así que ese camino **no está verificado**.
+
 ## 🆕 Qué trae la 3.20 — de "el gate dijo PASS" a "muéstrame la corrida"
 
 La 3.20 es la versión del blindaje. La pregunta detrás de cada cambio fue la misma: *¿se puede falsificar un verde?* Donde la respuesta era sí, se cerró.
@@ -43,8 +86,8 @@ La 3.20 es la versión del blindaje. La pregunta detrás de cada cambio fue la m
 | Área | 3.19 | 3.20 |
 |---|---|---|
 | **Cerrar una tarea** | Un gate podía reportar PASS desde un booleano | El PASS exige el **artefacto de ejecución del sujeto exacto**. Un id inventado, un runner sin aserciones o código que cambió después de la corrida → `UNVERIFIED`, nunca verde |
-| **Actualizar** | `akdd update` bajaba de `main` en GitHub | Usa el motor **incluido en el paquete que instalaste**. Journal transaccional, respaldo por archivo, reversión automática si falla, `--rollback`. Memoria, config y código de negocio quedan fuera del reemplazo |
-| **Esquema de la base** | Podía migrarse durante una lectura normal | **Nunca migra solo.** Únicamente `akdd update --migrate`, con respaldo SQLite coherente (WAL incluido), dentro de una transacción y con chequeo de integridad |
+| **Actualizar** | `akdd update` bajaba de `main` en GitHub | Usa el motor **incluido en el paquete que instalaste**. Desde la 3.20.1 es un solo comando verificado (ver abajo). Journal transaccional, respaldo por archivo, reversión automática si falla, `--rollback`. Memoria, config y código de negocio quedan fuera del reemplazo |
+| **Esquema de la base** | Podía migrarse durante una lectura normal | **Nunca migra mientras el motor trabaja.** En la 3.20.0 hacía falta un segundo `akdd update --migrate`; desde la 3.20.1 `akdd update` migra solo (ver abajo), con respaldo SQLite coherente (WAL incluido), dentro de una transacción y con chequeo de integridad |
 | **Esfuerzo** | El mismo peso de pipeline para un typo que para auth | **LOW / MEDIUM / HIGH** = máx(dificultad, riesgo). Pequeño *y* riesgoso conserva los controles de riesgo. Los gates mínimos no se pueden quitar, ni con una política propia |
 | **Preservación** | Contratos por archivo de test | Un contrato **por test individual**, escenarios de front, manifiesto `.agentic/protected_files`, impacto por aristas reales del AST. Cobertura incompleta se lee `UNKNOWN`, nunca `LOW` |
 | **Hooks de git** | Leían el directorio de trabajo | Leen el **índice** (lo que de verdad vas a commitear). Bloquean secretos filtrados, un arreglo sin test y quitarle un caso a un test protegido. Respetan `core.hooksPath` y nunca pisan tus propios hooks |
@@ -122,37 +165,30 @@ audit: auditar               ← 7 auditores en paralelo; solo leen, jamás toca
 
 ---
 
-## Actualizar desde la 3.19 — tu memoria se queda
+## Actualizar desde la 3.19 o la 3.20 — tu memoria se queda
 
 Son dos pasos distintos. **Instalar el CLI nuevo no toca ningún proyecto**; cada proyecto se actualiza cuando tú se lo pides.
 
 ```bash
 npm install -g agentic-kdd@latest     # 1. el motor nuevo, una vez por máquina
+akdd mcp --global                     #    refresca el lanzador MCP global (una vez)
 
 cd tu-proyecto                        # 2. en CADA proyecto que ya usa Agentix
-akdd update
+akdd update --check                   #    opcional: ver el plan sin cambiar nada
+akdd update                           #    un solo comando: respalda, migra y verifica
 akdd health
 ```
 
-Lo que `akdd update` hace y lo que no:
+`akdd update` es el único comando que necesitas. Reemplaza los archivos del framework desde el paquete que acabas de instalar — **no** desde GitHub (`--ref=<tag|sha>` y `--from=<archivo.tar.gz>` son alternativas explícitas) —, migra el esquema de la memoria de forma compatible y aditiva, y verifica el resultado. Los pasos, los estados y lo que lo puede bloquear están en [3.20.1](#-3201--una-actualización-segura-que-demuestra-lo-que-hizo).
 
-- **Reemplaza solo archivos del framework**, desde el paquete que acabas de instalar — no desde GitHub. `--ref=<tag|sha>` y `--from=<archivo.tar.gz>` existen como alternativas explícitas.
-- **Nunca toca** `memoria.db`, los Markdown de memoria (`.agentic/memoria/`), `config.md`, el conocimiento, `PLAN.md`, tus instrucciones ni tu código. Lo que declares en `.agentic/protected_files` también se salta.
-- **Corre como transacción**: journal + respaldo por archivo. Si falla a mitad, revierte lo que escribió; si el proceso muere, la siguiente corrida revierte primero. `akdd update --rollback` deshace la última actualización.
-- **Conserva tus personalizaciones**: un archivo del framework que editaste se deja como estaba, y la versión nueva queda en el journal de la actualización (`.agentic/_update/…/personalizados/`) para que compares.
-- **No migra el esquema de la base.** Cuando quieras las columnas nuevas, detén tus agentes y corre:
+- **Nunca toca** el contenido de tu memoria, `config.md`, el conocimiento, `PLAN.md`, tus instrucciones ni tu código. Lo declarado en `.agentic/protected_files` también se salta.
+- **Corre como transacción con journal**: si falla a mitad, revierte lo que escribió y verifica la recuperación; si el proceso muere, la siguiente corrida recupera primero. Los archivos a reemplazar se revalidan justo antes de escribir, y una recuperación jamás sobrescribe una edición hecha después de que el update escribiera ese archivo.
+- **Conserva tus personalizaciones**: un archivo del framework que editaste se deja como estaba y la versión nueva queda en el journal de la actualización (`.agentic/_update/tx/<id>/personalizados/`) para que compares.
+- **Respalda antes del primer cambio** y mantiene los respaldos fuera de Git y de npm (`.agentic/_update/` se autoignora). La retención nunca borra el respaldo de una operación en curso, el último verificado, ni uno que marques con un archivo `.keep`.
 
-```bash
-akdd update --migrate
-```
+> ⚠️ Primera actualización desde un motor anterior al registro de propiedad: Agentix clasifica cada archivo del framework contra los hashes de las *versiones publicadas* (3.15.0 → 3.20.0). Un archivo que no coincide con ninguna se trata como tuyo. Revisa lo que reporta.
 
-Eso hace un respaldo SQLite coherente (incluidos los commits pendientes en WAL), migra dentro de una transacción y comprueba integridad. Un fallo se informa como fallo — nunca como "actualizado".
-
-> ⚠️ Primera actualización desde un motor anterior al registro de propiedad: Agentix no puede distinguir cada edición local dentro de un archivo del framework de su versión original. Revisa lo que reporta. `--rollback` restaura archivos del framework, no un esquema ya migrado; revisa la compatibilidad antes de volver a un motor viejo.
-
-**Esta ruta está probada, no prometida.** El release check descarga el `agentic-kdd@3.19.0` real de npm, arma un proyecto consumidor con una base SQLite real en el esquema de la 3.19 y lo actualiza a la 3.20 — resultados en [Números medidos](#números-medidos-no-estimaciones).
-
----
+**Esta ruta está probada, no prometida.** El release check instala en un directorio limpio el tarball que está por publicar, arma consumidores ejecutando los motores **publicados** 3.19.0 y 3.20.0, les añade datos que un proyecto real podría perder (tablas propias, enteros de 64 bits, BLOBs, una vista y un índice) y luego corre, con esa CLI instalada, `--check`, `update`, un segundo `update`, el MCP por stdio y `--rollback`. Después de publicar, `npm run release:verify` descarga lo que de verdad está en npm, comprueba que es byte a byte el tarball verificado y repite la actualización desde la 3.19.0 con él.
 
 ## El MCP — para qué sirve y cómo conectarlo
 
@@ -271,8 +307,8 @@ Cada protección queda anotada en la libreta (`gate_events`) con su origen: **`m
 |---|---|
 | Dirección del error de rango (vs parser real, 1,989 símbolos) | 99.75% del lado seguro |
 | Grafo de un proyecto real (~414 archivos TS+JS) | 3,757 símbolos · ~4,900 aristas · 100% con rango de líneas |
-| **Release check de la 3.20** (03/10/2026, Windows, Node 24) | Suite completa en verde con cero tests omitidos · tarball sin datos privados · 528 sondas adversariales, 0 fallos |
-| **Actualización real 3.19 → 3.20** (desde el paquete publicado en npm) | 50 nodos de memoria y 500 filas privadas conservados · bytes de la base idénticos durante el update · un segundo update no escribe nada · el rollback restaura · `--migrate` conserva todas las filas · MCP `initialize` / `remember` / `recall` por stdio |
+| **Release check de la 3.20.1** (03/10/2026, Windows, Node 24 — la única plataforma medida) | Suite completa 624/624, cero omitidas · tarball (210 archivos) sin datos privados · 528 sondas adversariales, 0 fallos · se prueba el **tarball instalado** |
+| **Actualizaciones reales 3.19.0 → 3.20.1 y 3.20.0 → 3.20.1** (consumidores armados ejecutando los motores publicados) | `akdd update` solo: `VERIFIED` (25 y 9 migraciones aplicadas) · memoria conservada por **contenido** (30–31 tablas, 567–572 filas comparadas, más 500 filas privadas en una tabla propia) · segundo update `NO_CHANGES_VERIFIED` · `--rollback` revierte archivos y conserva la memoria más nueva · el motor anterior sigue leyendo la base migrada · MCP `initialize` / `remember` / `recall` por stdio (62 herramientas) |
 | Enrutador de esfuerzo (15 fixtures, umbral fijado antes de correr) | LOW: −90% de bytes de contexto, −54% de pasos · MEDIUM: −25 a −32% · HIGH conserva tdd, preservation, QA y reviewer. *Proxy: bytes que Agentix pide cargar; tokens del host no medidos* |
 | Benchmark de 19 fases (SaaS multi-tenant, con/sin Agentix) | errores por fase 2.6→~0 · tests que pasan a la primera 79%→100% · cascada de refactor 4/7→11/11 |
 
@@ -284,7 +320,7 @@ Cada protección queda anotada en la libreta (`gate_events`) con su origen: **`m
 
 Agentix es **de primera clase en Claude Code y Cursor** — ahí está probado en batalla. Como el motor se apoya en **estándares abiertos** (`AGENTS.md` y **MCP**), *debería* funcionar también con otros agentes (VS Code, Windsurf, Kiro, Aider…), pero por honestidad: **hasta ahora solo está probado a fondo en Claude Code y Cursor**. Si lo pruebas en otro IDE y funciona, abre un issue.
 
-Node.js: el paquete declara `>=18`. El CI corre Windows y Linux con Node 20, 22 y 24; el release check de la 3.20 corrió en Node 24. Git es obligatorio.
+Node.js: el paquete declara `>=20`, igual que la matriz del CI (Windows y Linux con Node 20, 22 y 24). Además, `akdd update` necesita un conector SQLite que supere sus pruebas de capacidad: `node:sqlite` (Node ≥ 22.13) o un `better-sqlite3` compatible. Donde no existe ninguno, se niega antes de escribir, y las pruebas del update se omiten diciendo por qué. **Verificado en esta versión: Windows con Node 24.** El CI todavía no corrió con esta versión, así que Linux y Node 20/22 no están verificados aquí. Git es obligatorio.
 
 ---
 
@@ -330,9 +366,11 @@ Todo lo de abajo es **manual** — úsalo solo cuando haga falta. Lo automático
 ```bash
 akdd init                      # Instala Agentix KDD en un proyecto
 akdd onboard                   # Incorpora un proyecto existente (brownfield)
-akdd update                    # Actualiza el motor desde el paquete INSTALADO (memoria intacta)
-akdd update --migrate          # ...y migra el esquema de memoria (respaldo + transacción + integridad)
-akdd update --rollback         # Deshace la última actualización (archivos del framework)
+akdd update                    # Un comando: respalda, migra (compatible, aditivo) y VERIFICA. Salida 0 solo si es verificable
+akdd update --check            # Solo el plan — no cambia nada
+akdd update --json             # Un único documento JSON estructurado por stdout
+akdd update --no-migrate       # Salta el esquema (el resultado nunca se presenta como completo)
+akdd update --rollback         # Deshace los ARCHIVOS de la última actualización (la memoria se conserva)
 akdd mcp --global              # Una entrada MCP para todos los proyectos (Cursor + Claude Code)
 akdd mcp · akdd mcp status     # MCP por proyecto · qué está configurado
 akdd hooks [status]            # Hooks de git: pre-commit, commit-msg, post-commit
@@ -415,6 +453,7 @@ akdd locks release-all         # Libera todo (limpieza de sesión)
 5. **La franja semántica sigue en el modelo.** Los valores de negocio los vigila hierro, pero "¿esto contradice el ESPÍRITU de la decisión?" lo juzga el LLM siguiendo protocolo — y la libreta registra qué protección vino de dónde.
 6. **Sin promesa fija de ahorro de tokens.** Los números de esfuerzo miden el contexto pedido, no los tokens del host ni la calidad del resultado.
 7. **El benchmark de 19 fases es N=1** — direccional, sin revisión de pares.
+8. **El update tiene límites que declara.** Un archivo de bloqueo no puede controlar a un programa externo que abre `memoria.db` con su propio SQLite: para esos casos el update se apoya en el bloqueo de escritura de SQLite y **se detiene** (`BLOCKED`) si no lo consigue. Decenas de módulos del motor todavía abren SQLite directamente en vez de por el adaptador; están listados, bloqueados por un test para que no aparezca uno nuevo sin que se note, y no consultan la exclusión. Un par director/constructor de TEAMS vivo durante un update no se probó de punta a punta (sí el servidor MCP, la cola de commits, el post-cycle, la telemetría y el vigilante de TEAMS). `better-sqlite3` no está verificado en Node 24. Restaurar datos históricos sobre aprendizajes nuevos no forma parte de `--rollback`.
 
 ---
 
@@ -442,7 +481,8 @@ El libro de jugadas completo del Coliseo vive en la rama [`coliseo-arena`](https
 
 ```bash
 npm ci
-npm run release:check          # suite + privacidad del tarball + piloto real 3.19 → 3.20 + MCP
+npm run release:check          # suite + privacidad del tarball + el tarball INSTALADO actualizando consumidores reales 3.19.0 y 3.20.0 + MCP
+npm run release:verify         # DESPUÉS de publicar: descarga de npm, ¿son los mismos bytes que el tarball verificado?, repite la actualización desde la 3.19.0 con él
 ```
 
 Resultados, log y el tarball exacto quedan en `_output/release-<versión>/` (`verification.json`). La publicación va únicamente por el workflow manual de GitHub Actions **Publish npm (manual)**: vuelve a correr el check en Windows y Linux, y luego publica con la publicación de confianza de npm (OIDC) **el tarball cuyo SHA registró el reporte**. Configuración y pasos: [PUBLICACION-3.20.md](PUBLICACION-3.20.md).

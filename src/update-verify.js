@@ -73,25 +73,42 @@ async function verificarFuncional(opts) {
     const dbCopia = path.join(tmp, '.agentic', 'memoria.db');
 
     // ── 1. búsqueda real ────────────────────────────────────────────────
+    // recall solo devuelve lo que la memoria considera recordable: se prueban
+    // varias consultas sacadas de los nodos y basta un acierto. Un 0 aislado no
+    // es un fallo (la consulta pudo caer en un nodo obsoleto o comprimido).
     let consulta = 'memoria';
     let nodos = 0;
+    let activos = 0;
+    const candidatas = [];
     {
       const lector = adapter.openReadOnly(dbCopia, { drivers: [driver] });
       try {
         nodos = Number(lector.get('SELECT count(*) AS n FROM nodos').n);
-        const fila = lector.get("SELECT titulo FROM nodos WHERE estado = 'ACTIVO' ORDER BY id LIMIT 1") || lector.get('SELECT titulo FROM nodos ORDER BY id LIMIT 1');
-        if (fila && fila.titulo) consulta = String(fila.titulo).split(/\s+/).filter((w) => w.length > 3)[0] || String(fila.titulo);
+        activos = Number(lector.get("SELECT count(*) AS n FROM nodos WHERE estado = 'ACTIVO' AND COALESCE(vigencia_tipo, '') NOT IN ('OBSOLETO','HISTORICO','SUPERSEDED')").n);
+        const filas = lector.all("SELECT titulo FROM nodos ORDER BY (CASE WHEN estado = 'ACTIVO' AND COALESCE(vigencia_tipo, '') NOT IN ('OBSOLETO','HISTORICO','SUPERSEDED') THEN 0 ELSE 1 END), id LIMIT 12");
+        for (const fila of filas) {
+          const palabras = String(fila.titulo || '').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 3).sort((x, y) => y.length - x.length);
+          if (palabras[0] && !candidatas.includes(palabras[0])) candidatas.push(palabras[0]);
+        }
       } finally { lector.close(); }
     }
-    const r1 = spawnSync(process.execPath, [path.join(tmp, '.agentic', 'grafo', 'kdd-memory.cjs'), 'recall', consulta, '--top=3'], { cwd: tmp, env: Object.assign({}, process.env, env), encoding: 'utf8', timeout: timeoutMs, windowsHide: true });
-    if (r1.status !== 0) checks.push({ name: 'busqueda_real', status: 'FAIL', detail: `kdd-memory recall salió con ${r1.status}: ${(r1.stderr || '').split('\n').filter((l) => !/ExperimentalWarning|trace-warnings/.test(l)).slice(0, 2).join(' ')}` });
-    else if (nodos === 0) { checks.push({ name: 'busqueda_real', status: 'PASS', detail: 'la búsqueda corre; la memoria no tiene nodos con los que probar aciertos' }); advertencias.push('la memoria está vacía: la búsqueda se probó sin aciertos posibles'); }
-    else {
-      const salida = String(r1.stdout || '');
-      const hallazgos = /Found:\s*(\d+)/.exec(salida);
-      const n = hallazgos ? Number(hallazgos[1]) : null;
-      checks.push({ name: 'busqueda_real', status: n === null || n > 0 ? 'PASS' : 'FAIL', detail: n === null ? 'recall terminó correctamente (formato de salida no reconocido)' : `recall "${consulta}" devolvió ${n} resultado(s) con ${nodos} nodo(s) en la memoria` });
+    if (!candidatas.length) candidatas.push(consulta);
+    const recall = (q) => spawnSync(process.execPath, [path.join(tmp, '.agentic', 'grafo', 'kdd-memory.cjs'), 'recall', q, '--top=3'], { cwd: tmp, env: Object.assign({}, process.env, env), encoding: 'utf8', timeout: timeoutMs, windowsHide: true });
+    let rotura = null; let acierto = null; let probadas = 0; let sinFormato = false;
+    for (const q of candidatas.slice(0, 8)) {
+      const r1 = recall(q);
+      probadas++;
+      if (r1.status !== 0) { rotura = `kdd-memory recall salió con ${r1.status}: ${(r1.stderr || '').split('\n').filter((l) => !/ExperimentalWarning|trace-warnings/.test(l)).slice(0, 2).join(' ')}`; break; }
+      const hallazgos = /Found:\s*(\d+)/.exec(String(r1.stdout || ''));
+      if (!hallazgos) { sinFormato = true; consulta = q; break; }
+      if (Number(hallazgos[1]) > 0) { acierto = { q, n: Number(hallazgos[1]) }; consulta = q; break; }
     }
+    if (rotura) checks.push({ name: 'busqueda_real', status: 'FAIL', detail: rotura });
+    else if (nodos === 0) { checks.push({ name: 'busqueda_real', status: 'PASS', detail: 'la búsqueda corre; la memoria no tiene nodos con los que probar aciertos' }); advertencias.push('la memoria está vacía: la búsqueda se probó sin aciertos posibles'); }
+    else if (acierto) checks.push({ name: 'busqueda_real', status: 'PASS', detail: `recall "${acierto.q}" devolvió ${acierto.n} resultado(s) con ${nodos} nodo(s) en la memoria` });
+    else if (sinFormato) checks.push({ name: 'busqueda_real', status: 'PASS', detail: 'recall terminó correctamente (formato de salida no reconocido)' });
+    else if (activos === 0) { checks.push({ name: 'busqueda_real', status: 'PASS', detail: `la búsqueda corre; ninguno de los ${nodos} nodo(s) es recuperable por recall (solo devuelve nodos ACTIVO y vigentes)` }); advertencias.push('la memoria no tiene nodos recuperables por recall (obsoletos, históricos o sin activar): no hubo aciertos posibles para probar la búsqueda'); }
+    else checks.push({ name: 'busqueda_real', status: 'FAIL', detail: `recall no devolvió resultados en ${probadas} consulta(s) tomadas de nodos recuperables (${activos} de ${nodos} nodo(s))` });
 
     // ── 2. compatibilidad MCP ───────────────────────────────────────────
     const r2 = await rpcMcp(path.join(tmp, '.agentic', 'grafo', 'mcp-server.cjs'), tmp, env, [

@@ -400,7 +400,12 @@ function registrarOwned(projectPath, hashes, meta, finales = []) {
     const abs = path.join(projectPath, rel);
     if (fs.existsSync(abs) && h[rel]) h[rel] = hashArchivo(abs);
   }
-  escribirJSON(ownedPath(projectPath), { ...meta, actualizado: new Date().toISOString(), archivos: h });
+  // Significado de cada hash, para que nadie lo confunda con otra cosa:
+  //   archivos[rel]  = hash (sha256) del archivo TAL COMO AGENTIX LO DEJÓ INSTALADO. Es la base para saber
+  //                    después si alguien lo cambió. NO es el hash de la versión del paquete: cuando un archivo
+  //                    se conservó por ser personalizado, aquí queda el hash que ya tenía, no el del paquete.
+  //   sha256/commit  = huella del paquete del que se instaló (no de un archivo).
+  escribirJSON(ownedPath(projectPath), { ...meta, semantica: { archivos: 'sha256 del archivo tal como Agentix lo dejó instalado (base de comparación); no es el hash del paquete', sha256: 'huella del paquete de origen' }, actualizado: new Date().toISOString(), archivos: h });
 }
 
 function codigo(code, msg) { const e = new Error(msg); e.code = code; return e; }

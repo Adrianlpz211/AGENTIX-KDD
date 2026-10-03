@@ -80,11 +80,30 @@ function clasificar(opts) {
   const hayOwned = Object.keys(previos).length > 0;
   const entradas = [], conflictos = [], bloqueos = [];
 
+  // Un enlace (o una junction) del proyecto que apunte FUERA haría que el update escribiera fuera del proyecto.
+  let raizReal;
+  try { raizReal = fs.realpathSync.native(projectPath); } catch { raizReal = path.resolve(projectPath); }
+  const dentro = (p) => { const a = process.platform === 'win32' ? p.toLowerCase() : p; const r = process.platform === 'win32' ? raizReal.toLowerCase() : raizReal; return a === r || a.startsWith(r + path.sep); };
+  const destinoSeguro = (rel) => {
+    let dir = path.join(projectPath, rel);
+    while (!fs.existsSync(dir)) { const padre = path.dirname(dir); if (padre === dir) return true; dir = padre; }
+    let real;
+    try { real = fs.realpathSync.native(dir); } catch { return true; }
+    return dentro(real);
+  };
+
   for (const rel of manifest.archivos(staging)) {
     const src = path.join(staging, rel);
     const dest = path.join(projectPath, rel);
     const nuevoNorm = hashNorm(leer(src));
     const e = { rel, clase: null, accion: null, base: null, motivo: '', hash_nuevo: sha(leer(src)), hash_actual: null };
+
+    if (!destinoSeguro(rel)) {
+      bloqueos.push({ code: 'ENLACE_FUERA_DEL_PROYECTO', file: rel, message: `${rel} se resuelve fuera del proyecto por un enlace o junction: actualizar escribiría fuera de él. Quite el enlace o declare el archivo en .agentic/protected_files.` });
+      Object.assign(e, { clase: 'DESCONOCIDO', accion: 'OMITIR', motivo: 'destino fuera del proyecto por un enlace' });
+      entradas.push(e);
+      continue;
+    }
 
     if (filtro && !filtro(rel)) { Object.assign(e, { clase: 'PROTEGIDO', accion: 'OMITIR', motivo: 'declarado en .agentic/protected_files' }); entradas.push(e); continue; }
     if (!fs.existsSync(dest)) { Object.assign(e, { clase: 'NUEVO', accion: 'CREAR', motivo: 'no existía en el proyecto' }); entradas.push(e); continue; }

@@ -49,4 +49,15 @@ function conservada(antes, dbPath) {
   return inv.compare(antes, despues);
 }
 
-module.exports = { crearBase, inventario, conservada, dba, inv, REPO };
+/**
+ * Un update solo se apoya en un conector SQLite que supere las pruebas reales
+ * (node:sqlite en Node >= 22.13, o un better-sqlite3 compatible). Sin él, el update
+ * se NIEGA por diseño (DRIVER_NO_APTO); estas pruebas no pueden ejercitarlo y se
+ * omiten diciendo por qué. El release check exige cero omitidas: corre donde hay conector.
+ */
+const SIN_DRIVER = (() => {
+  try { if (dba.selectDriverForUpdate().driver) return false; } catch { /* sin adaptador */ }
+  return 'sin conector SQLite apto para actualizar (Node < 22.13 sin better-sqlite3 compatible): el update se niega por diseño';
+})();
+
+module.exports = { crearBase, inventario, conservada, dba, inv, REPO, SIN_DRIVER };

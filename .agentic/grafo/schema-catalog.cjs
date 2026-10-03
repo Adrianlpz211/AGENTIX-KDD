@@ -295,7 +295,7 @@ function ejecutarOp(db, op, ctx) {
         const cols = colsDelDdl(idef.ddl);
         const d = db.get(`SELECT count(*) AS n FROM (SELECT 1 FROM ${q(op.table)} GROUP BY ${cols.map(q).join(', ')} HAVING count(*) > 1)`);
         if (Number(d.n) > 0) {
-          throw err('DATOS_DUPLICADOS', `no se puede crear el índice único ${op.index}: ${d.n} grupo(s) de ${op.table}(${cols.join(', ')}) están duplicados. Deduplicar es una decisión humana; el update no borra registros.`, { index: op.index, grupos: Number(d.n) });
+          throw err('DATOS_DUPLICADOS', 'no se puede crear el índice único ' + op.index + ': ' + d.n + ' grupo(s) de ' + op.table + '(' + cols.join(', ') + ') están duplicados. Deduplicar es una decisión humana; la actualización no borra registros.', { index: op.index, grupos: Number(d.n) });
         }
       }
       db.exec(idef.ddl);

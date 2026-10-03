@@ -9,11 +9,14 @@ const path = require('node:path');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release-integration.cjs'), 'utf8');
 
+// Bases ya publicadas contra las que se prueba la actualización (nunca la versión objetivo).
+const BASES_PUBLICADAS = ['3.19.0', '3.20.0'];
+
 test('release: el piloto no fija la versión objetivo', () => {
-  assert.match(src, /const TARGET=require\('\.\.\/package\.json'\)\.version/);
+  assert.match(src, /const TARGET\s*=\s*require\('\.\.\/package\.json'\)\.version/);
   const pkgVersion = require('../package.json').version;
-  const literales = [...src.matchAll(/'(\d+\.\d+\.\d+)'/g)].map((m) => m[1]).filter((v) => v !== '3.19.0');
-  assert.deepEqual(literales, [], 'versión escrita a mano distinta de la base 3.19.0 (' + pkgVersion + ' debe salir de package.json)');
+  const literales = [...src.matchAll(/'(\d+\.\d+\.\d+)'/g)].map((m) => m[1]).filter((v) => !BASES_PUBLICADAS.includes(v) || v === pkgVersion);
+  assert.deepEqual(literales, [], 'versión escrita a mano que no es una base publicada (' + pkgVersion + ' debe salir de package.json)');
 });
 
 test('release: la base del piloto sigue siendo la 3.19.0 publicada', () => {
