@@ -1,11 +1,11 @@
 # SPEC — actualizacion
 Generado: 2026-10-02
-Última actualización: 2026-10-02
+Última actualización: 2026-10-03
 Estado: IMPLEMENTADO
 
 ## Qué hace
 Módulo actualizacion del proyecto Agency OS.
-Tests: 304 pasando ✅
+Tests: 517 pasando ✅
 
 ## Criterios de aceptación
 - ✅ CRUD completo con tenant isolation (agencyId en todas las queries)

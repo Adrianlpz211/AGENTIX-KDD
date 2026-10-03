@@ -94,3 +94,6 @@ _output/*-baseline/
 # Bitácora de la sesión de actualización (rutas de escritorio dentro) — misma
 # regla que life-logbook-*.md: documento de sesión, no fuente.
 .agentic/actualizacion-agentix.md
+
+# Cola del post-commit (H21): SHAs pendientes y ACK por commit — estado de máquina
+.agentic/_hooks/
