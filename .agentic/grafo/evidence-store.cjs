@@ -257,7 +257,12 @@ function comprobar(root, f) {
   const cache = verificadas.get(r.ruta);
   let hash;
   if (cache && cache.mtimeMs === st.mtimeMs && cache.size === st.size) hash = cache.sha;
-  else { hash = hashArchivo(r.ruta); verificadas.set(r.ruta, { mtimeMs: st.mtimeMs, size: st.size, sha: hash }); }
+  else {
+    hash = hashArchivo(r.ruta);
+    // Solo se confía en la caché si el archivo es lo bastante ANTIGUO: un cambio del mismo tamaño dentro de la misma marca de
+    // tiempo (resolución del sistema de archivos) no cambiaría mtime ni size y pasaría por intacto («racy» como en git).
+    if (Date.now() - st.mtimeMs > 3000) verificadas.set(r.ruta, { mtimeMs: st.mtimeMs, size: st.size, sha: hash });
+  }
   if (hash !== f.sha256) return falla('EVIDENCE_CHANGED', 'El contenido cambió (el hash ya no coincide).', { evidence_id: f.evidence_id, expected_sha256: f.sha256, actual_sha256: hash });
   return { ok: true, status: 'OK', ruta: r.ruta, evidence_id: f.evidence_id, sha256: f.sha256, bytes: Number(f.bytes) };
 }
