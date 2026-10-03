@@ -160,6 +160,20 @@ const HELP = `
     akdd tiempo <inicio "<task>"|pausa|fin|resumen>   Measured task time (worked vs elapsed)
     akdd tiempos [module]  Time per module · akdd rebobina [from] [to] · akdd orden
 
+  3.20.1 — memory with evidence, layered recall, recoverable context:
+    akdd memory status|capabilities    What is stored, what is pending, and what each host can really capture
+    akdd memory index|detail|timeline|evidence   Layered recall: compact index → batch details → timeline → original evidence
+    akdd memory capture|drain|queue    Record an activity; process the durable queue (deterministic, no model calls)
+    akdd memory provenance <node>      Which activity and evidence a piece of knowledge comes from
+    akdd memory validate <node> --evidence=ev_..  --by=gate|test|user|verifier   Only with CURRENT evidence
+    akdd memory project status|adopt|fork   Stable project id: rename (adopt) vs copy (fork), always explicit
+    akdd memory health [verify-write]  Independent health states (only verify-write touches the database)
+    akdd context compress <file|-> --kind=K --task=T   Compact a tool result; the original stays recoverable
+    akdd context recover <reference_id> [--lines=a-b]  Retrieve the original (hash verified)
+    akdd effort budget <estado <id>|host [id]>          Cumulative effort budget per task
+    akdd benchmark contexto [--json]   Deterministic benchmark of compaction + recovery + effort (net payload, measured honestly)
+    akdd teams packet <estado|snapshot|ack|invalidar|cerrar>   Shared director↔builder context packets
+
   MCP Setup (Cursor / Claude Code / VS Code):
     akdd mcp               Configure MCP for THIS project (Cursor + Claude Code)
     akdd mcp --global      One entry for all projects: ~/.cursor/mcp.json + Claude Code user scope.
@@ -218,7 +232,8 @@ switch (command) {
   case 'effort': {
     const sub = arg1;
     if (['decide', 'reevaluar', 'show'].includes(sub)) runModule('effort-router.cjs', ...args.slice(1));
-    else uso('akdd effort <decide "<tarea>" [--paths=a,b] [--type=T] [--json]|reevaluar <id> <EVENTO>|show <id>>');
+    else if (sub === 'budget') runModule('effort-budget.cjs', ...args.slice(2));
+    else uso('akdd effort <decide "<tarea>" [--paths=a,b] [--type=T] [--json]|reevaluar <id> <EVENTO>|show <id>|budget <estado <id>|registrar <id> <kind>|host [id]>>');
     break;
   }
   case 'host-hooks': {
@@ -232,8 +247,9 @@ switch (command) {
     if (['init', 'plan', 'run', 'status', 'pause', 'resume', 'disable', 'pending', 'resolve', 'import', 'verify', 'views'].includes(sub)) runModule('teams-manager.cjs', sub, ...args.slice(2));
     else if (sub === 'goal') runModule('goal-check.cjs', ...args.slice(2));
     else if (sub === 'watch') runModule('teams-watch.cjs', ...args.slice(2));
+    else if (sub === 'packet') runModule('teams-packets.cjs', ...args.slice(2));
     else if (sub === 'vigilar') runModule('builder-inactividad.cjs', ...args.slice(2));
-    else uso('akdd teams <init [--aprobar-migracion]|plan <plan.json>|run|status|pause|resume|disable|pending|resolve <id> <decisión>|import <archivo>|verify <id> --gates=<json>|views|goal|watch --rol=R>');
+    else uso('akdd teams <init [--aprobar-migracion]|plan <plan.json>|run|status|pause|resume|disable|pending|resolve <id> <decisión>|import <archivo>|verify <id> --gates=<json>|views|packet <estado|snapshot|ack|invalidar|cerrar>|goal|watch --rol=R>');
     break;
   }
   case 'ws': {
@@ -248,9 +264,18 @@ switch (command) {
     else uso('akdd restore <list|create --label=L [--files=a,b]|show <id>|preview <id>|apply <id> --expected-current-hash=H [--confirmar]|resume|invalidate <id> <motivo>>');
     break;
   }
+  case 'memory': runModule('memory-cli.cjs', ...args.slice(1)); break;
+  case 'benchmark': {
+    if (arg1 === 'contexto') runModule('benchmark-contexto.cjs', 'run', ...args.slice(2));
+    else uso('akdd benchmark contexto [--seed=N] [--only=A,B] [--json]   (determinista, sin datos de usuario; las campañas con modelos reales quedan NO_EJECUTADO)');
+    break;
+  }
   case 'context': {
     if (arg1 === 'armar') runModule('context-pack.cjs', ...args.slice(1));
-    else uso('akdd context armar "<objetivo>" --paths=a,b [--task=T] [--rol=builder|qa|analyst]');
+    else if (['leer', 'stats', 'limpiar'].includes(arg1)) runModule('context-reuse.cjs', ...args.slice(1));
+    else if (arg1 === 'compress') runModule('memory-cli.cjs', 'compress', ...args.slice(2));
+    else if (arg1 === 'recover') runModule('memory-cli.cjs', 'recover', ...args.slice(2));
+    else uso('akdd context <armar "<objetivo>" --paths=a,b [--task=T] [--rol=builder|qa|analyst]|leer <archivo> [--task=T]|stats|limpiar|compress <archivo|-> --kind=K --task=T|recover <reference_id>>');
     break;
   }
   case 'clickup': case 'cu': {

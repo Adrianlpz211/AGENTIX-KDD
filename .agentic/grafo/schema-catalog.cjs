@@ -26,8 +26,8 @@ const crypto = require('crypto');
 const DATA = require('./schema-catalog.data.json');
 
 const BASELINE = '3.19.0';
-const SUPPORTED_LEVEL = 2;           // 1 = línea base 3.19.0, 2 = adiciones de 3.20.0
-const LEVEL_DE = (since) => (since === BASELINE ? 1 : 2);
+const SUPPORTED_LEVEL = 3;           // 1 = línea base 3.19.0, 2 = adiciones de 3.20.0, 3 = memoria con evidencia de 3.20.1
+const LEVEL_DE = (since) => (since === BASELINE ? 1 : since === '3.20.0' ? 2 : 3);
 const RELLENO_BASE = ['fecha_update', 'fecha_creacion', 'created_at', 'fecha'];
 
 const REGISTRY_DDL = [

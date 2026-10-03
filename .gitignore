@@ -103,4 +103,6 @@ _output/*-baseline/
 
 # akdd update: respaldos verificados de la memoria, journals e informes (3.20.1). NUNCA se versionan.
 .agentic/_update/
+# 3.20.1: originales recuperables (pueden contener salidas de herramientas del cliente), caché y cola de memoria
+.agentic/_evidence/
 .agentic/memoria.db.bak-*

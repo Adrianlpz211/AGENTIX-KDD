@@ -39,7 +39,7 @@ test('catálogo: una base REAL 3.20.0 solo tiene pendientes las funciones que el
   try {
     const r = sc.inspect(db);
     assert.ok(!r.pending.some((p) => p.id === 'create-table:lock_fencing'), 'lo de 3.20 ya está');
-    assert.ok(r.pending.every((p) => /contract|file_fingerprints|code_summaries|metadata|verified_contracts/.test(p.id)), 'solo funciones perezosas: ' + r.pending.map((p) => p.id));
+    assert.ok(r.pending.every((p) => /contract|file_fingerprints|code_summaries|metadata|verified_contracts|mem_/.test(p.id)), 'solo funciones perezosas o tablas nuevas de 3.20.1: ' + r.pending.map((p) => p.id));
   } finally { db.close(); }
 });
 

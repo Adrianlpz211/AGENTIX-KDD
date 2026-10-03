@@ -930,12 +930,26 @@ function regenerarVistas(root) {
     return evs.map((ev) => '```\n<<<AKDD-TEAMS v1\n' + JSON.stringify({ kind: 'EVENT', rol, seq: ev.seq, event_kind: ev.kind, task_id: ev.task_id, revision: ev.revision, payload: ev.payload })
       + '\nAKDD-TEAMS>>>\n```').join('\n') + '\n';
   };
+  /* H02: paquetes de contexto aún sin ACK, para la sesión que no tiene otra vía. Solo los pendientes (compacto); fail-soft. */
+  const paquetes = () => {
+    try {
+      const tp = require('./teams-packets.cjs');
+      const out = [];
+      for (const rol of ['builder', 'director']) {
+        for (const w of (tp.paquetesPendientes(root, { recipient_role: rol }).paquetes || [])) {
+          out.push('```\n<<<AKDD-TEAMS v1\n' + JSON.stringify({ kind: 'PACKET', rol, packet: w }) + '\nAKDD-TEAMS>>>\n```');
+        }
+      }
+      return out.length ? out.join('\n') + '\n' : '- (ninguno pendiente de ACK)\n';
+    } catch { return '- (no disponible)\n'; }
+  };
   const auditoria = aviso + `# Canal TEAMS — vista\n\nLa cola real vive en la base. Para responder desde fuera, pega un bloque:\n\n`
     + '```\n<<<AKDD-TEAMS v1\n{"kind":"RESULT","task_id":"...","event_id":"...","owner_id":"...","fencing":0,"subject_hash":"...","files":[]}\nAKDD-TEAMS>>>\n```\n\n'
     + `## Tareas para el constructor\n${lista(por(['READY']).map((t) => `${t.id} [${t.tier}]`))}\n\n`
     + `## En verificación del director\n${lista(por(['VERIFYING']).map((t) => t.id))}\n\n`
     + `## Entregas para el constructor (envoltorio)\n${envoltorios('builder')}\n`
     + `## Entregas para el director (envoltorio)\n${envoltorios('director')}\n`
+    + `## Paquetes de contexto pendientes de ACK (envoltorio)\n${paquetes()}\n`
     + `## Notas de la persona\n${MARCA_HUMANA_INICIO}\n${humano}\n${MARCA_HUMANA_FIN}\n`;
   escribirAtomico(path.join(root, '.legion', 'CONTINUIDAD.md'), continuidad);
   escribirAtomico(fCanal, auditoria);

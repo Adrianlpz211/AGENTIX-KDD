@@ -59,6 +59,13 @@ const PATRON_EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const PATRON_TELEFONO = /\+?\d[\d\s().-]{8,}\d/g;
 
 function redactar(texto) {
+  // 3.20.1: un solo redactor (memory-privacy.cjs, superset de estos patrones: JSON, cabeceras, .env, formatos de
+  // proveedor) y FALLA CERRADO. Antes un error aquí devolvía el texto íntegro; ahora devuelve la marca de fallo.
+  try { return require('./memory-privacy.cjs').redactar(texto); } catch { return '[REDACCION_FALLIDA]'; }
+}
+
+/** Redactor histórico (solo patrones locales): se conserva para quien lo importaba; ya no lo usa `redactar`. */
+function redactarLocal(texto) {
   let t = String(texto == null ? '' : texto);
   for (const p of PATRONES_SECRETOS) t = t.replace(p, '[REDACTADO]');
   return t.replace(PATRON_EMAIL, '[EMAIL]').replace(PATRON_TELEFONO, '[TELEFONO]');
@@ -532,5 +539,5 @@ module.exports = {
   SCHEMA_VERSION,
   startSpan, endSpan,
   recordStop, recordMemoryRead, recordMemoryWrite, recordDecision, recordStep, recordUsage,
-  exportToLangfuse, viewTrace, getSummary, prune, redactar, huella,
+  exportToLangfuse, viewTrace, getSummary, prune, redactar, redactarLocal, huella,
 };

@@ -95,8 +95,10 @@ function leerCanal(root, { rol }) {
 }
 
 /** La sesión acepta una tarea: queda escrito en su cola, no en el canal del director. */
-function ackear(root, { rol = 'builder', session_id, owner_id, delivery_id }) {
-  return encolar(root, rol, { kind: 'ACK', delivery_id, owner_id, host_session_id: session_id, event_id: 'ack-' + delivery_id });
+function ackear(root, { rol = 'builder', session_id, owner_id, delivery_id, packet_revision, packet_hash, packet_state_hash }) {
+  /* H02: el mismo ACK puede confirmar el paquete de contexto, identificando REVISIÓN y HASH recibidos. */
+  const paquete = packet_revision != null && packet_revision !== true ? { packet_revision: Number(packet_revision), packet_hash, packet_state_hash } : {};
+  return encolar(root, rol, { kind: 'ACK', delivery_id, owner_id, host_session_id: session_id, event_id: 'ack-' + delivery_id, ...paquete });
 }
 
 function entregar(root, { rol = 'builder', resultado }) {
@@ -174,6 +176,10 @@ class AdapterMdSesion {
       if (m.kind === 'ACK') {
         const a = tm.ack(this.root, { delivery_id: m.delivery_id, owner_id: m.owner_id || this.owner_id, host_session_id: m.host_session_id });
         if (a.status === 'ACKED') e.acks[m.delivery_id] = { session_id: m.host_session_id, task_id: a.task_id || null };
+        /* ACK del paquete de contexto (si la sesión lo trae): extiende el ACK de la entrega, no lo reemplaza. */
+        if (m.packet_revision != null && a.status === 'ACKED' && a.task_id) {
+          try { require('./teams-packets.cjs').ack(this.root, { task_id: a.task_id, recipient_role: this.rol, revision: m.packet_revision, hash: m.packet_hash, state_hash: m.packet_state_hash }); } catch { /* auxiliar */ }
+        }
       } else if (m.kind === 'RESULT') {
         resultados.push(Object.assign({}, m, { owner_id: m.owner_id || this.owner_id }));
       }
@@ -239,7 +245,7 @@ if (require.main === module) {
   if (cmd === 'registrar') r = registrar(root, { rol: opt.rol, host: opt.host, session_id: opt.session });
   else if (cmd === 'latido') r = latido(root, { rol: opt.rol, session_id: opt.session });
   else if (cmd === 'canal') r = leerCanal(root, { rol: opt.rol || 'builder' });
-  else if (cmd === 'ack') r = ackear(root, { rol: opt.rol || 'builder', session_id: opt.session, owner_id: opt.owner, delivery_id: opt.delivery });
+  else if (cmd === 'ack') r = ackear(root, { rol: opt.rol || 'builder', session_id: opt.session, owner_id: opt.owner, delivery_id: opt.delivery, packet_revision: opt['packet-revision'], packet_hash: opt['packet-hash'], packet_state_hash: opt['packet-state-hash'] });
   else if (cmd === 'resultado') r = entregar(root, { rol: opt.rol || 'builder', resultado: JSON.parse(fs.readFileSync(path.resolve(root, opt.archivo), 'utf8')) });
   else if (cmd === 'visto') r = visto(root, { rol: opt.rol || 'builder', hasta_seq: opt.seq });
   else if (cmd === 'retomar') r = retomar(root, { rol: opt.rol || 'builder', session_id: opt.session });

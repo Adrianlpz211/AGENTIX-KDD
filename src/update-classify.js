@@ -34,6 +34,9 @@ const ESENCIALES = [
   '.agentic/grafo/schema-catalog.data.json', '.agentic/grafo/schema.sql', '.agentic/grafo/schema-columns.cjs',
   '.agentic/grafo/update-guard.cjs', '.agentic/grafo/memory-inventory.cjs', '.agentic/grafo/kdd-memory.cjs',
   '.agentic/grafo/mcp-server.cjs', '.agentic/grafo/framework.json',
+  // 3.20.1: lo que kdd-memory.cjs y el servidor MCP nuevos requieren para escribir memoria con procedencia
+  '.agentic/grafo/memory-privacy.cjs', '.agentic/grafo/memory-core.cjs', '.agentic/grafo/evidence-store.cjs',
+  '.agentic/grafo/memory-queue.cjs', '.agentic/grafo/context-usage.cjs',
 ];
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');

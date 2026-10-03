@@ -5121,6 +5121,8 @@ const server = require('http').createServer((req, res) => {
   const base = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' };
   const fin = (status, texto, extra) => { res.writeHead(status, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, base, extra)); res.end(req.method === 'HEAD' ? undefined : texto); };
   if (!hostPermitido(req.headers.host)) return fin(403, 'Host no permitido');
+  // Única escritura de los paneles nuevos: reintentar un job muerto de la cola (valida origen, cabecera y límites).
+  if (req.method === 'POST' && String(req.url || '').split('?')[0] === '/api/v1/memory-retry') return API.manejarAccion(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') return fin(405, 'Método no permitido', { Allow: 'GET, HEAD' });
   let url;
   try { url = new URL(String(req.url || '/'), 'http://127.0.0.1'); } catch { return fin(400, 'URL inválida'); }
@@ -5144,6 +5146,13 @@ const server = require('http').createServer((req, res) => {
     res.end(req.method === 'HEAD' ? undefined : cargarGrafo('update-panel.cjs').HTML);
     return;
   }
+  if (ruta === '/memoria' || ruta === '/contexto') {
+    // Páginas propias de memoria visible y de contexto/esfuerzo (solo lectura). No tocan el tablero de grafos.
+    const pag = cargarGrafo('memoria-pagina.cjs');
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+    res.end(req.method === 'HEAD' ? undefined : (ruta === '/memoria' ? pag.MEMORIA_HTML : pag.CONTEXTO_HTML));
+    return;
+  }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
   res.end(req.method === 'HEAD' ? undefined : HTML);
@@ -5153,7 +5162,8 @@ server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
   console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}`);
-  console.log(`  Actualización y memoria → ${url}/actualizacion\n`);
+  console.log(`  Actualización y memoria → ${url}/actualizacion`);
+  console.log(`  Memoria → ${url}/memoria  ·  Contexto y esfuerzo → ${url}/contexto\n`);
   if (process.env.AKDD_DASH_NO_OPEN === '1') return;
   // Open browser
   const { exec } = require('child_process');

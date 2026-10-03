@@ -79,6 +79,82 @@ Options: `--check` (plan only — changes nothing), `--json` (one JSON document 
 
 **Requirements.** The update needs a SQLite driver that passes the real checks (read-only, transactions, locking, backup with WAL, BLOB, 64-bit integers, multi-process, clean close): `node:sqlite` on Node ≥ 22.13, or a compatible `better-sqlite3`. `sql.js` re-exports the whole file from memory and is **not** accepted for an update. Without one, the update refuses before writing and explains how to fix it. In this release the verified driver is `node:sqlite`: the optional `better-sqlite3@^9` has no prebuilt binary for Node 24 and failed to compile there, so that path is **unverified**.
 
+## 🆕 3.20.1 — memory you can trace, recall by layers, context that keeps its original
+
+The safe update ships together with a memory upgrade. Everything below is **native**: no Claude-Mem, no Headroom proxy, no cloud service, no extra daemon and no paid call by default. Other projects inspired some ideas; the mechanisms are Agentix's own and live in the same `memoria.db`.
+
+New tables arrive **only through `akdd update`** (the schema catalog, with the same backup and verification). Reading never creates or migrates anything: on an old database the memory commands say `SCHEMA_MISSING` and point to `akdd update`. Existing nodes keep their IDs (INTEGER or TEXT) and their content; nothing is regenerated.
+
+### Memory with provenance
+
+| Piece | What it is |
+|---|---|
+| **Activity** | A raw event from a real action: tool run, phase, gate result. Idempotent by project + host + session + host event id: resending one event keeps **one** activity and **one** job; two identical runs at different moments are **two** activities. |
+| **Observation** | A bounded reading of one or more activities (test failure, files touched, explicit decision, gate result). Many reads of the same file become **one** grouped observation. |
+| **Knowledge** | A KDD node with a state: *proposed → validated → suspect → obsolete*, mapped onto the existing node states. |
+| **Evidence** | A verifiable artifact: id, SHA-256, size, scope, retention. |
+
+**An observation or a summary never validates anything.** Validation needs *current* evidence (its hash is re-checked at that moment) and a validator that is a gate, a test, the user or a verifier. It is deliberately **not** exposed to the model over MCP: `akdd memory validate <node> --evidence=ev_… --by=gate`. When related code changes, validated knowledge becomes *suspect*. Identical knowledge in the same scope adds an occurrence instead of a new node; similar knowledge becomes a *review candidate*, never a merge; contradictions keep both origins. Records from before 3.20.1 are shown as `LEGACY_UNVERIFIED_PROVENANCE` when read — they are neither rewritten nor downgraded.
+
+**Privacy comes first.** Text is classified *authorized / redacted / private / unknown* and redacted **before** it reaches the database, the queue, a cache, the delivered context or the dashboard. Redaction **fails closed** (a redactor error stores nothing, never the original). Private paths (`.env`, keys, credentials…) keep metadata only. Add your own denied paths and fields in `.agentic/privacy-policy.json`. Regular expressions cannot guarantee they catch every secret — that is why deny lists exist; treat the redactor as risk reduction, not as a DLP.
+
+**What is captured depends on the host** — `akdd memory capabilities` prints the real picture:
+
+| Host | Capture | What it sees |
+|---|---|---|
+| Claude Code / Cursor **with the host hooks installed** (`akdd host-hooks install`, never automatic) | `NATIVE_PASSIVE` | Shell, edit and MCP actions **before** they run, and the guard's decision — not the tool's output |
+| Same hosts **without** hooks | `PIPELINE_ONLY` | Only what goes through Agentix: `aa:`, post-cycle, Agentix MCP tools, TEAMS |
+| Any other host | `UNSUPPORTED` | Nothing is promised |
+
+It does **not** see an IDE's internal reads and searches, tool output, or the model's reasoning.
+
+**Durable queue.** Capture inserts the event and its job in **one transaction**; a worker claims it with a lease and a fencing token, processes it with deterministic rules (no model call), retries with backoff and finally parks it as *dead-letter*, visible and retryable (bounded). A full queue answers `BACKPRESSURE` and does not claim "captured". Capture never blocks Shell/Edit: if it fails, it reports a degraded state.
+
+### Recall by layers
+
+```bash
+akdd memory index --query="refund rule"        # 1. compact index: id, title, state, provenance, estimated cost
+akdd memory detail --ids=12,40                 # 2. details of the chosen ids, in a bounded batch
+akdd memory timeline --node=12                 # 3. chronology around an activity or node, paginated
+akdd memory evidence ev_…  --lines=100-140     # 4. authorized original, with hash
+```
+
+Every answer carries explicit states (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSING`, `ERROR`, `INSUFFICIENT_BUDGET`), a known total, `has_more`/cursor and *why* something was omitted. Budgets are **cumulative per task** (changing role or asking again does not reset them) and follow the effort tier. Applicable **protected contracts are never dropped silently** by a budget. Lexical search works without embeddings and never creates the FTS index while querying. The same layers are MCP tools (`memory_index`, `memory_detail`, `memory_timeline`, `memory_evidence`); `recall` and `remember` are unchanged.
+
+### Compaction that keeps the original
+
+`akdd context compress <file|-> --kind=log|test|json|search|doc|code --task=T` compacts a large tool result **deterministically** (no model, no Python, no ML) and stores the authorized original; `akdd context recover <reference_id> --lines=a-b` returns it with its hash verified.
+
+- Logs group exact repetitions and keep the context around errors; test runs keep **every** failure; JSON is delivered as an explicitly labeled *sample* with the original counts; searches keep all affected paths.
+- **Code you are about to edit, audit, debug or verify is delivered whole**, as is gate evidence. Only orientation uses the AST index.
+- **A sample can never prove absence.** "No failures" requires the complete original (`verificarAusencia` scans it locally and returns only the result).
+- A malformed, empty or inflationary compaction returns the original with a warning. Without room to keep the original, it is **not** compacted. An expired or changed reference answers `EXPIRED` / `EVIDENCE_CHANGED` — never reconstructed content. Gate evidence is durable; originals used by an active task or sprint are pinned; only unpinned cache expires.
+
+### Effort that really changes, and shared context in TEAMS
+
+`LOW` now means less: no global search and no needless delegation — while scope, protected files, security and leases stay in every tier, and a "small change" to auth, payments or a migration stays `HIGH`. Reads of unchanged files are reused, and a changed hash always invalidates. In TEAMS the director and the builder exchange **versioned packets** (snapshot, or a delta only against the revision the receiver acknowledged); an out-of-order ACK or a restarted receiver gets a full snapshot, and the director **re-verifies the original evidence** — an invented PASS or evidence from an older version is rejected. `akdd effort budget …` and `akdd teams packet …` expose it. Controlling the *provider's* reasoning effort needs an explicit integration that is **not installed**; Agentix declares `HOST_NATIVE_UNCONTROLLED` and never promises to shrink a host's internal thinking.
+
+### See it
+
+`akdd dashboard` serves two more pages next to the graphs (which are untouched): **/memoria** (what is stored, queue, provenance, legacy records) and **/contexto** (tier, budget, net reduction and its measurement type, host coverage). Health shows independent states — service, readable, schema, search, last verified write, queue, update — and the dashboard is **not green** if the schema is broken even when HTTP answers 200. `akdd memory health verify-write` is the only command that exercises a write (in an isolated copy); opening the page never writes. Missing data is "not available", never `0`.
+
+### What was measured (deterministic, no user data)
+
+`akdd benchmark contexto` runs eight cases against the real modules — baseline (nothing compacted) vs optimized, same task, same acceptance. Recovering an original **counts against** the saving.
+
+| Case | Net payload saved | Note |
+|---|---|---|
+| A · text change under `LOW` | 94.1 % | no global search, no delegation, guards intact |
+| B · one error in 20,000 log lines | 99.8 % | the error stays visible, original recoverable |
+| C · "small change" in auth/payments | **0 %** | **by design**: stays `HIGH` with every control |
+| D · refactor with protected contracts | 95.2 % | all 30 protected contracts listed; under a tight cap it answers `INSUFFICIENT_BUDGET` instead of dropping any |
+| E · rare critical record in a long JSON | 99.4 % | found over the complete original |
+| F · empty / malformed / secret / code to edit | 41.4 % | edges: nothing lost, nothing leaked |
+| G · TEAMS, restarts and a changed evidence | 71.3 % | simulated receiver; protocol and database are real |
+| H · 4,000-node memory | 99.3 % | index + two details, never a dump |
+
+All 31 acceptance criteria held. This is a **payload** reduction (bytes exact; tokens are `bytes/4` *estimates*), not a saving of session, reasoning or money. A campaign with real models is `NO_EJECUTADO` (it costs money and needs your authorization), and none of this was measured inside Cursor or Claude Code.
+
 ## 🆕 What's new in 3.20 — from "the gate said PASS" to "show me the run"
 
 3.20 is the hardening release. The question behind every change was the same: *can a green light be faked?* Wherever the answer was yes, it got closed.
@@ -307,8 +383,8 @@ Every protection is recorded in the ledger (`gate_events`) with its origin: **`m
 |---|---|
 | Range-error direction (vs real parser, 1,989 symbols) | 99.75% safe side |
 | Graph of a real project (~414 TS+JS files) | 3,757 symbols · ~4,900 edges · 100% with line ranges |
-| **3.20.1 release check** (2026-10-03, Windows, Node 24 — the only platform measured) | Full suite 624/624, zero skipped · tarball (210 files) with no private data · 528 adversarial probes, 0 failures · the **installed tarball** is what gets tested |
-| **Real upgrades 3.19.0 → 3.20.1 and 3.20.0 → 3.20.1** (consumers built by running the published engines) | `akdd update` alone: `VERIFIED` (25 and 9 migrations applied) · memory preserved by **content** (30–31 tables, 567–572 rows compared, plus 500 private rows in a user table) · second update `NO_CHANGES_VERIFIED` · `--rollback` reverts files and keeps newer memory · the previous engine still reads the migrated database · MCP `initialize` / `remember` / `recall` over stdio (62 tools) |
+| **3.20.1 release check** (2026-10-03, Windows, Node 24 — the only platform measured) | Full suite 808/809 (the one not run is a smoke inside real Cursor/Claude hosts, declared `NO_EJECUTADO`) · tarball (229 files) with no private data · 528 adversarial probes, 0 failures · the **installed tarball** is what gets tested |
+| **Real upgrades 3.19.0 → 3.20.1 and 3.20.0 → 3.20.1** (consumers built by running the published engines) | `akdd update` alone: `VERIFIED` (25 and 9 migrations applied) · memory preserved by **content** (30–31 tables, 567–572 rows compared, plus 500 private rows in a user table) · second update `NO_CHANGES_VERIFIED` · `--rollback` reverts files and keeps newer memory · the previous engine still reads the migrated database · MCP `initialize` / `remember` / `recall` over stdio |
 | Effort router (15 fixtures, threshold fixed before running) | LOW: −90% context bytes, −54% steps · MEDIUM: −25 to −32% · HIGH keeps tdd, preservation, QA and reviewer. *Proxy: bytes Agentix asks to load; host tokens not measured* |
 | 19-phase benchmark (multi-tenant SaaS, with/without Agentix) | errors per phase 2.6→~0 · tests passing first try 79%→100% · refactor cascade 4/7→11/11 |
 
@@ -442,6 +518,29 @@ akdd locks release-all         # Release everything (session cleanup)
 ### Collaboration (team) — 🔒 private beta
 > Shared **team memory** is in **private beta**. Everything else works **100% locally, no account required**. Want it for your team? [Open an issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
+### Memory, context and effort (3.20.1)
+```bash
+akdd memory status                    # What is stored, what is pending, what each host captures
+akdd memory capabilities              # Capture per host: NATIVE_PASSIVE / PIPELINE_ONLY / UNSUPPORTED
+akdd memory index --query="..."        # Layered recall: 1 index, 2 detail, 3 timeline, 4 evidence
+akdd memory detail --ids=12,40
+akdd memory timeline --node=12
+akdd memory evidence ev_... --lines=100-140
+akdd memory capture --host=H --session=S --type=T --task=ID   # Record a real activity (idempotent)
+akdd memory drain                     # Process the durable queue (deterministic, no model call)
+akdd memory queue                     # Queue state; 'queue retry <job>' for a dead-letter job (bounded)
+akdd memory provenance <node>         # Which activities and evidence a piece of knowledge comes from
+akdd memory validate <node> --evidence=ev_... --by=gate|test|user|verifier
+akdd memory project status|adopt|fork # Stable project id: rename = adopt, copy = fork (always explicit)
+akdd memory health [verify-write]     # Independent health states; only verify-write exercises a write
+akdd context compress <file|-> --kind=log|test|json|search|doc|code --task=T [--purpose=debug]
+akdd context recover <reference_id> [--lines=a-b|--json-path=items]
+akdd context leer <file> --task=T     # Read with reuse (a changed hash always invalidates)
+akdd effort budget estado <task>      # Cumulative effort budget per task · 'host' = what Agentix cannot observe
+akdd teams packet estado|snapshot|ack|invalidar|cerrar   # Shared director/builder packets
+akdd benchmark contexto [--json]      # Deterministic benchmark (net payload, honest measurement)
+```
+
 ---
 
 ## Honest limits (what it is NOT)
@@ -454,6 +553,10 @@ akdd locks release-all         # Release everything (session cleanup)
 6. **No fixed token-saving promise.** The effort numbers measure context requested, not host tokens or result quality.
 7. **The 19-phase benchmark is N=1** — directional, not peer-reviewed.
 8. **The update has limits it states.** A lock file cannot control an outside program that opens `memoria.db` with its own SQLite: for those the update relies on SQLite's write lock and **stops** (`BLOCKED`) if it can't get it. Dozens of engine modules still open SQLite directly instead of through the adapter; they are listed, locked by a test so no new one appears unnoticed, and do not consult the exclusion. A live TEAMS director/builder pair during an update was not tested end to end (the MCP server, the commit queue, post-cycle, telemetry and the TEAMS watcher were). `better-sqlite3` is unverified on Node 24. Restoring historical data over newer learnings is not part of `--rollback`.
+9. **Memory with provenance sees what the host hands over.** Native passive capture needs the host hooks installed and only covers actions *before* they run; without them, only what goes through Agentix is recorded. A claim of "verified inside Cursor/Claude" is never made from a fixture: the TEAMS receiver, builder and director in the tests are simulated, the protocol and the database are real, and a smoke test in real hosts is `NO_EJECUTADO` unless you run it.
+10. **Compaction is a payload measure, not a promise.** The benchmark measures bytes Agentix controls, deterministically; tokens are `bytes/4` estimates. A campaign with real models is `NO_EJECUTADO`. When recovering the original is needed, the saving shrinks — and in some cases it is zero by design.
+11. **The redactor reduces risk; it is not a DLP.** Regular expressions miss secrets that carry no context. Use `.agentic/privacy-policy.json` to deny paths and fields.
+
 
 ---
 

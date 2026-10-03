@@ -83,3 +83,5 @@ test/
 # Respaldos de la memoria de quien publica: jamás en el paquete
 .agentic/memoria.db.bak-*
 .agentic/_update/
+.agentic/_evidence/
+.agentic/_context/

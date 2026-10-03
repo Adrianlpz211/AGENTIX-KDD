@@ -1289,6 +1289,49 @@ async function main() {
       (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
   }
 
+  // Step 2.14: Memoria con procedencia (C01/C02) — el cierre del ciclo es una actividad REAL.
+  //
+  // Registra el cierre (archivos del commit, tests, tarea) como evento con su job, drena la cola con las
+  // reglas DETERMINISTAS (sin llamar a ningún modelo), marca como sospechoso el conocimiento validado cuyos
+  // archivos cambiaron, suelta los pins de evidencia de esta tarea y purga solo caché caducada sin pin.
+  // WARN-only y fail-soft: un fallo aquí informa degradación, jamás frena el cierre del ciclo.
+  try {
+    const core = require(path.join(GRAFO_DIR, 'memory-core.cjs'));
+    const disp = core.disponibilidad(ROOT);
+    if (disp.state === 'READY') {
+      const tarea = String(taskName || 'ciclo').replace(/[^\w.-]+/g, '-').slice(0, 80) || 'ciclo';
+      const archivos = (commitFilesForScans || []).slice(0, 100);
+      // Artefactos de gates de este ciclo (.agentic/_executions): se REGISTRAN como evidencia durable (referencia
+      // verificable por hash, no copia) y se enlazan al evento. El resumen jamás sustituye a estos originales.
+      const refs = [];
+      try {
+        const ev = require(path.join(GRAFO_DIR, 'evidence-store.cjs'));
+        const dirEj = path.join(AGENTIC_DIR, '_executions');
+        const recientes = fs.existsSync(dirEj) ? fs.readdirSync(dirEj).map((n) => ({ n, t: fs.statSync(path.join(dirEj, n)).mtimeMs })).filter((x) => Date.now() - x.t < 15 * 60 * 1000).sort((a, b) => b.t - a.t).slice(0, 20) : [];
+        for (const x of recientes) {
+          const r = ev.guardarArchivo(ROOT, '.agentic/_executions/' + x.n, { copy: false, kind: 'gate_artifact', retention: 'durable_audit', scope: tarea });
+          if (r && r.ok) refs.push(r.evidence_id);
+        }
+      } catch { /* sin almacén: los artefactos siguen en _executions */ }
+      const cap = core.capturar(ROOT, {
+        host: 'agentix', session_id: 'post-cycle', host_event_id: 'cycle:' + (results.ciclo || Date.now()),
+        event_type: 'cycle_close', role: 'memory', task_id: tarea, cycle_id: results.ciclo ? String(results.ciclo) : null,
+        paths: archivos, evidence_refs: refs, input: { area, tests: testsPassing }, output: { contratos: results.contratos && results.contratos.success ? results.contratos.pasando : null },
+      });
+      const q = require(path.join(GRAFO_DIR, 'memory-queue.cjs'));
+      const dr = await q.drenar(ROOT, { owner: 'post-cycle:' + process.pid, max: 50 });
+      const inv = archivos.length ? core.invalidarPorArchivos(ROOT, archivos) : { suspect: [] };
+      let pins = 0;
+      try { pins = require(path.join(GRAFO_DIR, 'evidence-store.cjs')).soltar(ROOT, 'task', tarea).released || 0; } catch { /* sin almacén */ }
+      try { require(path.join(GRAFO_DIR, 'evidence-store.cjs')).limpiar(ROOT, {}); } catch { /* caché auxiliar */ }
+      if (!silent) console.log('  2.14 Memoria con procedencia... ' + (cap.ok ? '✅' : '⚠️  ' + (cap.code || cap.status)) + ' · cola: ' + dr.done + ' procesado(s)' + (dr.dead_letter ? ', ' + dr.dead_letter + ' en dead-letter' : '') + (inv.suspect && inv.suspect.length ? ' · ' + inv.suspect.length + ' conocimiento(s) a revisar' : '') + (pins ? ' · ' + pins + ' pin(s) liberado(s)' : ''));
+    } else if (!silent) {
+      console.log('  2.14 Memoria con procedencia... — (' + disp.state + (disp.hint ? ': ' + disp.hint : '') + ')');
+    }
+  } catch (e) {
+    if (!silent) console.log('  2.14 Memoria con procedencia... ⚠️  omitido' + (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
+  }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);

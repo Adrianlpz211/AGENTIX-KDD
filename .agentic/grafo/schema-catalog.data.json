@@ -5,7 +5,7 @@
    "3.19.0",
    "3.20.0"
   ],
-  "note": "esquemas reales de los paquetes publicados + DDL de funciones perezosas del código fuente"
+  "note": "esquemas reales de los paquetes publicados + DDL de funciones perezosas del código fuente + tablas nuevas de 3.20.1 (scripts/memory-ddl-3201.cjs)"
  },
  "derived_tables": [
   "ast_symbols",
@@ -2411,6 +2411,1496 @@
     }
    ],
    "indexes": []
+  },
+  "mem_compression_refs": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_compression_refs (\n  reference_id TEXT PRIMARY KEY,\n  schema_version INTEGER NOT NULL DEFAULT 1,\n  project_id TEXT NOT NULL,\n  task_id TEXT,\n  evidence_id TEXT NOT NULL,\n  source_kind TEXT NOT NULL,\n  source_hash TEXT NOT NULL,\n  content_type TEXT NOT NULL,\n  original_bytes INTEGER NOT NULL,\n  delivered_bytes INTEGER NOT NULL,\n  compression_method TEXT NOT NULL,\n  complete INTEGER NOT NULL DEFAULT 0,\n  retrieval_count INTEGER NOT NULL DEFAULT 0,\n  recovered_bytes INTEGER NOT NULL DEFAULT 0,\n  created_at TEXT NOT NULL\n)",
+   "columns": [
+    {
+     "name": "reference_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "schema_version",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "task_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "evidence_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "source_kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "source_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "content_type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "original_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "delivered_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "compression_method",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "complete",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "retrieval_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "recovered_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_cref_task",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_cref_task ON mem_compression_refs (project_id, task_id)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_context_packets": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_context_packets (\n  packet_id TEXT PRIMARY KEY,\n  schema_version INTEGER NOT NULL DEFAULT 1,\n  project_id TEXT NOT NULL,\n  plan_id TEXT,\n  sprint_id TEXT,\n  task_id TEXT NOT NULL,\n  sender_role TEXT NOT NULL,\n  recipient_role TEXT NOT NULL,\n  revision INTEGER NOT NULL,\n  base_revision INTEGER,\n  kind TEXT NOT NULL DEFAULT 'snapshot',\n  body TEXT NOT NULL,\n  body_hash TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'SENT',\n  acked_revision INTEGER,\n  acked_hash TEXT,\n  acked_at TEXT,\n  created_at TEXT NOT NULL,\n  UNIQUE (project_id, task_id, recipient_role, revision)\n)",
+   "columns": [
+    {
+     "name": "packet_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "schema_version",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "plan_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "sprint_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "task_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "sender_role",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "recipient_role",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "revision",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "base_revision",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'snapshot'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "body",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "body_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'SENT'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "acked_revision",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "acked_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "acked_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_packets_task",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_packets_task ON mem_context_packets (project_id, task_id, recipient_role, revision)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_context_usage": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_context_usage (\n  usage_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  project_id TEXT NOT NULL,\n  task_id TEXT NOT NULL,\n  sprint_id TEXT,\n  role TEXT,\n  kind TEXT NOT NULL,\n  original_bytes INTEGER NOT NULL DEFAULT 0,\n  delivered_bytes INTEGER NOT NULL DEFAULT 0,\n  recovered_bytes INTEGER NOT NULL DEFAULT 0,\n  measure TEXT NOT NULL DEFAULT 'estimated_bytes4',\n  tokens_original INTEGER,\n  tokens_delivered INTEGER,\n  latency_ms INTEGER,\n  observed INTEGER NOT NULL DEFAULT 1,\n  detail TEXT,\n  created_at TEXT NOT NULL\n)",
+   "columns": [
+    {
+     "name": "usage_id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "task_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "sprint_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "role",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "original_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "delivered_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "recovered_bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "measure",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'estimated_bytes4'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "tokens_original",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "tokens_delivered",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "latency_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "observed",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    },
+    {
+     "name": "detail",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_usage_task",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_usage_task ON mem_context_usage (project_id, task_id, kind)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_events": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_events (\n  event_id TEXT PRIMARY KEY,\n  schema_version INTEGER NOT NULL DEFAULT 1,\n  project_id TEXT NOT NULL,\n  canonical_project_root TEXT NOT NULL,\n  session_id TEXT NOT NULL,\n  task_id TEXT,\n  cycle_id TEXT,\n  host TEXT NOT NULL,\n  role TEXT,\n  host_event_id TEXT NOT NULL,\n  event_type TEXT NOT NULL,\n  sequence INTEGER NOT NULL DEFAULT 0,\n  occurred_at TEXT NOT NULL,\n  received_at TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'CAPTURED',\n  paths TEXT,\n  input_summary TEXT,\n  output_summary TEXT,\n  evidence_refs TEXT,\n  redaction_version TEXT NOT NULL,\n  privacy_class TEXT NOT NULL DEFAULT 'redacted',\n  attempts INTEGER NOT NULL DEFAULT 1,\n  UNIQUE (project_id, host, session_id, host_event_id)\n)",
+   "columns": [
+    {
+     "name": "event_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "schema_version",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "canonical_project_root",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "session_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "task_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "cycle_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "host",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "role",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "host_event_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "event_type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "sequence",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "occurred_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "received_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'CAPTURED'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "paths",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "input_summary",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "output_summary",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "evidence_refs",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "redaction_version",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "privacy_class",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'redacted'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "attempts",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_events_task",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_events_task ON mem_events (project_id, task_id, sequence)"
+    },
+    {
+     "name": "idx_mem_events_time",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_events_time ON mem_events (project_id, occurred_at, sequence)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_evidence": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_evidence (\n  evidence_id TEXT PRIMARY KEY,\n  project_id TEXT NOT NULL,\n  kind TEXT NOT NULL,\n  store TEXT NOT NULL,\n  locator TEXT NOT NULL,\n  sha256 TEXT NOT NULL,\n  bytes INTEGER NOT NULL,\n  content_type TEXT,\n  scope TEXT,\n  policy_id TEXT,\n  privacy_class TEXT NOT NULL DEFAULT 'redacted',\n  retention TEXT NOT NULL DEFAULT 'cache',\n  status TEXT NOT NULL DEFAULT 'AVAILABLE',\n  created_at TEXT NOT NULL,\n  last_verified_at TEXT,\n  last_accessed_at TEXT,\n  expires_at TEXT\n)",
+   "columns": [
+    {
+     "name": "evidence_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "store",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "locator",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "sha256",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "bytes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "content_type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "scope",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "policy_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "privacy_class",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'redacted'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "retention",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'cache'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'AVAILABLE'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "last_verified_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "last_accessed_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "expires_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_evidence_hash",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_evidence_hash ON mem_evidence (project_id, sha256)"
+    },
+    {
+     "name": "idx_mem_evidence_retention",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_evidence_retention ON mem_evidence (retention, last_accessed_at)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_evidence_pins": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_evidence_pins (\n  evidence_id TEXT NOT NULL,\n  owner_kind TEXT NOT NULL,\n  owner_id TEXT NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (evidence_id, owner_kind, owner_id)\n)",
+   "columns": [
+    {
+     "name": "evidence_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "owner_kind",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "owner_id",
+     "type": "TEXT",
+     "pk": 3,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_pins_owner",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_pins_owner ON mem_evidence_pins (owner_kind, owner_id)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_health": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_health (\n  check_name TEXT NOT NULL,\n  scope TEXT NOT NULL DEFAULT 'project',\n  status TEXT NOT NULL,\n  detail TEXT,\n  source TEXT NOT NULL,\n  checked_at TEXT NOT NULL,\n  expires_at TEXT,\n  PRIMARY KEY (check_name, scope)\n)",
+   "columns": [
+    {
+     "name": "check_name",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "scope",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": "'project'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "detail",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "source",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "checked_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "expires_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_job_events": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_job_events (\n  job_id TEXT NOT NULL,\n  event_id TEXT NOT NULL,\n  PRIMARY KEY (job_id, event_id)\n)",
+   "columns": [
+    {
+     "name": "job_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "event_id",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_job_events_event",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_job_events_event ON mem_job_events (event_id)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_jobs": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_jobs (\n  job_id TEXT PRIMARY KEY,\n  project_id TEXT NOT NULL,\n  kind TEXT NOT NULL DEFAULT 'observe',\n  state TEXT NOT NULL DEFAULT 'PENDING',\n  required INTEGER NOT NULL DEFAULT 0,\n  attempts INTEGER NOT NULL DEFAULT 0,\n  max_attempts INTEGER NOT NULL DEFAULT 5,\n  manual_retries INTEGER NOT NULL DEFAULT 0,\n  next_attempt_at TEXT NOT NULL,\n  lease_owner TEXT,\n  lease_token INTEGER NOT NULL DEFAULT 0,\n  lease_until TEXT,\n  result_ref TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  error_code TEXT\n)",
+   "columns": [
+    {
+     "name": "job_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'observe'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "state",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'PENDING'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "required",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "attempts",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "max_attempts",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "5",
+     "since": "3.20.1"
+    },
+    {
+     "name": "manual_retries",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "next_attempt_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "lease_owner",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "lease_token",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "0",
+     "since": "3.20.1"
+    },
+    {
+     "name": "lease_until",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "result_ref",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "error_code",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_jobs_state",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_jobs_state ON mem_jobs (project_id, state, next_attempt_at)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_knowledge": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_knowledge (\n  node_id TEXT PRIMARY KEY,\n  project_id TEXT NOT NULL,\n  state TEXT NOT NULL DEFAULT 'PROPOSED',\n  provenance TEXT NOT NULL DEFAULT 'OBSERVED',\n  scope TEXT,\n  content_key TEXT,\n  occurrences INTEGER NOT NULL DEFAULT 1,\n  validated_at TEXT,\n  validated_by TEXT,\n  stale_since TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n)",
+   "columns": [
+    {
+     "name": "node_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "state",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'PROPOSED'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "provenance",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'OBSERVED'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "scope",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "content_key",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "occurrences",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "1",
+     "since": "3.20.1"
+    },
+    {
+     "name": "validated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "validated_by",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "stale_since",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_knowledge_key",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_knowledge_key ON mem_knowledge (project_id, content_key)"
+    },
+    {
+     "name": "idx_mem_knowledge_state",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_knowledge_state ON mem_knowledge (project_id, state)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_observation_events": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_observation_events (\n  observation_id TEXT NOT NULL,\n  event_id TEXT NOT NULL,\n  PRIMARY KEY (observation_id, event_id)\n)",
+   "columns": [
+    {
+     "name": "observation_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "event_id",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_obs_events_event",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_obs_events_event ON mem_observation_events (event_id)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_observations": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_observations (\n  observation_id TEXT PRIMARY KEY,\n  project_id TEXT NOT NULL,\n  task_id TEXT,\n  kind TEXT NOT NULL,\n  summary TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'CAPTURED',\n  dedupe_key TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  processor TEXT,\n  error_code TEXT\n)",
+   "columns": [
+    {
+     "name": "observation_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "task_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "summary",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'CAPTURED'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "dedupe_key",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "processor",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "error_code",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_obs_dedupe",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_obs_dedupe ON mem_observations (project_id, dedupe_key)"
+    },
+    {
+     "name": "idx_mem_obs_status",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_obs_status ON mem_observations (project_id, status)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_project": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_project (\n  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),\n  project_id TEXT NOT NULL,\n  canonical_root TEXT NOT NULL,\n  created_at TEXT NOT NULL,\n  origin TEXT NOT NULL DEFAULT 'created',\n  previous_ids TEXT\n)",
+   "columns": [
+    {
+     "name": "singleton",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "canonical_root",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "origin",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'created'",
+     "since": "3.20.1"
+    },
+    {
+     "name": "previous_ids",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [],
+   "fuente": "scripts/memory-ddl-3201.cjs"
+  },
+  "mem_provenance": {
+   "since": "3.20.1",
+   "create": "CREATE TABLE IF NOT EXISTS mem_provenance (\n  provenance_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  project_id TEXT NOT NULL,\n  node_id TEXT NOT NULL,\n  relation TEXT NOT NULL,\n  observation_id TEXT NOT NULL DEFAULT '',\n  event_id TEXT NOT NULL DEFAULT '',\n  evidence_id TEXT NOT NULL DEFAULT '',\n  related_node_id TEXT NOT NULL DEFAULT '',\n  note TEXT,\n  created_at TEXT NOT NULL,\n  UNIQUE (project_id, node_id, relation, observation_id, event_id, evidence_id, related_node_id)\n)",
+   "columns": [
+    {
+     "name": "provenance_id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "node_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "relation",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "observation_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "''",
+     "since": "3.20.1"
+    },
+    {
+     "name": "event_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "''",
+     "since": "3.20.1"
+    },
+    {
+     "name": "evidence_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "''",
+     "since": "3.20.1"
+    },
+    {
+     "name": "related_node_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "''",
+     "since": "3.20.1"
+    },
+    {
+     "name": "note",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.1"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.1"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_mem_prov_event",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_prov_event ON mem_provenance (event_id)"
+    },
+    {
+     "name": "idx_mem_prov_node",
+     "since": "3.20.1",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_mem_prov_node ON mem_provenance (project_id, node_id)"
+    }
+   ],
+   "fuente": "scripts/memory-ddl-3201.cjs"
   },
   "metadata": {
    "since": "3.19.0",

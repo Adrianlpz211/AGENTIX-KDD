@@ -479,6 +479,14 @@ function remember(entry, options = {}, projectRoot) {
 function rememberInterno(entry, options, projectRoot) {
   const { tipo = 'patron', area = 'global', confianza = 'BAJA', archivos = [] } = options;
 
+  // Privacidad ANTES de persistir (3.20.1): un secreto que llega en la entrada no puede quedar escrito en
+  // la base, en su FTS ni en el contexto que luego se entrega. Falla CERRADO: si la redacción no puede
+  // hacerse, no se escribe nada (jamás se guarda el original por un error del redactor).
+  const privacidad = require('./memory-privacy.cjs');
+  const redaccion = privacidad.redactarSecretos(entry, privacidad.cargarPolitica(projectRoot));
+  if (!redaccion.ok) return { ok: false, error: 'REDACTION_FAILED', reason: 'la entrada no se pudo redactar: no se guarda' };
+  entry = redaccion.text;
+
   const db = openDB(projectRoot, { write: true });
   if (!db) return { ok: false, error: 'DB unavailable' };
 

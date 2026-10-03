@@ -48,6 +48,32 @@ const DEFAULT_POLICY = {
 };
 const MINIMOS = ['scope', 'protected-files', 'security', 'leases'];
 
+/**
+ * Control del proveedor (H02, OPCIONAL y solo declarativo). Por defecto el host
+ * decide cuánto razona: no se controla y no se promete nada. Solo una
+ * configuración EXPLÍCITA del proyecto (`.agentic/effort-provider.json`) puede
+ * declarar otra capacidad; Agentix jamás toca endpoints, credenciales, modelos
+ * ni ajustes de Cursor por su cuenta.
+ *   HOST_NATIVE_UNCONTROLLED     el host razona como quiere; no hay control.
+ *   CONTEXT_CONTROLLED           Agentix controla el CONTEXTO que entrega, no el razonamiento.
+ *   PROVIDER_EFFORT_CONTROLLED   hay un proxy/API validado que cambia parámetros de razonamiento.
+ * Una instrucción textual NO baja el "thinking" interno: no cuenta como control.
+ */
+const PROVEEDOR_CAPACIDADES = ['HOST_NATIVE_UNCONTROLLED', 'CONTEXT_CONTROLLED', 'PROVIDER_EFFORT_CONTROLLED'];
+
+function capacidadProveedor(root) {
+  const defecto = { capability: 'HOST_NATIVE_UNCONTROLLED', can_set_reasoning: false, project_scoped: true, origen: 'default' };
+  if (!root) return defecto;
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(path.join(root, '.agentic', 'effort-provider.json'), 'utf8')); } catch { return defecto; }
+  if (!cfg || !PROVEEDOR_CAPACIDADES.includes(cfg.capability)) return { ...defecto, error: 'effort-provider.json declara una capacidad desconocida: se ignora' };
+  // La capacidad fuerte exige validación explícita; sin ella se degrada a la que sí se puede probar.
+  if (cfg.capability === 'PROVIDER_EFFORT_CONTROLLED' && !(cfg.validated === true && cfg.validated_at && cfg.project_scoped !== false)) {
+    return { capability: 'CONTEXT_CONTROLLED', can_set_reasoning: false, project_scoped: true, origen: 'effort-provider.json', degradada_de: 'PROVIDER_EFFORT_CONTROLLED', error: 'PROVIDER_EFFORT_CONTROLLED exige validated:true, validated_at y alcance por proyecto: se degrada a CONTEXT_CONTROLLED' };
+  }
+  return { capability: cfg.capability, can_set_reasoning: cfg.capability === 'PROVIDER_EFFORT_CONTROLLED', project_scoped: true, origen: 'effort-provider.json' };
+}
+
 // ─── POLÍTICA ────────────────────────────────────────────────────────────────
 
 function validarPolitica(p) {
@@ -200,6 +226,7 @@ function construir(entrada, tier, riesgo, dificultad, policy, extra) {
       alcance = { nivel: a.nivel, rutas: a.rutas, motivos: a.motivos, suite_front: a.suite };
     } catch { /* sin análisis: el tier decide */ }
   }
+  const prov = capacidadProveedor(extra && extra._root);
   delete extra._root;
   return {
     policy_version: policy.policy_version,
@@ -221,7 +248,8 @@ function construir(entrada, tier, riesgo, dificultad, policy, extra) {
     recall_top_k: t.recall_top_k,
     escalation_conditions: policy.escalation_conditions,
     user_hard_limit: Number.isFinite(u.max_context_bytes) || Number.isFinite(u.max_tool_calls) ? { max_context_bytes: u.max_context_bytes ?? null, max_tool_calls: u.max_tool_calls ?? null } : null,
-    host_effort: 'no_controlable',
+    host_effort: prov.can_set_reasoning ? 'controlado_por_proveedor' : 'no_controlable',
+    provider_capability: prov.capability,
     subject_hash: entrada.subject_hash || null,
     ...extra,
   };
@@ -264,6 +292,18 @@ function escribir(root, estado) {
   fs.renameSync(tmp, f);
 }
 
+/**
+ * Contadores ACUMULADOS por tarea (H02). Son ADITIVOS: un estado escrito por una
+ * versión anterior solo tiene context_bytes y tool_calls; `usoCompleto` rellena
+ * el resto con 0 al leer, sin reescribir el archivo en disco hasta el siguiente
+ * consumo. Todos cuentan SOLO lo que Agentix controla: lo que el host hace por
+ * su cuenta no está aquí (ver host_unobserved: es "no observado", no un 0).
+ */
+const CONTADORES = ['context_bytes', 'tool_calls', 'retrieved_bytes', 'retrievals', 'searches', 'file_reads', 'delegations',
+  'repairs', 'rereads_unchanged', 'rereads_avoided', 'cache_invalidations', 'duration_ms', 'host_unobserved', 'heartbeats_ignored'];
+const usoVacio = () => Object.fromEntries(CONTADORES.map((k) => [k, 0]));
+const usoCompleto = (u) => ({ ...usoVacio(), ...(u || {}) });
+
 /** Decide y persiste; si la tarea ya tiene decisión, la devuelve (una vez por tarea). */
 function decidirYGuardar(root, entrada, opciones = {}) {
   const id = idTarea(entrada);
@@ -272,7 +312,7 @@ function decidirYGuardar(root, entrada, opciones = {}) {
   const decision = decidir({ ...entrada, task_id: id }, { ...opciones, root });
   escribir(root, {
     decision, entrada: { intent: entrada.intent, paths: entrada.paths || [], origen: entrada.origen || 'aa' },
-    uso: { context_bytes: 0, tool_calls: 0 }, estado: 'EN_CURSO',
+    uso: usoVacio(), estado: 'EN_CURSO',
     historial: [{ ts: new Date().toISOString(), evento: 'DECIDIDO', tier: decision.tier, motivo: decision.reason_codes.join(',') }],
   });
   return decision;
@@ -316,38 +356,101 @@ function reevaluar(root, id, evento, detalle) {
 function consumir(root, id, uso = {}) {
   const e = leer(root, id);
   if (!e) return { status: 'ERROR', reason_code: 'SIN_DECISION' };
-  e.uso.context_bytes += Number(uso.context_bytes) || 0;
-  e.uso.tool_calls += Number(uso.tool_calls) || 0;
+  e.uso = usoCompleto(e.uso);
+  const ahora = new Date().toISOString();
+  const n = (v) => Math.max(0, Number(v) || 0);
   const d = e.decision;
+  // Un latido NO es progreso ni consumo: solo se anota que llegó (H02). No toca límites ni reloj de actividad.
+  if (uso.heartbeat) {
+    e.uso.heartbeats_ignored += 1;
+    escribir(root, e);
+    return { status: 'OK', reason_code: 'HEARTBEAT_IGNORADO', uso: e.uso, estado: e.estado, completed: false };
+  }
+  // Lo recuperado después (detalle/original) TAMBIÉN se entregó al modelo: cuenta como contexto entregado.
+  e.uso.context_bytes += n(uso.context_bytes) + n(uso.retrieved_bytes);
+  for (const k of CONTADORES) if (k !== 'context_bytes') e.uso[k] += n(uso[k]);
+  // Presupuesto acumulado por TAREA: el desglose por rol es informativo, jamás reinicia el total.
+  if (uso.rol) {
+    e.por_rol = e.por_rol || {};
+    const r = (e.por_rol[uso.rol] = e.por_rol[uso.rol] || { context_bytes: 0, tool_calls: 0 });
+    r.context_bytes += n(uso.context_bytes) + n(uso.retrieved_bytes); r.tool_calls += n(uso.tool_calls);
+  }
+  if (uso.actividad !== false && !uso.no_observado) e.ultimo_actividad_at = ahora;
+  if (uso.progreso === true) e.ultimo_progreso_at = ahora;
+  // Una reevaluación DOCUMENTADA que decidió continuar abre otra ventana blanda; el límite duro del usuario no se mueve.
+  const base = e.soft_baseline || { context_bytes: 0, tool_calls: 0, repairs: 0 };
   const h = d.user_hard_limit;
   let status = 'OK';
   let reason_code = null;
+  const avisos = [];
   if (h && ((Number.isFinite(h.max_context_bytes) && e.uso.context_bytes > h.max_context_bytes) || (Number.isFinite(h.max_tool_calls) && e.uso.tool_calls > h.max_tool_calls))) {
     status = 'CHECKPOINT'; reason_code = 'USER_HARD_LIMIT';
     e.estado = 'PENDIENTE';
-    e.checkpoint = { ts: new Date().toISOString(), uso: { ...e.uso }, evidencia: uso.evidencia || e.checkpoint?.evidencia || [], pendientes: uso.pendientes || [] };
-  } else if (e.uso.context_bytes > d.context_budget_bytes || e.uso.tool_calls > d.tool_calls_soft_limit) {
+    e.checkpoint = { ts: ahora, uso: { ...e.uso }, evidencia: uso.evidencia || e.checkpoint?.evidencia || [], pendientes: uso.pendientes || [] };
+  } else if (e.uso.context_bytes - base.context_bytes > d.context_budget_bytes || e.uso.tool_calls - base.tool_calls > d.tool_calls_soft_limit) {
     status = 'REEVALUAR'; reason_code = 'SOFT_LIMIT';
-    if (!e.historial.some((x) => x.evento === 'SOFT_LIMIT' && x.tier === d.tier)) {
-      e.historial.push({ ts: new Date().toISOString(), evento: 'SOFT_LIMIT', tier: d.tier, motivo: `uso ${e.uso.context_bytes} B / ${e.uso.tool_calls} llamadas` });
+    if (!e.historial.some((x) => x.evento === 'SOFT_LIMIT' && x.tier === d.tier && x.ventana === (e.reevaluaciones || []).length)) {
+      e.historial.push({ ts: ahora, evento: 'SOFT_LIMIT', tier: d.tier, ventana: (e.reevaluaciones || []).length, motivo: `uso ${e.uso.context_bytes} B / ${e.uso.tool_calls} llamadas` });
+    }
+  } else if (e.uso.repairs - base.repairs > d.max_repair_attempts) {
+    // Más reparaciones que las que la política permite = fallo repetido: se reevalúa (y se puede escalar), no se sigue en bucle.
+    status = 'REEVALUAR'; reason_code = 'REPAIR_LIMIT';
+    if (!e.historial.some((x) => x.evento === 'REPAIR_LIMIT' && x.ventana === (e.reevaluaciones || []).length)) {
+      e.historial.push({ ts: ahora, evento: 'REPAIR_LIMIT', tier: d.tier, ventana: (e.reevaluaciones || []).length, motivo: `${e.uso.repairs} reparaciones (máx. ${d.max_repair_attempts})` });
     }
   }
+  if (e.uso.rereads_unchanged > 2) avisos.push('REREAD_UNCHANGED: se releyó contenido sin cambios; usa la referencia ya entregada');
   escribir(root, e);
-  return { status, reason_code, uso: e.uso, estado: e.estado, completed: false };
+  return { status, reason_code, uso: e.uso, estado: e.estado, completed: false, ...(avisos.length ? { avisos } : {}) };
+}
+
+/** Anota un hecho en el historial de la tarea SIN cambiar tier, límites ni estado (revisiones, errores de progreso). */
+function anotar(root, id, evento, detalle, extra) {
+  const e = leer(root, id);
+  if (!e) return { ok: false, reason_code: 'SIN_DECISION' };
+  e.historial.push({ ts: new Date().toISOString(), evento, tier: e.decision.tier, motivo: detalle ? String(detalle).slice(0, 300) : null, ...(extra || {}) });
+  if (e.historial.length > 500) e.historial.splice(1, e.historial.length - 500); // acotado: conserva el DECIDIDO inicial
+  escribir(root, e);
+  return { ok: true };
+}
+
+/**
+ * Cierra un REEVALUAR con una decisión por escrito (necesidad + riesgo). CONTINUAR
+ * abre otra ventana blanda (con el límite duro intacto); ESCALAR sube el tier;
+ * CERRAR_PARCIAL deja la tarea PENDIENTE con su evidencia, nunca completada.
+ */
+function documentarReevaluacion(root, id, { necesidad, riesgo, decision, motivo }) {
+  const e = leer(root, id);
+  if (!e) return { ok: false, reason_code: 'SIN_DECISION' };
+  if (!['CONTINUAR', 'ESCALAR', 'CERRAR_PARCIAL'].includes(decision)) return { ok: false, reason_code: 'DECISION_INVALIDA' };
+  if (!String(necesidad || '').trim() || !String(riesgo || '').trim()) return { ok: false, reason_code: 'FALTA_NECESIDAD_O_RIESGO', detalle: 'una reevaluación sin necesidad y riesgo escritos no es una reevaluación' };
+  e.uso = usoCompleto(e.uso);
+  e.reevaluaciones = e.reevaluaciones || [];
+  e.reevaluaciones.push({ ts: new Date().toISOString(), decision, necesidad: String(necesidad).slice(0, 300), riesgo: String(riesgo).slice(0, 300), motivo: motivo ? String(motivo).slice(0, 300) : null, uso: { context_bytes: e.uso.context_bytes, tool_calls: e.uso.tool_calls, repairs: e.uso.repairs } });
+  e.historial.push({ ts: new Date().toISOString(), evento: 'REEVALUACION_DOCUMENTADA', tier: e.decision.tier, motivo: decision + ': ' + String(necesidad).slice(0, 120) });
+  if (decision === 'CONTINUAR') e.soft_baseline = { context_bytes: e.uso.context_bytes, tool_calls: e.uso.tool_calls, repairs: e.uso.repairs };
+  if (decision === 'CERRAR_PARCIAL') { e.estado = 'PENDIENTE'; e.checkpoint = { ts: new Date().toISOString(), uso: { ...e.uso }, evidencia: e.checkpoint?.evidencia || [], pendientes: [String(necesidad).slice(0, 200)], motivo: 'REEVALUACION' }; }
+  escribir(root, e);
+  if (decision === 'ESCALAR') return reevaluar(root, id, 'WIDER_IMPACT', 'reevaluación documentada: ' + String(necesidad).slice(0, 200));
+  return { ok: true, decision, estado: e.estado };
 }
 
 /** Cierre: con un checkpoint por límite duro, nunca se marca completada. */
 function cerrar(root, id, { ok }) {
   const e = leer(root, id);
   if (!e) return { ok: false, reason_code: 'SIN_DECISION' };
-  if (e.estado === 'PENDIENTE') return { ok: false, estado: 'PENDIENTE', reason_code: 'USER_HARD_LIMIT', checkpoint: e.checkpoint };
+  if (e.estado === 'PENDIENTE') return { ok: false, estado: 'PENDIENTE', reason_code: e.checkpoint && e.checkpoint.motivo === 'REEVALUACION' ? 'REEVALUACION_PARCIAL' : 'USER_HARD_LIMIT', checkpoint: e.checkpoint };
   e.estado = ok ? 'COMPLETADA' : 'FALLIDA';
   e.historial.push({ ts: new Date().toISOString(), evento: 'CERRADO', tier: e.decision.tier, motivo: e.estado });
   escribir(root, e);
   return { ok: !!ok, estado: e.estado };
 }
 
-module.exports = { decidir, decidirYGuardar, reevaluar, consumir, cerrar, leer, cargarPolitica, validarPolitica, DEFAULT_POLICY, ORDEN, MINIMOS };
+module.exports = {
+  decidir, decidirYGuardar, reevaluar, consumir, cerrar, leer, cargarPolitica, validarPolitica, DEFAULT_POLICY, ORDEN, MINIMOS,
+  // H02: contadores acumulados, reevaluación documentada y capacidad declarada del proveedor.
+  documentarReevaluacion, anotar, riesgoDe, capacidadProveedor, PROVEEDOR_CAPACIDADES, CONTADORES, usoCompleto,
+};
 
 if (require.main === module) {
   const [cmd, ...rest] = process.argv.slice(2);

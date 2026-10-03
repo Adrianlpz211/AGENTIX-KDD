@@ -550,8 +550,11 @@ rl.on('line', async (line) => {
         sendError(id, -32603, `Tool '${name}' sin handler`);
         return;
       }
+      const inicio = Date.now();
       try {
         const result = await handler(args);
+        // Actividad real de una herramienta de Agentix: se anota en la memoria con procedencia (silencioso, no bloquea).
+        try { require(path.join(ROOT, '.agentic/grafo/mcp-contexto-tools.cjs')).registrarLlamada(ROOT, name, args, true, Date.now() - inicio); } catch { /* módulo ausente */ }
         sendResponse(id, {
           content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }],
         });
@@ -1030,6 +1033,22 @@ async function handleV34Tool(name, args={}) {
 TOOLS.push(...TOOLS_V34);
 TOOLS_V34.forEach(t => { TOOL_MAP[t.name] = { ...t, handler: (args) => handleV34Tool(t.name, args) }; });
 process.stderr.write('[Agentic KDD MCP] +6 v3.4 tools (recall, remember, validate_knowledge, memory_scan, telemetry_view, telemetry_summary)\n');
+
+// ─── 3.20.1: memoria con evidencia, recuperación por capas, contexto compacto, esfuerzo y TEAMS ───
+// Dos módulos con contrato versionado. Se registran SOLO si sus archivos existen (un proyecto a medio
+// actualizar no rompe el servidor) y la raíz del proyecto la fija ESTE servidor, nunca el llamador.
+for (const [archivo, nombre] of [['mcp-memory-tools.cjs', 'memory layers'], ['mcp-contexto-tools.cjs', 'context tools']]) {
+  try {
+    const p = path.join(ROOT, '.agentic/grafo', archivo);
+    if (!fs.existsSync(p)) continue;
+    const modulo = require(p);
+    TOOLS.push(...modulo.TOOLS);
+    modulo.TOOLS.forEach((t) => { TOOL_MAP[t.name] = { ...t, handler: (args) => modulo.handle(t.name, args, ROOT) }; });
+    process.stderr.write('[Agentic KDD MCP] +' + modulo.TOOLS.length + ' 3.20.1 tools (' + nombre + ')\n');
+  } catch (e) {
+    process.stderr.write('[Agentic KDD MCP] 3.20.1 ' + nombre + ' no disponible: ' + e.message + '\n');
+  }
+}
 
 // ─── v3.5: PATTERN DETECTION + FILE RISK MCP TOOLS ──────────────────────────
 const TOOLS_V35 = [

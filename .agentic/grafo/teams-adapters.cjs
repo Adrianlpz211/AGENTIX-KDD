@@ -99,6 +99,17 @@ class AdapterPrueba {
     return { delivery_id: asg.delivery_id, host_session_id: this.sesion, accepted: true, ack_at: new Date().toISOString() };
   }
 
+  /**
+   * Receptor en proceso del paquete de contexto (H02). Es SIMULADO: aplica la lógica pura de teams-packets.recibir;
+   * un host real tiene que implementar lo mismo dentro de su sesión y eso no se prueba aquí.
+   */
+  confirmarPaquete(pk) {
+    const tp = require('./teams-packets.cjs');
+    const r = tp.recibir(this.estadoPaquete || null, pk);
+    if (r.status === 'APLICADO') this.estadoPaquete = r.estado;
+    return r;
+  }
+
   /** Se llama después del ACK, cuando la tarea ya está RUNNING. */
   trabajar(revision) {
     const a = this.actual;
@@ -107,6 +118,7 @@ class AdapterPrueba {
     this.cola.push({
       event_id: 'res-' + a.delivery_id, task_id: a.task.id, owner_id: this.owner_id, fencing: a.fencing,
       expected_revision: revision, subject_hash: p.subject_hash, files: p.files, evidence: p.evidence || [],
+      ...(p.entrega ? { entrega: p.entrega } : {}),
     });
     this.actual = null;
   }
@@ -172,11 +184,22 @@ function tick(root, { builder, verificador, puntos }) {
       log.push({ paso: 'baseline', task_id: taskId, status: 'NO_ENTREGADA', motivo, stop_id: s.id });
       return log;
     }
+    /* H02: el estado de la tarea viaja como paquete (snapshot, o delta si el receptor ya confirmó una base). Sin la tabla de
+       3.20.1 devuelve null y la entrega sigue exactamente como antes. Cada asignación (fencing nuevo) arranca con snapshot. */
+    const tp = require('./teams-packets.cjs');
+    const pk = tp.paqueteDeAsignacion(root, asg.assignment);
+    if (pk) { asg.assignment.context_packet = pk; log.push({ paso: 'paquete', task_id: taskId, kind: pk.kind, revision: pk.revision }); }
     const sub = builder.submitTask(asg.assignment);
     log.push({ paso: 'submit', accepted: sub.accepted, motivo: sub.motivo || null });
     if (sub.accepted && sub.ack_at) {
       const a = tm.ack(root, { delivery_id: sub.delivery_id, owner_id: builder.owner_id, host_session_id: sub.host_session_id });
       log.push({ paso: 'ack', status: a.status });
+      /* El ACK del PAQUETE identifica revisión y hash recibidos; lo da el receptor, no se presume por el ACK de la entrega. */
+      if (pk && a.status === 'ACKED' && typeof builder.confirmarPaquete === 'function') {
+        const c = builder.confirmarPaquete(pk);
+        const k = c && c.ack ? tp.ack(root, { task_id: taskId, recipient_role: 'builder', revision: c.ack.revision, hash: c.ack.hash, state_hash: c.ack.state_hash }) : null;
+        log.push({ paso: 'ack-paquete', task_id: taskId, recibido: c && c.status, status: k ? (k.status) : 'SIN_ACK' });
+      }
       if (a.status === 'ACKED' && typeof builder.trabajar === 'function') builder.trabajar(a.revision);
     }
   }
@@ -185,13 +208,25 @@ function tick(root, { builder, verificador, puntos }) {
     log.push({ paso: 'resultado', task_id: res.task_id, status: e.status });
     if (e.status === 'VERIFICANDO') punto('AFTER_UNVERIFIED', res.task_id, { attempt: res.fencing });
     if (e.status === 'VERIFICANDO' && typeof verificador === 'function') {
-      const gates = verificador(res) || [];
+      /* H02: el director NO confía en el informe del constructor. Si trae criterios con evidencia, se comprueban contra los
+         originales; un PASS inventado, cambiado o de otra versión cuenta como gate fallido (una reparación), nunca como DONE. */
+      const extras = [];
+      if (res.entrega) {
+        const vp = require('./teams-packets.cjs').validarEntrega(root, { ...res.entrega, task_id: res.task_id });
+        log.push({ paso: 'validar-entrega', task_id: res.task_id, status: vp.status || vp.code, rechazos: (vp.rechazos || []).map((r) => r.code) });
+        if (!vp.ok) extras.push({ gate: 'evidence-originals', status: 'FAIL', subject_hash: res.subject_hash, reason_code: 'ENTREGA_RECHAZADA:' + (vp.rechazos || []).map((r) => r.code).join(',') });
+      }
+      const gates = (verificador(res) || []).concat(extras);
       const v = tm.verificar(root, { task_id: res.task_id, expected_revision: e.revision, event_id: 'ver-' + res.event_id, gates });
       log.push({ paso: 'verificar', task_id: res.task_id, status: v.status, faltan: v.faltan || null });
       if (typeof builder.alVerificar === 'function') builder.alVerificar(res, v);
-      if (v.status === 'DONE_VERIFIED') punto('AFTER_VERIFIED', res.task_id, { attempt: res.fencing, evidence: gates.map((g) => ({ gate: g.gate, status: g.status })) });
+      if (v.status === 'DONE_VERIFIED') {
+        punto('AFTER_VERIFIED', res.task_id, { attempt: res.fencing, evidence: gates.map((g) => ({ gate: g.gate, status: g.status })) });
+        /* Cerrada y verificada: sus pins de evidencia se liberan (los de sprint/plan, solo al cerrar ese nivel). */
+        try { const c = require('./teams-packets.cjs').cerrar(root, { task_id: res.task_id }); log.push({ paso: 'cerrar-paquetes', task_id: res.task_id, status: c.status || c.code }); } catch { /* auxiliar */ }
+      }
       else if (FALLO_VERIFICACION.has(v.status) && conPuntos && rm.politica(root).rollback_automatico) {
-        const reproducible = falloReproducible(gates, verificador(res) || []);
+        const reproducible = falloReproducible(gates, (verificador(res) || []).concat(extras));
         const rb = rm.rollbackAutomatico(root, { task_id: res.task_id, attempt: res.fencing, fallo_reproducible: reproducible, side_effects: efectosDeTarea(root, res) });
         log.push({ paso: 'rollback', task_id: res.task_id, status: rb.status, motivos: rb.motivos || null, point_id: rb.point_id || null });
       }

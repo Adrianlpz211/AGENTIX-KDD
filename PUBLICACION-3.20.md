@@ -11,7 +11,7 @@ Este documento prepara la publicación; **no afirma que una versión ya esté pu
 
 ### Qué certifica `release:check` (y qué no)
 
-Suite completa sin omitidas; el tarball sin datos privados; el tarball **instalado en limpio** actualizando consumidores construidos con los motores **publicados** 3.19.0 y 3.20.0 (`--check`, `update`, repetición idempotente, MCP por stdio, `--rollback` con el motor anterior leyendo la base migrada); y sondas adversariales. **No** certifica una sesión real de Cursor/Claude, WhatsApp ni sistemas consumidores distintos de esos.
+Suite completa sin omitidas; el tarball sin datos privados; el tarball **instalado en limpio** actualizando consumidores construidos con los motores **publicados** 3.19.0 y 3.20.0 (`--check`, `update`, repetición idempotente, MCP por stdio con las herramientas nuevas registradas, `--rollback` con el motor anterior leyendo la base migrada); que **leer con el motor nuevo una base vieja no la migra** (ni un byte cambia); que tras el upgrade funcionan la captura idempotente, la cola, el índice por capas, la compactación con recuperación por hash y los paquetes TEAMS (snapshot y delta); una segunda instalación con las dependencias **opcionales presentes** pero sin compilar; y sondas adversariales. **No** certifica una sesión real de Cursor/Claude, WhatsApp ni sistemas consumidores distintos de esos.
 
 ## Publicar: flujo recomendado (GitHub Actions con OIDC)
 

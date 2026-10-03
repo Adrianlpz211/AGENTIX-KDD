@@ -92,6 +92,20 @@ for (const c of COLUMNAS_EXTRA) {
   }
   mem.close();
 }
+/* Tablas que añade 3.20.1 (memoria con evidencia, cola, compresión, TEAMS): el DDL vive
+   en scripts/memory-ddl-3201.cjs. Ningún motor publicado las tiene. */
+{
+  const { TABLAS_3_20_1, SINCE } = require('./memory-ddl-3201.cjs');
+  const mem = new DatabaseSync(':memory:');
+  for (const [nombre, t] of Object.entries(TABLAS_3_20_1)) {
+    if (v319.tablas[nombre] || v320.tablas[nombre]) throw new Error('la tabla ' + nombre + ' ya existe en un motor publicado: no es nueva de ' + SINCE);
+    mem.exec(t.create);
+    const columns = mem.prepare('PRAGMA table_info("' + nombre + '")').all().map((c) => ({ name: c.name, type: c.type, pk: c.pk, notnull: c.notnull, dflt: c.dflt_value, since: SINCE }));
+    const indexes = t.indexes.map((ddl) => { mem.exec(ddl); const m = /INDEX\s+IF NOT EXISTS\s+(\w+)/i.exec(ddl); return { name: m[1], since: SINCE, unique: /^\s*CREATE\s+UNIQUE/i.test(ddl), ddl }; });
+    tablas[nombre] = { since: SINCE, create: t.create, columns, indexes, fuente: 'scripts/memory-ddl-3201.cjs' };
+  }
+  mem.close();
+}
 const RELLENO_GENERICO = ['fecha_update', 'fecha_creacion', 'created_at', 'fecha'];
 for (const [nt, t] of Object.entries(tablas)) {
   for (const c of t.columns) {
@@ -111,7 +125,7 @@ for (const t of Object.values(tablas)) t.indexes.sort((a, b) => a.name.localeCom
 
 const salida = {
   catalog_version: 1,
-  generated_from: { engines: ['3.19.0', '3.20.0'], note: 'esquemas reales de los paquetes publicados + DDL de funciones perezosas del código fuente' },
+  generated_from: { engines: ['3.19.0', '3.20.0'], note: 'esquemas reales de los paquetes publicados + DDL de funciones perezosas del código fuente + tablas nuevas de 3.20.1 (scripts/memory-ddl-3201.cjs)' },
   derived_tables: DERIVADAS,
   tables: Object.fromEntries(Object.entries(tablas).sort(([a], [b]) => a.localeCompare(b))),
   triggers,

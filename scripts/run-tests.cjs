@@ -82,6 +82,9 @@ const r = spawnSync(process.execPath, ['--test',
   '--test-reporter=junit', '--test-reporter-destination=' + JUNIT,
   ...archivos], {
   cwd: RAIZ,
+  // Las pruebas ejercitan la guardia del host y el MCP CONTRA ESTE REPO: sin este aislamiento anotarían sus eventos
+  // en la memoria real del proyecto. Los tests de captura lo activan explícitamente en SU proceso.
+  env: { ...process.env, AKDD_NO_MEMORY_CAPTURE: process.env.AKDD_NO_MEMORY_CAPTURE || '1' },
   stdio: ['inherit', 'pipe', 'pipe'],
   encoding: 'utf8',
   maxBuffer: 256 * 1024 * 1024,

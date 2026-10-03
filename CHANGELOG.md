@@ -6,6 +6,59 @@
 comandos (`update` y `update --migrate`) y nada demostraba, de forma comprobable, que la
 memoria había sobrevivido.
 
+### Memoria con procedencia (C01) — nivel de esquema 3
+Actividad → observación → conocimiento → evidencia, en 14 tablas nuevas `mem_*` que entran SOLO
+por el catálogo del update seguro (nivel 3; una base nueva las trae completas). Lectura sin
+migración escondida: sin las tablas, `SCHEMA_MISSING` y `akdd update`. Captura idempotente por
+proyecto+host+sesión+id del host (dos ejecuciones iguales en momentos distintos son dos
+actividades), evento y job en UNA transacción, backpressure explícito, `project_id` estable con
+renombre (`adopt`) y copia (`fork`) explícitos. Estados propuesto/validado/sospechoso/obsoleto:
+una observación nunca valida; validar exige evidencia ACTUAL y un validador gate/test/usuario/
+verificador, y no se expone al modelo por MCP. Lo anterior sin procedencia se etiqueta
+`LEGACY_UNVERIFIED_PROVENANCE` al leer, sin reescribirlo. Privacidad ANTES de persistir
+(`memory-privacy.cjs`): redacción que falla cerrada, clases autorizado/redactado/privado/desconocido,
+política por proyecto, y el redactor de telemetría y de `context-pack` ya no devuelven el original
+si fallan (`kdd-memory remember` también redacta antes de escribir).
+
+### Evidencias y originales recuperables (`evidence-store.cjs`)
+Guardado atómico con hash, retención (`durable_audit` para gates; caché con TTL/LRU solo sin pin),
+pins que persisten el reinicio, aislamiento por proyecto (realpath, traversal, symlinks, referencias
+de otro proyecto), `EVIDENCE_CHANGED` / `EVIDENCE_UNAVAILABLE` / `EXPIRED` en lugar de contenido
+inventado, paginación por bytes/líneas y selector JSON limitado sin `eval`.
+
+### Cola durable (`memory-queue.cjs`) y recuperación por capas (`memory-layers.cjs`)
+Claim atómico con lease y fencing token, recuperación idempotente tras una caída, backoff, dead-letter
+y reintento manual acotado, reglas deterministas (sin llamar a un modelo; resumidor solo opt-in).
+Índice → detalle en lote → cronología → evidencia, con estados distintos (`NO_RESULTS` ≠ `NO_DB` ≠
+`SCHEMA_MISSING` ≠ `ERROR`), presupuesto ACUMULADO por tarea, contratos protegidos que no se omiten en
+silencio y caché invalidada por memoria/código/permisos. Herramientas MCP `memory_index`, `memory_detail`,
+`memory_timeline`, `memory_evidence`, `memory_capture`, `memory_health`, `memory_queue`.
+
+### Compactación que conserva el original (`context-compressor.cjs`)
+Determinista y sin modelo: logs, pruebas (todos los fallos), JSON (muestras etiquetadas), búsquedas,
+documentación y orientación de código por AST. El código a editar/auditar/depurar/verificar y la evidencia
+de gates se entregan íntegros; una muestra nunca prueba una ausencia (`verificarAusencia` sobre el original
+completo); compresor fallido o inflacionario devuelve el original; sin espacio no se comprime. El ahorro es
+NETO (recuperar resta). `akdd context compress|recover`; MCP `context_compress`, `context_recover`.
+
+### Esfuerzo acumulado, reutilización y paquetes TEAMS
+`effort-budget.cjs` (presupuesto por tarea que no se reinicia al cambiar de rol; `LOW` sin investigación
+global ni delegación innecesaria con las guardias críticas intactas; lo del host fuera de Agentix es "no
+observado"), `context-reuse.cjs` (lecturas reutilizadas; un hash distinto invalida) y `teams-packets.cjs`
+(snapshot o delta contra la revisión confirmada, ACK con revisión y hash, idempotencia, pins, y el director
+re-verifica la evidencia original). Control del proveedor solo declarativo.
+
+### Salud, dashboard y métricas
+`memoria-salud.cjs` (estados independientes; la escritura se verifica solo con `akdd memory health verify-write`),
+páginas `/memoria` y `/contexto` (los grafos no se tocan), `context-metrics.cjs` (ahorro neto, tipo de
+medición, dato ausente = no disponible) y `akdd benchmark contexto`: ocho casos A–H deterministas, sin datos de
+usuarios; campañas con modelos reales `NO_EJECUTADO`.
+
+### Captura por host (sin prometer de más)
+`akdd memory capabilities`: `NATIVE_PASSIVE` (hooks del host ya instalados: acciones antes de ejecutarse),
+`PIPELINE_ONLY` y `UNSUPPORTED`. Nada de esto se verificó dentro de Cursor ni de Claude Code: los fixtures
+están etiquetados como tales.
+
 ### `akdd update` migra, respalda y verifica
 Inspecciona → excluye escritores → respalda → aplica → verifica → informa. Estados:
 `VERIFIED`, `VERIFIED_WITH_WARNINGS`, `NO_CHANGES_VERIFIED` (salida 0) y `BLOCKED`,

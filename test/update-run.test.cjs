@@ -184,6 +184,8 @@ test('escritores con conexión persistente: el que confirma la pausa deja pasar;
     for (let i = 0; i < 60 && !s2.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
     const r = await correr(q.root, { writerAckMs: 5000 });
     assert.ok(r.ok, JSON.stringify([r.status, r.errors]));
+    // La salida del hijo llega por una tubería asíncrona: puede tardar unos ms más que el propio update en verse.
+    for (let i = 0; i < 30 && !s2.includes('PAUSADO'); i++) await new Promise((r) => setTimeout(r, 100));
     assert.ok(s2.includes('PAUSADO'));
     assert.ok(r.coverage.verified.some((c) => /1 servicio\(s\) confirmaron la pausa/.test(c)));
   } finally { servicio.kill(); }

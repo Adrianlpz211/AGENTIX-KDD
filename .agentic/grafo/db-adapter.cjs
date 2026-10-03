@@ -244,7 +244,13 @@ function envolver(nativo, opciones) {
       const sql = /^\s*pragma\b/i.test(statement) ? statement : 'PRAGMA ' + statement;
       return api.exec(sql);
     },
-    transaction(fn) {
+    /**
+     * opciones.immediate: BEGIN IMMEDIATE. Una transacción que primero LEE y luego ESCRIBE no puede
+     * esperar con el busy_timeout al promover su bloqueo si otro proceso escribe a la vez: SQLite la
+     * rechaza al instante (database is locked). Con IMMEDIATE el bloqueo de escritura se toma al empezar
+     * y el busy_timeout sí espera. Lo usan la captura de eventos, la cola y las observaciones.
+     */
+    transaction(fn, opciones) {
       if (state.readOnly) throw errorCodigo('READ_ONLY', 'READ_ONLY');
       if (!api.capabilities.transactions) {
         throw errorCodigo('UNSUPPORTED', 'Este driver no ofrece transacciones reales');
@@ -253,7 +259,7 @@ function envolver(nativo, opciones) {
         const anidada = state.depth > 0;
         const sp = 'akdd_sp_' + state.depth;
         if (anidada) nativo.db.exec('SAVEPOINT ' + sp);
-        else nativo.db.exec('BEGIN');
+        else nativo.db.exec(opciones && opciones.immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
         state.depth += 1;
         try {
           const result = fn(...args);

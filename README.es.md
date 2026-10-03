@@ -79,6 +79,82 @@ Opciones: `--check` (solo el plan — no cambia nada), `--json` (un único docum
 
 **Requisitos.** El update necesita un conector SQLite que supere las pruebas reales (solo lectura, transacciones, bloqueo, respaldo con WAL, BLOB, enteros de 64 bits, multiproceso, cierre limpio): `node:sqlite` en Node ≥ 22.13, o un `better-sqlite3` compatible. `sql.js` reexporta el archivo completo desde memoria y **no** se acepta para actualizar. Sin conector, el update se niega antes de escribir y explica cómo resolverlo. En esta versión el conector verificado es `node:sqlite`: el `better-sqlite3@^9` opcional no tiene binario precompilado para Node 24 y falló al compilar ahí, así que ese camino **no está verificado**.
 
+## 🆕 3.20.1 — memoria que se puede rastrear, recuperación por capas y contexto que conserva su original
+
+La actualización segura llega junto con una mejora de memoria. Todo lo que sigue es **nativo**: sin Claude-Mem, sin proxy de Headroom, sin servicio en la nube, sin otro demonio y sin llamadas de pago por defecto. Otros proyectos inspiraron algunas ideas; los mecanismos son de Agentix y viven en la misma `memoria.db`.
+
+Las tablas nuevas llegan **solo por `akdd update`** (el catálogo de esquema, con su respaldo y verificación). Leer nunca crea ni migra nada: sobre una base antigua los comandos de memoria dicen `SCHEMA_MISSING` y mandan a `akdd update`. Los nodos existentes conservan su ID (INTEGER o TEXT) y su contenido; nada se regenera.
+
+### Memoria con procedencia
+
+| Pieza | Qué es |
+|---|---|
+| **Actividad** | Un evento bruto de una acción real: herramienta, fase, resultado de un gate. Idempotente por proyecto + host + sesión + id del evento del host: reenviar un evento deja **una** actividad y **un** job; dos ejecuciones iguales en momentos distintos son **dos** actividades. |
+| **Observación** | Una lectura acotada de una o varias actividades (prueba fallida, archivos tocados, decisión explícita, resultado de gate). Muchas lecturas del mismo archivo se agrupan en **una** observación. |
+| **Conocimiento** | Un nodo KDD con estado: *propuesto → validado → sospechoso → obsoleto*, mapeado a los estados de nodo existentes. |
+| **Evidencia** | Un artefacto verificable: id, SHA-256, tamaño, alcance, retención. |
+
+**Una observación o un resumen nunca validan nada.** Validar exige evidencia *actual* (su hash se vuelve a comprobar en ese momento) y un validador que sea un gate, un test, la persona o un verificador. A propósito **no** se expone al modelo por MCP: `akdd memory validate <nodo> --evidence=ev_… --by=gate`. Si cambia el código relacionado, lo validado pasa a *sospechoso*. El conocimiento idéntico en el mismo ámbito suma una ocurrencia en vez de un nodo nuevo; el parecido queda como *candidato de revisión*, jamás se fusiona; las contradicciones conservan ambos orígenes. Los registros anteriores a 3.20.1 se muestran como `LEGACY_UNVERIFIED_PROVENANCE` al leerlos: ni se reescriben ni se rebajan.
+
+**La privacidad va primero.** El texto se clasifica *autorizado / redactado / privado / desconocido* y se redacta **antes** de llegar a la base, la cola, una caché, el contexto entregado o el dashboard. La redacción **falla cerrada** (si el redactor falla no se guarda nada, jamás el original). Las rutas privadas (`.env`, llaves, credenciales…) conservan solo metadatos. Añade tus rutas y campos denegados en `.agentic/privacy-policy.json`. Las expresiones regulares no pueden garantizar que detectan todos los secretos: por eso existen las listas de denegación; trata al redactor como reducción de riesgo, no como un DLP.
+
+**Qué se captura depende del host** — `akdd memory capabilities` imprime el panorama real:
+
+| Host | Captura | Qué ve |
+|---|---|---|
+| Claude Code / Cursor **con los hooks del host instalados** (`akdd host-hooks install`, nunca automático) | `NATIVE_PASSIVE` | Acciones de shell, edición y MCP **antes** de ejecutarse y la decisión de la guardia — no la salida de la herramienta |
+| Los mismos hosts **sin** hooks | `PIPELINE_ONLY` | Solo lo que pasa por Agentix: `aa:`, post-cycle, herramientas MCP de Agentix, TEAMS |
+| Cualquier otro host | `UNSUPPORTED` | No se promete nada |
+
+**No** ve las lecturas y búsquedas internas de un IDE, la salida de las herramientas ni el razonamiento del modelo.
+
+**Cola durable.** La captura inserta el evento y su job en **una** transacción; un worker lo reclama con un lease y un token de fencing, lo procesa con reglas deterministas (sin llamar a un modelo), reintenta con backoff y al final lo aparta como *dead-letter*, visible y reintentable (de forma acotada). Una cola llena responde `BACKPRESSURE` y no dice "capturado". La captura nunca bloquea Shell/Edit: si falla, informa un estado degradado.
+
+### Recuperación por capas
+
+```bash
+akdd memory index --query="regla de reembolso"   # 1. índice compacto: id, título, estado, procedencia, coste estimado
+akdd memory detail --ids=12,40                   # 2. detalle de los ids elegidos, en lote acotado
+akdd memory timeline --node=12                   # 3. cronología alrededor de una actividad o nodo, paginada
+akdd memory evidence ev_…  --lines=100-140       # 4. original autorizado, con hash
+```
+
+Cada respuesta lleva estados explícitos (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSING`, `ERROR`, `INSUFFICIENT_BUDGET`), un total conocido, `has_more`/cursor y *por qué* se omitió algo. Los presupuestos son **acumulados por tarea** (cambiar de rol o volver a preguntar no los reinicia) y siguen el nivel de esfuerzo. Los **contratos protegidos aplicables nunca se descartan en silencio** por un presupuesto. La búsqueda léxica funciona sin embeddings y jamás crea el índice FTS al consultar. Las mismas capas son herramientas MCP (`memory_index`, `memory_detail`, `memory_timeline`, `memory_evidence`); `recall` y `remember` no cambian.
+
+### Compactar sin perder el original
+
+`akdd context compress <archivo|-> --kind=log|test|json|search|doc|code --task=T` compacta un resultado grande de forma **determinista** (sin modelo, sin Python, sin ML) y guarda el original autorizado; `akdd context recover <reference_id> --lines=a-b` lo devuelve con el hash verificado.
+
+- Los logs agrupan las repeticiones exactas y conservan el contexto de los errores; las corridas de pruebas conservan **todos** los fallos; el JSON se entrega como una *muestra* etiquetada con las cantidades originales; las búsquedas conservan todas las rutas afectadas.
+- **El código que vas a editar, auditar, depurar o verificar se entrega íntegro**, igual que la evidencia de un gate. Solo la orientación usa el índice AST.
+- **Una muestra jamás prueba una ausencia.** "Sin fallos" exige el original completo (`verificarAusencia` lo recorre en local y devuelve solo el resultado).
+- Una compactación mal formada, vacía o que infla devuelve el original con una advertencia. Si no hay espacio para conservar el original, **no** se compacta. Una referencia caducada o cambiada responde `EXPIRED` / `EVIDENCE_CHANGED` — nunca contenido reconstruido. La evidencia de gates es durable; los originales de una tarea o sprint activos llevan pin; solo caduca la caché sin pin.
+
+### Esfuerzo que sí cambia, y contexto compartido en TEAMS
+
+`LOW` ahora significa menos: sin búsqueda global y sin delegación innecesaria — mientras el alcance, los archivos protegidos, la seguridad y los leases se mantienen en todos los niveles, y un "cambio pequeño" en auth, pagos o una migración sigue siendo `HIGH`. Las lecturas de archivos sin cambios se reutilizan, y un hash distinto siempre invalida. En TEAMS el director y el constructor intercambian **paquetes versionados** (snapshot, o un delta solo contra la revisión que el receptor confirmó); un ACK fuera de orden o un receptor reiniciado reciben un snapshot completo, y el director **vuelve a verificar la evidencia original** — un PASS inventado o evidencia de una versión anterior se rechaza. `akdd effort budget …` y `akdd teams packet …` lo exponen. Controlar el esfuerzo de razonamiento *del proveedor* exige una integración explícita que **no está instalada**; Agentix declara `HOST_NATIVE_UNCONTROLLED` y no promete reducir el pensamiento interno de un host.
+
+### Verlo
+
+`akdd dashboard` sirve dos páginas más junto a los grafos (que no se tocan): **/memoria** (qué hay guardado, cola, procedencia, registros antiguos) y **/contexto** (nivel, presupuesto, reducción neta y su tipo de medición, cobertura del host). La salud muestra estados independientes — servicio, legible, esquema, búsqueda, última escritura verificada, cola, actualización — y el dashboard **no sale en verde** si el esquema está roto aunque HTTP responda 200. `akdd memory health verify-write` es el único comando que ejercita una escritura (en una copia aislada); abrir la página nunca escribe. Un dato ausente es "no disponible", jamás `0`.
+
+### Qué se midió (determinista, sin datos de usuarios)
+
+`akdd benchmark contexto` ejecuta ocho casos contra los módulos reales — baseline (nada compactado) frente a optimizado, misma tarea, misma aceptación. Recuperar un original **cuenta en contra** del ahorro.
+
+| Caso | Payload neto ahorrado | Nota |
+|---|---|---|
+| A · cambio de texto bajo `LOW` | 94,1 % | sin búsqueda global ni delegación, guardias intactas |
+| B · un error entre 20.000 líneas de log | 99,8 % | el error sigue visible, original recuperable |
+| C · "cambio pequeño" en auth/pagos | **0 %** | **por diseño**: sigue en `HIGH` con todos sus controles |
+| D · refactor con contratos protegidos | 95,2 % | los 30 contratos protegidos listados; con un tope ajustado responde `INSUFFICIENT_BUDGET` en vez de descartar alguno |
+| E · registro crítico raro en un JSON largo | 99,4 % | encontrado sobre el original completo |
+| F · vacío / malformado / secreto / código a editar | 41,4 % | bordes: nada se pierde, nada se filtra |
+| G · TEAMS, reinicios y una evidencia cambiada | 71,3 % | receptor simulado; el protocolo y la base son reales |
+| H · memoria de 4.000 nodos | 99,3 % | índice + dos detalles, nunca un volcado |
+
+Se cumplieron los 31 criterios de aceptación. Es una reducción de **payload** (bytes exactos; los tokens son *estimaciones* `bytes/4`), no un ahorro de sesión, de razonamiento ni de dinero. Una campaña con modelos reales queda `NO_EJECUTADO` (cuesta dinero y necesita tu autorización) y nada de esto se midió dentro de Cursor ni de Claude Code.
+
 ## 🆕 Qué trae la 3.20 — de "el gate dijo PASS" a "muéstrame la corrida"
 
 La 3.20 es la versión del blindaje. La pregunta detrás de cada cambio fue la misma: *¿se puede falsificar un verde?* Donde la respuesta era sí, se cerró.
@@ -307,8 +383,8 @@ Cada protección queda anotada en la libreta (`gate_events`) con su origen: **`m
 |---|---|
 | Dirección del error de rango (vs parser real, 1,989 símbolos) | 99.75% del lado seguro |
 | Grafo de un proyecto real (~414 archivos TS+JS) | 3,757 símbolos · ~4,900 aristas · 100% con rango de líneas |
-| **Release check de la 3.20.1** (03/10/2026, Windows, Node 24 — la única plataforma medida) | Suite completa 624/624, cero omitidas · tarball (210 archivos) sin datos privados · 528 sondas adversariales, 0 fallos · se prueba el **tarball instalado** |
-| **Actualizaciones reales 3.19.0 → 3.20.1 y 3.20.0 → 3.20.1** (consumidores armados ejecutando los motores publicados) | `akdd update` solo: `VERIFIED` (25 y 9 migraciones aplicadas) · memoria conservada por **contenido** (30–31 tablas, 567–572 filas comparadas, más 500 filas privadas en una tabla propia) · segundo update `NO_CHANGES_VERIFIED` · `--rollback` revierte archivos y conserva la memoria más nueva · el motor anterior sigue leyendo la base migrada · MCP `initialize` / `remember` / `recall` por stdio (62 herramientas) |
+| **Release check de la 3.20.1** (03/10/2026, Windows, Node 24 — la única plataforma medida) | Suite completa 808/809 (la que no corrió es un smoke dentro de Cursor/Claude reales, declarada `NO_EJECUTADO`) · tarball (229 archivos) sin datos privados · 528 sondas adversariales, 0 fallos · se prueba el **tarball instalado** |
+| **Actualizaciones reales 3.19.0 → 3.20.1 y 3.20.0 → 3.20.1** (consumidores armados ejecutando los motores publicados) | `akdd update` solo: `VERIFIED` (25 y 9 migraciones aplicadas) · memoria conservada por **contenido** (30–31 tablas, 567–572 filas comparadas, más 500 filas privadas en una tabla propia) · segundo update `NO_CHANGES_VERIFIED` · `--rollback` revierte archivos y conserva la memoria más nueva · el motor anterior sigue leyendo la base migrada · MCP `initialize` / `remember` / `recall` por stdio |
 | Enrutador de esfuerzo (15 fixtures, umbral fijado antes de correr) | LOW: −90% de bytes de contexto, −54% de pasos · MEDIUM: −25 a −32% · HIGH conserva tdd, preservation, QA y reviewer. *Proxy: bytes que Agentix pide cargar; tokens del host no medidos* |
 | Benchmark de 19 fases (SaaS multi-tenant, con/sin Agentix) | errores por fase 2.6→~0 · tests que pasan a la primera 79%→100% · cascada de refactor 4/7→11/11 |
 
@@ -442,6 +518,29 @@ akdd locks release-all         # Libera todo (limpieza de sesión)
 ### Colaboración (equipo) — 🔒 beta privada
 > La **memoria compartida de equipo** está en **beta privada**. Todo lo demás funciona **100% local, sin cuenta**. ¿La quieres para tu equipo? [Abre un issue](https://github.com/Adrianlpz211/AGENTIX-KDD/issues).
 
+### Memoria, contexto y esfuerzo (3.20.1)
+```bash
+akdd memory status                    # Qué hay guardado, qué falta y qué captura cada host
+akdd memory capabilities              # Captura por host: NATIVE_PASSIVE / PIPELINE_ONLY / UNSUPPORTED
+akdd memory index --query="..."        # Recuperación por capas: 1 índice, 2 detalle, 3 cronología, 4 evidencia
+akdd memory detail --ids=12,40
+akdd memory timeline --node=12
+akdd memory evidence ev_... --lines=100-140
+akdd memory capture --host=H --session=S --type=T --task=ID   # Registra una actividad real (idempotente)
+akdd memory drain                     # Procesa la cola durable (determinista, sin llamar a un modelo)
+akdd memory queue                     # Estado de la cola; 'queue retry <job>' para un dead-letter (acotado)
+akdd memory provenance <nodo>         # De qué actividades y evidencias sale un conocimiento
+akdd memory validate <nodo> --evidence=ev_... --by=gate|test|user|verifier
+akdd memory project status|adopt|fork # Id estable del proyecto: renombre = adopt, copia = fork (siempre explícito)
+akdd memory health [verify-write]     # Estados de salud independientes; solo verify-write ejercita una escritura
+akdd context compress <archivo|-> --kind=log|test|json|search|doc|code --task=T [--purpose=debug]
+akdd context recover <reference_id> [--lines=a-b|--json-path=items]
+akdd context leer <archivo> --task=T  # Lee con reutilización (un hash distinto siempre invalida)
+akdd effort budget estado <tarea>     # Presupuesto de esfuerzo acumulado por tarea · 'host' = lo que Agentix no puede observar
+akdd teams packet estado|snapshot|ack|invalidar|cerrar   # Paquetes compartidos director/constructor
+akdd benchmark contexto [--json]      # Benchmark determinista (payload neto, medición honesta)
+```
+
 ---
 
 ## Límites honestos (lo que NO es)
@@ -454,6 +553,10 @@ akdd locks release-all         # Libera todo (limpieza de sesión)
 6. **Sin promesa fija de ahorro de tokens.** Los números de esfuerzo miden el contexto pedido, no los tokens del host ni la calidad del resultado.
 7. **El benchmark de 19 fases es N=1** — direccional, sin revisión de pares.
 8. **El update tiene límites que declara.** Un archivo de bloqueo no puede controlar a un programa externo que abre `memoria.db` con su propio SQLite: para esos casos el update se apoya en el bloqueo de escritura de SQLite y **se detiene** (`BLOCKED`) si no lo consigue. Decenas de módulos del motor todavía abren SQLite directamente en vez de por el adaptador; están listados, bloqueados por un test para que no aparezca uno nuevo sin que se note, y no consultan la exclusión. Un par director/constructor de TEAMS vivo durante un update no se probó de punta a punta (sí el servidor MCP, la cola de commits, el post-cycle, la telemetría y el vigilante de TEAMS). `better-sqlite3` no está verificado en Node 24. Restaurar datos históricos sobre aprendizajes nuevos no forma parte de `--rollback`.
+9. **La memoria con procedencia ve lo que el host le entrega.** La captura nativa pasiva exige los hooks del host instalados y solo cubre acciones *antes* de ejecutarse; sin ellos, solo se registra lo que pasa por Agentix. Nunca se afirma "verificado dentro de Cursor/Claude" a partir de un fixture: el receptor, el constructor y el director de TEAMS en las pruebas son simulados, el protocolo y la base son reales, y un smoke en hosts reales queda `NO_EJECUTADO` salvo que lo ejecutes tú.
+10. **Compactar es una medida de payload, no una promesa.** El benchmark mide los bytes que Agentix controla, de forma determinista; los tokens son estimaciones `bytes/4`. Una campaña con modelos reales queda `NO_EJECUTADO`. Cuando hace falta recuperar el original, el ahorro se reduce — y en algunos casos es cero por diseño.
+11. **El redactor reduce el riesgo; no es un DLP.** Las expresiones regulares no ven secretos que no traen contexto. Usa `.agentic/privacy-policy.json` para denegar rutas y campos.
+
 
 ---
 

@@ -1,0 +1,1105 @@
+{
+  "version": "3.20.1",
+  "nota": "Matriz requisito → prueba. Cada 'titulo' es un fragmento del título de un test que EXISTE (test/matriz-requisitos.test.cjs lo comprueba). 'alcance' dice qué clase de evidencia es: proceso real (SQLite real, procesos node reales), fixture (datos de prueba etiquetados), simulado (receptor/constructor/director simulados), host real NO_EJECUTADO (no se probó dentro de Cursor/Claude Code). Implementado no es verificado, y verificado no es publicado.",
+  "requisitos": [
+    {
+      "id": "C01-1",
+      "doc": "C01",
+      "requisito": "Reenviar un mismo evento deja una actividad y un job",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-1:"
+        ]
+      ]
+    },
+    {
+      "id": "C01-2",
+      "doc": "C01",
+      "requisito": "Dos eventos reales de payload igual conservan dos actividades",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-2:"
+        ]
+      ]
+    },
+    {
+      "id": "C01-3",
+      "doc": "C01",
+      "requisito": "Crear una observación no valida un nodo ni cierra un gate",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-3:"
+        ],
+        [
+          "memory-core",
+          "con evidencia ACTUAL"
+        ]
+      ]
+    },
+    {
+      "id": "C01-4",
+      "doc": "C01",
+      "requisito": "La contradicción conserva ambos orígenes sin fusionar",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-4:"
+        ],
+        [
+          "memory-core",
+          "conocimiento idéntico y mismo ámbito"
+        ]
+      ]
+    },
+    {
+      "id": "C01-5",
+      "doc": "C01",
+      "requisito": "Un reinicio no pierde un evento confirmado",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-5:"
+        ]
+      ]
+    },
+    {
+      "id": "C01-6",
+      "doc": "C01",
+      "requisito": "Secretos canario no aparecen en BD, cola, caché, paquete ni logs",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-6:"
+        ],
+        [
+          "memory-privacy",
+          "cada formato de secreto canario"
+        ],
+        [
+          "evidence-store",
+          "el secreto no existe en el original almacenado"
+        ],
+        [
+          "context-compressor",
+          "un secreto canario NO existe"
+        ],
+        [
+          "memoria-dashboard",
+          "evento REDACTADO o PRIVADO"
+        ]
+      ],
+      "nota": "SSE y exportación del panel cubiertos por memoria-dashboard (fixture)."
+    },
+    {
+      "id": "C01-7",
+      "doc": "C01",
+      "requisito": "Referencia de otro proyecto, traversal y symlink externo se rechazan",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "evidence-store",
+          "aislamiento: traversal"
+        ],
+        [
+          "context-compressor",
+          "colisión de ID, traversal, otro proyecto"
+        ]
+      ],
+      "nota": "El symlink solo se prueba si el sistema operativo permite crearlo."
+    },
+    {
+      "id": "C01-8",
+      "doc": "C01",
+      "requisito": "Evidencia modificada o ausente devuelve un estado explícito",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "evidence-store",
+          "hash o tamaño cambiado"
+        ]
+      ]
+    },
+    {
+      "id": "C01-9",
+      "doc": "C01",
+      "requisito": "El upgrade de memorias 3.19/3.20 reales conserva todos los registros anteriores",
+      "alcance": "proceso real (bases creadas por los motores publicados)",
+      "pruebas": [
+        [
+          "update-memoria-evidencia",
+          "REAL: leer NO migra"
+        ],
+        [
+          "update-memoria-evidencia",
+          "update INTERRUMPIDO"
+        ]
+      ]
+    },
+    {
+      "id": "C01-10",
+      "doc": "C01",
+      "requisito": "La consulta histórica funciona con IDs INTEGER y TEXT",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-10:"
+        ],
+        [
+          "memory-layers",
+          "IDs INTEGER y TEXT"
+        ]
+      ]
+    },
+    {
+      "id": "C01-priv",
+      "doc": "C01",
+      "requisito": "La redacción falla cerrada y existe política por proyecto",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-privacy",
+          "FALLA CERRADO"
+        ],
+        [
+          "memory-privacy",
+          "la política del proyecto"
+        ]
+      ]
+    },
+    {
+      "id": "C01-id",
+      "doc": "C01",
+      "requisito": "project_id estable; renombre y copia se resuelven de forma explícita",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "project_id estable"
+        ]
+      ]
+    },
+    {
+      "id": "C01-cap",
+      "doc": "C01",
+      "requisito": "La captura es idempotente, ordenada y nunca bloquea al agente",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "identidad durable con secuencia"
+        ],
+        [
+          "memory-core",
+          "FUERA DE ORDEN"
+        ],
+        [
+          "memory-core",
+          "la captura nunca lanza"
+        ],
+        [
+          "memory-core",
+          "sin tablas la captura NO migra"
+        ],
+        [
+          "host-guard-captura",
+          "la guardia del host registra shell"
+        ],
+        [
+          "host-guard-captura",
+          "la captura jamás bloquea"
+        ]
+      ]
+    },
+    {
+      "id": "C01-legacy",
+      "doc": "C01",
+      "requisito": "Lo antiguo sin procedencia queda LEGACY_UNVERIFIED_PROVENANCE sin reescribirse",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "C01-10:"
+        ],
+        [
+          "memory-layers",
+          "estados de conocimiento"
+        ]
+      ]
+    },
+    {
+      "id": "C02-capas",
+      "doc": "C02",
+      "requisito": "Índice → lote de detalles → cronología → evidencia, en CLI y MCP",
+      "alcance": "proceso real (CLI y stdio MCP)",
+      "pruebas": [
+        [
+          "memory-layers",
+          "índice → lote de detalles"
+        ],
+        [
+          "mcp-contexto-tools",
+          "stdio real"
+        ]
+      ]
+    },
+    {
+      "id": "C02-presupuesto",
+      "doc": "C02",
+      "requisito": "El presupuesto acumulado incluye los detalles, no solo el primer recall",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "presupuesto ACUMULADO"
+        ]
+      ]
+    },
+    {
+      "id": "C02-cache",
+      "doc": "C02",
+      "requisito": "Cambiar memoria o código invalida la caché",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "cambiar memoria, vigencia, código o permisos"
+        ]
+      ]
+    },
+    {
+      "id": "C02-contratos",
+      "doc": "C02",
+      "requisito": "Un contrato protegido aplicable no se omite en silencio",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "contrato PROTEGIDO aplicable"
+        ]
+      ]
+    },
+    {
+      "id": "C02-workers",
+      "doc": "C02",
+      "requisito": "Dos workers no confirman el mismo job (fencing)",
+      "alcance": "proceso real (varios procesos node)",
+      "pruebas": [
+        [
+          "memory-queue",
+          "dos workers NO confirman"
+        ],
+        [
+          "memory-queue",
+          "FENCING"
+        ],
+        [
+          "memory-queue",
+          "VARIOS PROCESOS"
+        ]
+      ]
+    },
+    {
+      "id": "C02-caida",
+      "doc": "C02",
+      "requisito": "Caída antes/después de claim o commit produce recuperación idempotente",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-queue",
+          "caída DESPUÉS de procesar"
+        ],
+        [
+          "memory-queue",
+          "caída ANTES del claim"
+        ]
+      ]
+    },
+    {
+      "id": "C02-resumidor",
+      "doc": "C02",
+      "requisito": "La falla del resumidor no bloquea edición ni terminal",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-queue",
+          "el resumidor es opt-in"
+        ]
+      ]
+    },
+    {
+      "id": "C02-enorme",
+      "doc": "C02",
+      "requisito": "Un payload enorme entra en límites sin perder la referencia ni filtrar secretos",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "payload enorme"
+        ],
+        [
+          "memory-core",
+          "payload enorme entra en límites"
+        ]
+      ]
+    },
+    {
+      "id": "C02-embeddings",
+      "doc": "C02",
+      "requisito": "Un proyecto sin embeddings mantiene la búsqueda",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "sin embeddings ni FTS"
+        ]
+      ]
+    },
+    {
+      "id": "C02-backpressure",
+      "doc": "C02",
+      "requisito": "Cola saturada: backpressure explícito sin perder eventos confirmados",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "backpressure explícito"
+        ]
+      ]
+    },
+    {
+      "id": "C02-hostvacio",
+      "doc": "C02",
+      "requisito": "Un payload vacío o desconocido del host no ladrilla al agente",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "la captura nunca lanza"
+        ]
+      ]
+    },
+    {
+      "id": "C02-cola",
+      "doc": "C02",
+      "requisito": "Backoff acotado, dead-letter visible, reintento manual limitado, lecturas agrupadas",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-queue",
+          "reintentos con backoff"
+        ],
+        [
+          "memory-queue",
+          "lecturas repetidas se AGRUPAN"
+        ],
+        [
+          "memory-queue",
+          "reglas deterministas"
+        ]
+      ]
+    },
+    {
+      "id": "C02-estados",
+      "doc": "C02",
+      "requisito": "Sin resultados, sin BD, sin tablas y error son estados distintos",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-layers",
+          "sin tablas = SCHEMA_MISSING"
+        ]
+      ]
+    },
+    {
+      "id": "C02-update",
+      "doc": "C02",
+      "requisito": "Actualizar mientras hay worker/captura exige coordinación con el update seguro",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memory-core",
+          "con un update EN CURSO"
+        ]
+      ]
+    },
+    {
+      "id": "C03-salud",
+      "doc": "C03",
+      "requisito": "Servicio vivo + esquema roto → degradado, no verde",
+      "alcance": "proceso real (servidor HTTP local)",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "servicio vivo + esquema roto"
+        ]
+      ]
+    },
+    {
+      "id": "C03-mirar",
+      "doc": "C03",
+      "requisito": "Mirar no escribe; la escritura se verifica con un comando explícito y caduca",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "salud: mirar NO escribe"
+        ]
+      ]
+    },
+    {
+      "id": "C03-readonly",
+      "doc": "C03",
+      "requisito": "BD de solo lectura: la búsqueda funciona y la escritura muestra su limitación",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "BD de solo lectura"
+        ]
+      ]
+    },
+    {
+      "id": "C03-cola",
+      "doc": "C03",
+      "requisito": "Cola atascada: estado visible y reintento seguro",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "cola atascada"
+        ]
+      ]
+    },
+    {
+      "id": "C03-aislamiento",
+      "doc": "C03",
+      "requisito": "Dos proyectos con el mismo nombre: aislamiento completo",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "dos proyectos con el MISMO nombre"
+        ]
+      ]
+    },
+    {
+      "id": "C03-xss",
+      "doc": "C03",
+      "requisito": "XSS en título o contenido llega como texto escapado",
+      "alcance": "proceso real (API); la página usa solo textContent",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "XSS:"
+        ]
+      ],
+      "nota": "Revisado en el navegador del panel de Claude; no en un navegador de usuario."
+    },
+    {
+      "id": "C03-enorme",
+      "doc": "C03",
+      "requisito": "BD enorme: paginación y uso acotado de RAM",
+      "alcance": "proceso real (30 000 filas; heapUsed, no RSS)",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "BD enorme"
+        ]
+      ]
+    },
+    {
+      "id": "C03-upgrade",
+      "doc": "C03",
+      "requisito": "Upgrade con tablas nuevas conserva los datos anteriores",
+      "alcance": "proceso real + fixture",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "actualización con tablas nuevas"
+        ],
+        [
+          "update-memoria-evidencia",
+          "REAL: leer NO migra"
+        ]
+      ]
+    },
+    {
+      "id": "C03-grafos",
+      "doc": "C03",
+      "requisito": "Los grafos KDD/combinado/code structure quedan intactos (dashboard-preservacion)",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "páginas /memoria y /contexto"
+        ],
+        [
+          "dashboard-preservacion",
+          "dashboard"
+        ]
+      ]
+    },
+    {
+      "id": "C03-tabla",
+      "doc": "C03",
+      "requisito": "Falta una tabla nueva: diagnóstico, nunca migración escondida",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "salud: falta una tabla nueva"
+        ]
+      ]
+    },
+    {
+      "id": "C03-sse",
+      "doc": "C03",
+      "requisito": "SSE con reconexión por cursor, eventos idempotentes y reconsulta tras un hueco",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "SSE existente"
+        ]
+      ]
+    },
+    {
+      "id": "C03-trazar",
+      "doc": "C03",
+      "requisito": "Cada conocimiento nuevo se rastrea hasta su actividad/evidencia; los huecos se muestran",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "conocimiento: se rastrea"
+        ],
+        [
+          "memoria-dashboard",
+          "huecos de captura"
+        ]
+      ]
+    },
+    {
+      "id": "C03-smoke",
+      "doc": "C03",
+      "requisito": "Smoke integrado: tarball instalado, captura, procesamiento, evidencia, índice/detalle y estados",
+      "alcance": "proceso real (tarball instalado en limpio)",
+      "pruebas": [
+        [
+          "release-integration",
+          "funcionesNuevas"
+        ]
+      ],
+      "nota": "Es un script de release (scripts/), no un test; lo ejecuta npm run release:check."
+    },
+    {
+      "id": "H01-log",
+      "doc": "H01",
+      "requisito": "Un error único en 20.000 líneas sigue visible",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "un error único en medio de 20.000 líneas"
+        ]
+      ]
+    },
+    {
+      "id": "H01-fallos",
+      "doc": "H01",
+      "requisito": "Múltiples fallos se conservan, se cuentan y se paginan",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "múltiples fallos se conservan"
+        ],
+        [
+          "context-compressor",
+          "salida REAL de node --test"
+        ]
+      ]
+    },
+    {
+      "id": "H01-json",
+      "doc": "H01",
+      "requisito": "JSON muestra la etiqueta de selección; las cantidades completas no cambian",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "JSON muestra la etiqueta"
+        ]
+      ]
+    },
+    {
+      "id": "H01-unicode",
+      "doc": "H01",
+      "requisito": "Unicode y límites por bytes no generan JSON inválido",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "Unicode y límites por bytes"
+        ]
+      ]
+    },
+    {
+      "id": "H01-reinicio",
+      "doc": "H01",
+      "requisito": "Un caché reiniciado recupera el original con el mismo hash",
+      "alcance": "proceso real (proceso hijo nuevo)",
+      "pruebas": [
+        [
+          "context-compressor",
+          "un caché/proceso reiniciado"
+        ]
+      ]
+    },
+    {
+      "id": "H01-retencion",
+      "doc": "H01",
+      "requisito": "La caducidad no elimina pins activos ni evidencia durable",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "la caducidad no elimina pins"
+        ],
+        [
+          "evidence-store",
+          "retención: la caducidad"
+        ]
+      ]
+    },
+    {
+      "id": "H01-aislamiento",
+      "doc": "H01",
+      "requisito": "Colisión de ID, traversal y otro proyecto se rechazan",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "colisión de ID, traversal"
+        ],
+        [
+          "evidence-store",
+          "colisión de id"
+        ]
+      ]
+    },
+    {
+      "id": "H01-fallo",
+      "doc": "H01",
+      "requisito": "Compresor fallido, malformado o inflacionario entrega el original",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "compresor fallido, malformado o inflacionario"
+        ],
+        [
+          "context-compressor",
+          "sin espacio, sin esquema"
+        ]
+      ]
+    },
+    {
+      "id": "H01-gate",
+      "doc": "H01",
+      "requisito": "Un gate no pasa con un resumen fabricado sin artefacto",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "un gate no pasa con un resumen fabricado"
+        ]
+      ]
+    },
+    {
+      "id": "H01-enorme",
+      "doc": "H01",
+      "requisito": "Un payload enorme usa límites y lectura acotada",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "un payload enorme usa límites"
+        ],
+        [
+          "evidence-store",
+          "payload enorme"
+        ]
+      ]
+    },
+    {
+      "id": "H01-neto",
+      "doc": "H01",
+      "requisito": "La recuperación repetida se contabiliza en el ahorro neto",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "la recuperación repetida se contabiliza"
+        ]
+      ]
+    },
+    {
+      "id": "H01-obligatoria",
+      "doc": "H01",
+      "requisito": "Recuperación obligatoria: gate, ausencia, totalidad, código a modificar, hash cambiado",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "reglas de debeRecuperar"
+        ],
+        [
+          "context-compressor",
+          "código para editar/auditar/depurar/verificar"
+        ]
+      ]
+    },
+    {
+      "id": "H01-inyeccion",
+      "doc": "H01",
+      "requisito": "El texto de una salida es dato: la inyección no se obedece",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "el texto de una salida es DATO"
+        ]
+      ]
+    },
+    {
+      "id": "H01-envelope",
+      "doc": "H01",
+      "requisito": "El sobre trae todos los campos del contrato sin credenciales ni rutas",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-compressor",
+          "H01 sobre"
+        ]
+      ]
+    },
+    {
+      "id": "H02-1",
+      "doc": "H02",
+      "requisito": "Un cambio de texto local usa LOW sin investigación global ni delegación innecesaria",
+      "alcance": "proceso real (decisión del router real)",
+      "pruebas": [
+        [
+          "effort-budget",
+          "[prueba 1]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-2",
+      "doc": "H02",
+      "requisito": "Dos líneas en auth o migración mantienen HIGH por riesgo",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "effort-budget",
+          "[prueba 2]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-3",
+      "doc": "H02",
+      "requisito": "Recuperar detalles afecta el presupuesto acumulado",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "effort-budget",
+          "[prueba 3]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-4",
+      "doc": "H02",
+      "requisito": "Cambiar de rol no reinicia los límites",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "effort-budget",
+          "[prueba 4]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-5",
+      "doc": "H02",
+      "requisito": "Relectura intacta reutiliza; un hash distinto invalida",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "context-reuse",
+          "[prueba 5]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-6",
+      "doc": "H02",
+      "requisito": "Una entrega duplicada no duplica la ejecución",
+      "alcance": "simulado (receptor) sobre protocolo y base reales",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 6]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-7",
+      "doc": "H02",
+      "requisito": "Un delta con base incorrecta pide snapshot, no aplica estado corrupto",
+      "alcance": "simulado (receptor) sobre protocolo y base reales",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 7]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-8",
+      "doc": "H02",
+      "requisito": "El director rechaza un PASS inventado y evidencia de una versión anterior",
+      "alcance": "simulado (constructor) sobre evidencia real",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 8]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-9",
+      "doc": "H02",
+      "requisito": "Un reinicio conserva pins, revisiones y pendientes humanos",
+      "alcance": "proceso real (proceso nuevo)",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 9]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-10",
+      "doc": "H02",
+      "requisito": "Un bloqueo no crítico no detiene las tareas independientes",
+      "alcance": "proceso real con TEAMS real",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 10]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-11a",
+      "doc": "H02",
+      "requisito": "Concurrencia simulada, separada del smoke en hosts reales",
+      "alcance": "simulado (8 procesos node)",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 11a]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-11b",
+      "doc": "H02",
+      "requisito": "Smoke dentro de hosts reales (Cursor y Claude Code)",
+      "alcance": "host real NO_EJECUTADO",
+      "pruebas": [
+        [
+          "teams-packets",
+          "[prueba 11b]"
+        ]
+      ],
+      "nota": "Queda NO_EJECUTADO salvo AKDD_HOST_SMOKE=1. No se certifica autonomía de host."
+    },
+    {
+      "id": "H02-12",
+      "doc": "H02",
+      "requisito": "Se registran los límites del host y los errores de progreso; no se certifica autonomía con un test de estado",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "effort-budget",
+          "[prueba 12]"
+        ],
+        [
+          "teams-packets",
+          "[prueba 12]"
+        ]
+      ]
+    },
+    {
+      "id": "H02-contrato",
+      "doc": "H02",
+      "requisito": "Paquete compartido con los campos exactos del contrato TEAMS; ACK con revisión y hash",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "teams-packets",
+          "contrato: un snapshot lleva EXACTAMENTE"
+        ],
+        [
+          "teams-packets",
+          "ACK identifica REVISIÓN y HASH"
+        ]
+      ]
+    },
+    {
+      "id": "H02-proveedor",
+      "doc": "H02",
+      "requisito": "Control del proveedor solo declarativo; sin ahorro de pensamiento interno prometido",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "effort-budget",
+          "capacidad del proveedor"
+        ]
+      ]
+    },
+    {
+      "id": "H03-neto",
+      "doc": "H03",
+      "requisito": "El ahorro es neto y recuperar el original resta",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "benchmark-contexto",
+          "el ahorro es NETO"
+        ]
+      ]
+    },
+    {
+      "id": "H03-medicion",
+      "doc": "H03",
+      "requisito": "bytes/4 es estimación, no se mezcla con uso exacto ni se convierte en dinero",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "benchmark-contexto",
+          "bytes/4 es ESTIMACIÓN"
+        ]
+      ]
+    },
+    {
+      "id": "H03-ausente",
+      "doc": "H03",
+      "requisito": "Dato ausente = no disponible, no 0; lo no observado se dice",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "benchmark-contexto",
+          "dato ausente es null"
+        ]
+      ]
+    },
+    {
+      "id": "H03-benchmark",
+      "doc": "H03",
+      "requisito": "Benchmark propio A–H determinista, sin datos de usuarios; campañas con modelos reales NO_EJECUTADO",
+      "alcance": "proceso real (determinista)",
+      "pruebas": [
+        [
+          "benchmark-contexto",
+          "ocho casos A–H"
+        ],
+        [
+          "benchmark-contexto",
+          "es reproducible con la misma semilla"
+        ]
+      ],
+      "nota": "No sustituye una campaña con modelos reales ni se midió en un host real."
+    },
+    {
+      "id": "H03-panel",
+      "doc": "H03",
+      "requisito": "Panel Contexto y esfuerzo: tier, presupuesto, reducción neta, tipo de medición, cobertura",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "memoria-dashboard",
+          "contexto: tier y motivo"
+        ],
+        [
+          "memoria-dashboard",
+          "contexto: sin datos"
+        ]
+      ]
+    },
+    {
+      "id": "H03-release",
+      "doc": "H03",
+      "requisito": "Release conjunto: suite completa, tarball limpio con opcionales presentes/ausentes, upgrade real 3.19.0 y 3.20.0, MCP stdio, sin datos privados",
+      "alcance": "proceso real (Windows, Node 24; ver informe)",
+      "pruebas": [
+        [
+          "release-integration",
+          "optional-install"
+        ],
+        [
+          "release-integration",
+          "read_does_not_migrate"
+        ],
+        [
+          "update-memoria-evidencia",
+          "REAL: leer NO migra"
+        ]
+      ],
+      "nota": "La matriz Linux/Node 20/22 está en el workflow de CI y NO se ejecutó en esta máquina."
+    },
+    {
+      "id": "H03-rollback",
+      "doc": "H03",
+      "requisito": "El rollback conserva los aprendizajes posteriores; un update interrumpido con tablas nuevas se recupera",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "update-memoria-evidencia",
+          "REAL: leer NO migra"
+        ],
+        [
+          "update-memoria-evidencia",
+          "update INTERRUMPIDO"
+        ]
+      ]
+    },
+    {
+      "id": "H03-docs",
+      "doc": "H03",
+      "requisito": "README y ayuda solo mencionan comandos que existen",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "readme-comandos",
+          "comandos documentados"
+        ]
+      ]
+    }
+  ]
+}

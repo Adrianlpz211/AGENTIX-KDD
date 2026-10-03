@@ -31,8 +31,9 @@ const NUCLEO = '.agentic/nucleo-reglas.md';
 const VECINOS_POR_TIER = { LOW: 3, MEDIUM: 8, HIGH: 15 };
 const FRONT = /\.(html?|css|scss|less|jsx|tsx|vue|svelte|astro)$|(^|\/)(components?|pages|views|app|public|styles?)\//i;
 
+/** Falla CERRADO: si el redactor no está o lanza, NO se devuelve el texto original (antes sí, y un secreto pasaba al paquete). */
 function redactar(t) {
-  try { return require('./telemetry.cjs').redactar(String(t)); } catch { return String(t); }
+  try { return require('./memory-privacy.cjs').redactar(String(t)); } catch { return '[REDACCION_FALLIDA]'; }
 }
 
 function hashArchivo(root, rel) {
@@ -56,6 +57,17 @@ function referencias(rol, tier, paths) {
 
 function tamano(root, rel) { try { return fs.statSync(path.join(root, rel)).size; } catch { return 0; } }
 
+/**
+ * Lo que entrega este paquete cuenta en el presupuesto ACUMULADO de la tarea (H02), también cuando se reutiliza:
+ * "reutilizado" evita volver a enriquecer, pero el llamador recibe los bytes igual. Fail-soft: sin decisión
+ * persistida o sin módulo no se rompe nada y el paquete sale como siempre.
+ */
+function contar(root, id, rol, pack, reutilizado) {
+  try {
+    return require('./effort-budget.cjs').registrar(root, id, { kind: 'context_pack', role: rol || null, delivered_bytes: pack.bytes, original_bytes: pack.bytes, detail: reutilizado ? 'paquete reutilizado' : 'paquete nuevo' });
+  } catch { return null; }
+}
+
 function ruta(root, id) {
   if (!/^[\w.-]{1,80}$/.test(String(id || ''))) { const e = new Error('task_id inválido'); e.code = 'INVALID_TASK_ID'; throw e; }
   return path.join(root, DIR, id + '.json');
@@ -71,14 +83,17 @@ async function armar(root, entrada) {
   const decision = entrada.decision || router.decidirYGuardar(root, { task_id: entrada.task_id, intent: entrada.objetivo, paths, origen: entrada.origen });
   const id = decision.task_id;
   let grafo = '-';
-  try { grafo = require('./kdd-memory.cjs').huellaGrafo(root); } catch { /* sin memoria */ }
+  // Revisión del CONOCIMIENTO (nodos), no la huella del archivo de la base: esa se mueve con cualquier escritura
+  // (registro de consumo, ciclos…) e invalidaría el paquete sin que cambie nada de lo que el paquete cita.
+  try { grafo = require('./context-reuse.cjs').revisionMemoria(root); } catch { try { grafo = require('./kdd-memory.cjs').huellaGrafo(root); } catch { /* sin memoria */ } }
   const hashes = Object.fromEntries(paths.map((p) => [p, hashArchivo(root, p)]));
   const contextHash = sha(JSON.stringify([entrada.objetivo, entrada.aceptacion || [], hashes, decision.tier, decision.policy_version]));
 
   let previo = null;
   try { previo = JSON.parse(fs.readFileSync(ruta(root, id), 'utf8')); } catch (e) { if (e.code === 'INVALID_TASK_ID') throw e; }
   if (previo && previo.context_hash === contextHash && previo.grafo === grafo && !entrada.forzar) {
-    return { ...previo, reutilizado: true };
+    const p0 = contar(root, id, entrada.rol, previo, true);
+    return { ...previo, reutilizado: true, ...(p0 ? { presupuesto: { status: p0.status, reason_code: p0.reason_code } } : {}) };
   }
 
   let decisiones = [];
@@ -139,7 +154,8 @@ async function armar(root, entrada) {
 
   fs.mkdirSync(path.dirname(ruta(root, id)), { recursive: true });
   fs.writeFileSync(ruta(root, id), JSON.stringify(pack, null, 2));
-  return { ...pack, reutilizado: false };
+  const p1 = contar(root, id, entrada.rol, pack, false);
+  return { ...pack, reutilizado: false, ...(p1 ? { presupuesto: { status: p1.status, reason_code: p1.reason_code } } : {}) };
 }
 
 /** La parte de cada rol, más las instrucciones que le tocan y su peso. */

@@ -296,6 +296,34 @@ function anotarEvento(root, host, evento, entrada, r) {
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.appendFileSync(f, JSON.stringify({ at: new Date().toISOString(), host, evento, event_id: id, decision: r ? r.decision : null, origen: process.env.AKDD_HOOK_SMOKE ? 'smoke' : 'host' }) + '\n');
   } catch { /* sin disco: no frena la decisión */ }
+  capturarEnMemoria(root, host, evento, entrada, r);
+}
+
+/**
+ * Captura PASIVA en la memoria con procedencia (C01): lo que el host realmente entrega por sus hooks ya
+ * validados (shell, edición, MCP). Es una actividad con su job en la misma transacción. No instala nada,
+ * no llama a ningún modelo y NO cambia la decisión de la guardia: ante cualquier fallo (sin tablas, base
+ * ocupada, update en curso) se calla y la acción sigue su curso. Una simulación se etiqueta como tal
+ * (host '-smoke') para que nadie la cuente como verificación dentro de Cursor/Claude.
+ */
+function capturarEnMemoria(root, host, evento, entrada, r) {
+  try {
+    // Aislamiento de pruebas (scripts/run-tests.cjs): una prueba contra el propio repo no escribe en su memoria real.
+    if (process.env.AKDD_NO_MEMORY_CAPTURE === '1') return;
+    const tipo = { shell: 'shell_command', edit: 'file_edit', mcp: 'mcp_call' }[evento];
+    if (!tipo || !entrada || typeof entrada !== 'object') return;
+    const core = require('./memory-core.cjs');
+    const ruta = evento === 'edit' ? rutaDe(entrada) : null;
+    const hid = entrada.tool_use_id || entrada.generation_id || entrada.hook_event_id || null;
+    core.capturar(root, {
+      host: process.env.AKDD_HOOK_SMOKE ? host + '-smoke' : host,
+      session_id: String(entrada.session_id || entrada.conversation_id || 'host-session'),
+      host_event_id: hid, event_type: tipo,
+      paths: typeof ruta === 'string' && ruta ? [ruta] : [],
+      input: evento === 'shell' ? comandoDe(entrada) : { tool: entrada.tool_name || entrada.toolName || null },
+      output: r ? { decision: r.decision, reason: r.reason } : null,
+    });
+  } catch { /* la captura es auxiliar: jamás convierte nada en deny */ }
 }
 
 function procesar(host, evento, entrada, root) {
