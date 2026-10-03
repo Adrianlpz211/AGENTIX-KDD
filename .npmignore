@@ -75,3 +75,7 @@ dashboard-original.cjs
 .agentic/actualizacion-agentix.md
 sandbox/
 test/
+
+# Estado de máquina en un .agentic anidado (03/10/2026: el guardia de hooks
+# sembró src/.agentic/ y el release check lo atrapó en el tarball)
+**/.agentic/_*

@@ -496,9 +496,15 @@ rl.on('line', async (line) => {
   try { request = JSON.parse(line); } catch { return; }
 
   const { id, method, params } = request;
+  // JSON-RPC: una notificación (sin id, p. ej. notifications/initialized) no
+  // lleva respuesta. Antes se contestaba con un error sin id, que algunos
+  // clientes registran como fallo del servidor.
+  if (id === undefined || id === null) return;
 
   try {
-    if (method === 'initialize') {
+    if (method === 'ping') {
+      sendResponse(id, {});
+    } else if (method === 'initialize') {
       sendResponse(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },

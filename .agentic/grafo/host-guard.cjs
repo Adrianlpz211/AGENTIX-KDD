@@ -266,9 +266,30 @@ function evaluarMcp(root, entrada) {
   return peor;
 }
 
+/**
+ * Raíz del proyecto Agentix: la primera carpeta (subiendo) que tiene
+ * .agentic/grafo. El cwd de la terminal puede ser una subcarpeta: tomarlo tal
+ * cual creaba un .agentic falso dentro de src/ que se coló al paquete npm
+ * (atrapado por el release check el 03/10/2026). Sin proyecto: el primer
+ * candidato, y anotarEvento no escribe nada.
+ */
+function raizProyecto(candidatos) {
+  // Manda el PRIMER candidato disponible (mismo orden de siempre); solo se
+  // sube desde él hasta la raíz. No se salta a otro candidato.
+  const base = candidatos.find((c) => typeof c === 'string' && c && !c.includes('${')) || process.cwd();
+  let dir = path.resolve(base);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.agentic', 'grafo'))) return dir;
+    const padre = path.dirname(dir);
+    if (padre === dir) return base;
+    dir = padre;
+  }
+}
+
 /** Huella de cada ejecución real: instalado no es verificado, ejecutado sí se mide. */
 function anotarEvento(root, host, evento, entrada, r) {
   try {
+    if (!fs.existsSync(path.join(root, '.agentic'))) return; // no es un proyecto Agentix: no se siembra .agentic
     const id = entrada.tool_use_id || entrada.generation_id || entrada.hook_event_id || entrada.conversation_id || null;
     const f = path.join(root, '.agentic', '_hooks-eventos.jsonl');
     try { if (fs.statSync(f).size > 512 * 1024) fs.renameSync(f, f + '.1'); } catch { /* nuevo */ }
@@ -312,7 +333,7 @@ function procesar(host, evento, entrada, root) {
   return null;
 }
 
-module.exports = { evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenTeams, origenWhatsapp, sinCitas, ENRIQ };
+module.exports = { raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenTeams, origenWhatsapp, sinCitas, ENRIQ };
 
 if (require.main === module) {
   const opt = Object.fromEntries(process.argv.slice(2).map((a) => /^--([^=]+)=(.*)$/.exec(a)).filter(Boolean).map((m) => [m[1], m[2]]));
@@ -323,7 +344,7 @@ if (require.main === module) {
     let entrada = null;
     try { entrada = datos.trim() ? JSON.parse(datos) : null; } catch { entrada = null; }
     const e = entrada && typeof entrada === 'object' ? entrada : {};
-    const root = (Array.isArray(e.workspace_roots) && e.workspace_roots[0]) || e.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+    const root = raizProyecto([Array.isArray(e.workspace_roots) ? e.workspace_roots[0] : null, e.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
     const out = procesar(opt.host === 'claude' ? 'claude' : 'cursor', opt.event || 'shell', entrada, root);
     if (out) process.stdout.write(JSON.stringify(out));
     process.exitCode = 0;

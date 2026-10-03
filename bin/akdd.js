@@ -23,7 +23,7 @@ const HELP = `
 
   Setup:
     akdd init              Install Agentic KDD in the current project
-    akdd update            Update agents + engine (memory stays intact)
+    akdd update            Update the engine from the INSTALLED package (memory, config and code untouched)
                            [--ref=<branch|tag|sha>] [--from=<file.tar.gz>] [--sha256=<hex>]
                            [--migrate] [--deps] · akdd update --rollback
     akdd onboard           Analyze existing project + pre-populate memory
@@ -140,9 +140,24 @@ const HELP = `
   Dashboard:
     akdd dashboard         Open visual dashboard in browser
 
+  3.20 — effort, TEAMS, restore, hooks, time:
+    akdd effort decide "<task>" [--paths=a,b] [--type=T] [--json]   LOW/MEDIUM/HIGH by difficulty AND risk
+    akdd context armar "<goal>" --paths=a,b                          One context package per task
+    akdd teams <init|plan <plan.json>|run|status|pending|resolve|pause|resume|disable|goal>
+                           Claude Code director + Cursor builder (init needs --aprobar-migracion)
+    akdd restore <list|create --label=L [--files=a,b]|show|preview|apply <id> --expected-current-hash=H>
+                           Real restore points in private Git refs (HEAD/branch/index untouched)
+    akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
+    akdd ws <activar|estado|desactivar>   Optional WhatsApp notices (needs a real browser session)
+    akdd simple            Simplicity gate: duplicated code, deps with native equivalent
+    akdd capabilities      What this install can really do (verified vs pending)
+    akdd tiempo <inicio "<task>"|pausa|fin|resumen>   Measured task time (worked vs elapsed)
+    akdd tiempos [module]  Time per module · akdd rebobina [from] [to] · akdd orden
+
   MCP Setup (Cursor / Claude Code / VS Code):
-    akdd mcp               Auto-configure MCP in all IDEs (recommended)
-    akdd mcp --global      Configure MCP globally for all projects
+    akdd mcp               Configure MCP for THIS project (Cursor + Claude Code)
+    akdd mcp --global      One entry for all projects: ~/.cursor/mcp.json + Claude Code user scope.
+                           A launcher opens each project's own server and memory.
     akdd mcp status        Check MCP configuration status
 
   akdd --version / akdd --help

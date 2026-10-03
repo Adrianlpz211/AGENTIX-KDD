@@ -97,3 +97,6 @@ _output/*-baseline/
 
 # Cola del post-commit (H21): SHAs pendientes y ACK por commit — estado de máquina
 .agentic/_hooks/
+
+# Mismo caso que en .npmignore: estado escrito en un .agentic anidado
+**/.agentic/_hooks-eventos.jsonl

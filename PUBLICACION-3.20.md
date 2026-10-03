@@ -44,6 +44,7 @@ Comprobar `npm view agentic-kdd version` y probar una instalación limpia. En ca
 
 ```powershell
 npm install -g agentic-kdd@3.20.0
+akdd mcp --global          # una vez por máquina: refresca el lanzador global
 cd "ruta-del-consumidor"
 akdd update
 akdd health
