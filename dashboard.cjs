@@ -1471,6 +1471,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
   <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
+  <a class="mode-tab" href="/memoria" style="text-decoration:none" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</a>
+  <a class="mode-tab" href="/contexto" style="text-decoration:none" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</a>
+  <a class="mode-tab" href="/teams" style="text-decoration:none" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</a>
+  <a class="mode-tab" href="/actualizacion" style="text-decoration:none" title="Estado de la última actualización y de la memoria">🔄 Actualización</a>
 </div>
 
 <div class="content">

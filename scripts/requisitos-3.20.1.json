@@ -1507,6 +1507,42 @@
       ]
     },
     {
+      "id": "AA-individual-1",
+      "doc": "Regresión",
+      "requisito": "El ciclo individual aa: sigue registrando ciclo, contratos, AST, layout, módulo, spec, episodio y tiempo, y la memoria con procedencia se SUMA sin quitar nada",
+      "alcance": "proceso real (Git, SQLite, hijos reales); el constructor lo simula la prueba",
+      "pruebas": [
+        [
+          "aa-individual-regresion",
+          "aa: individual — el ciclo completo"
+        ]
+      ]
+    },
+    {
+      "id": "AA-individual-2",
+      "doc": "Regresión",
+      "requisito": "Las consultas y controles previos (grafo, regresión, locks, hierro/papel, layout) responden y ninguna tabla histórica desaparece al sumar las nuevas",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "aa-individual-regresion",
+          "aa: individual — memoria y consulta de siempre"
+        ]
+      ]
+    },
+    {
+      "id": "AA-individual-3",
+      "doc": "Regresión",
+      "requisito": "El tablero conserva sus pestañas y grafos y enlaza (solo anclas) a /memoria, /contexto, /teams y /actualizacion",
+      "alcance": "proceso real",
+      "pruebas": [
+        [
+          "aa-individual-regresion",
+          "aa: individual — el dashboard"
+        ]
+      ]
+    },
+    {
       "id": "TEAMS-nivelC",
       "doc": "TEAMS",
       "requisito": "Campaña REAL Claude Code + Cursor con tres subagentes y vigilantes (T07/T08/T09/T13/T14/T18/T22 en hosts reales)",
