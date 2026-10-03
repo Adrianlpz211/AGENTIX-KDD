@@ -116,6 +116,8 @@ test('servicios con conexión persistente: pausan, cierran y CONFIRMAN; el que n
       const w = await guard.waitForWriters(root, 'op1', 5000);
       assert.equal(w.ok, true, JSON.stringify(w));
       assert.equal(w.acked.length, 1);
+      // El ack se escribe antes de que el «PAUSADO» del servicio llegue por la tubería: se espera a que llegue, no se lee al instante.
+      for (let i = 0; i < 60 && !salida.includes('PAUSADO'); i++) await new Promise((r) => setTimeout(r, 100));
       assert.ok(salida.includes('PAUSADO'), 'el servicio cerró su conexión');
     } finally { guard.release(h); }
     for (let i = 0; i < 60 && !salida.includes('REANUDADO'); i++) await new Promise((r) => setTimeout(r, 100));
