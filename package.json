@@ -60,6 +60,7 @@
     "bin/",
     "src/",
     ".agentic/grafo/",
+    "!.agentic/grafo/*.log",
     ".agentic/agentes/",
     ".agentic/nucleo-reglas.md",
     ".audit/",
