@@ -2,7 +2,7 @@
 
 Matriz requisito → prueba. Cada 'titulo' es un fragmento del título de un test que EXISTE (test/matriz-requisitos.test.cjs lo comprueba). 'alcance' dice qué clase de evidencia es: proceso real (SQLite real, procesos node reales), fixture (datos de prueba etiquetados), simulado (receptor/constructor/director simulados), host real NO_EJECUTADO (no se probó dentro de Cursor/Claude Code). Implementado no es verificado, y verificado no es publicado.
 
-**Último release check:** PASS · win32 · Node n/d · artefacto `agentic-kdd-3.20.1.tgz` sha256 `0629b31678b6dc5df2847aa4690dceb6571774b3956a266cb9f194992a546516` · 2026-10-03T15:37:06.133Z
+**Último release check:** PASS · win32 · Node n/d · artefacto `agentic-kdd-3.20.1.tgz` sha256 `cd740d0800cb61f3178aea0e1ad62dc78261c9dbd8afd96b6deda411df8caa32` · 2026-10-03T18:25:00.485Z
 
 El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. Linux y Node 20/22 están en la matriz de CI y no se ejecutaron en esta máquina.
 
