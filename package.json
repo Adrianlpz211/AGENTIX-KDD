@@ -1,15 +1,17 @@
 {
   "name": "agentic-kdd",
-  "version": "3.19.0",
+  "version": "3.20.0",
   "description": "Autonomous development pipeline — aa: · ag: · audit: · AST graph · Harness · Specs · Impact analysis · Decision trail · Metrics · MCP server. Works with Cursor and Claude Code.",
   "bin": {
     "akdd": "bin/akdd.js"
   },
   "scripts": {
-    "prepublishOnly": "node scripts/prepublish-check.js",
+    "prepublishOnly": "node scripts/release-check.cjs --publish",
+    "version": "node scripts/sync-version.cjs && git add .agentic/grafo/framework.json",
     "test": "node scripts/run-tests.cjs",
     "test:smoke": "node bin/akdd.js --version",
-    "prepare": "node -e \"var fs=require('fs');fs.chmodSync('bin/akdd.js','755')\""
+    "prepare": "node -e \"var fs=require('fs');fs.chmodSync('bin/akdd.js','755')\"",
+    "release:check": "node scripts/release-check.cjs"
   },
   "keywords": [
     "ai",
@@ -41,7 +43,6 @@
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
-    "axios": "^1.6.0",
     "chalk": "^4.1.2",
     "fs-extra": "^11.2.0",
     "inquirer": "^8.2.6",
@@ -53,6 +54,28 @@
     "playwright-core": "^1.61.1"
   },
   "devDependencies": {
-    "@xenova/transformers": "^2.17.2"
+    "@huggingface/transformers": "^4.3.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    ".agentic/grafo/",
+    ".agentic/agentes/",
+    ".agentic/nucleo-reglas.md",
+    ".audit/",
+    ".cursor/rules/",
+    "templates/seed/",
+    "CLAUDE.md",
+    ".cursorrules",
+    "dashboard.cjs",
+    "AGENTS.md",
+    "README.md",
+    "README.es.md",
+    "LICENSE",
+    "PUBLICACION-3.20.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

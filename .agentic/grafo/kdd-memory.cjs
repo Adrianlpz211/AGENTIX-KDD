@@ -48,33 +48,19 @@ const HEADING_BOOST = 3.0;   // multiplicador para matches en títulos/headings
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
 
-function openDB(projectRoot) {
+function openDB(projectRoot, opciones) {
   const dbPath = path.join(projectRoot, '.agentic/memoria.db');
-  let db;
-  try { db = new (require('better-sqlite3'))(dbPath); }
-  catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); } catch { return null; } }
-
-  // Crear tabla FTS5 para búsqueda léxica si no existe
+  if (!fs.existsSync(dbPath)) return null;
   try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS nodos_fts USING fts5(
-        id UNINDEXED,
-        titulo,
-        contenido,
-        area,
-        tipo,
-        tokenize='porter unicode61'
-      )
-    `);
+    const dba = require('./db-adapter.cjs');
+    return opciones && opciones.write ? dba.openWrite(dbPath) : dba.openReadOnly(dbPath);
+  } catch {
+    return null;
+  }
+}
 
-    // Sincronizar FTS con nodos si está vacío
-    const ftsCount = db.prepare("SELECT COUNT(*) as n FROM nodos_fts").get()?.n || 0;
-    if (ftsCount === 0) {
-      syncFTS(db);
-    }
-  } catch {}
-
-  return db;
+function traza() {
+  try { return require('./telemetry.cjs'); } catch { return null; }
 }
 
 function syncFTS(db) {
@@ -91,6 +77,39 @@ function syncFTS(db) {
   } catch { return 0; }
 }
 
+// ─── TÉRMINOS ────────────────────────────────────────────────────────────────
+
+const VACIAS = new Set(('the and for with from that this into los las del por para con una uno unos unas que como sus este esta ' +
+  'estos estas pero sin sobre entre cuando donde todo toda todos todas hay ser son fue han hace hacer el la de en un y o a al se lo le').split(' '));
+
+function terminos(query) {
+  const out = [];
+  for (const w of String(query || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9_]+/)) {
+    if (w.length >= 3 && !VACIAS.has(w) && !out.includes(w)) out.push(w);
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
+/** Sin índice FTS: coincidencia de términos sobre los nodos activos, en lectura. */
+function lexicoSinFts(db, query, topK) {
+  const ts = terminos(query);
+  if (!ts.length) return [];
+  let filas = [];
+  try { filas = db.prepare("SELECT id, titulo, contenido, area, tipo FROM nodos WHERE estado = 'ACTIVO' LIMIT 5000").all(); } catch { return []; }
+  const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return filas
+    .map((r) => {
+      const t = norm(r.titulo); const c = norm(r.contenido);
+      const score = ts.reduce((s, w) => s + (t.includes(w) ? HEADING_BOOST : 0) + (c.includes(w) ? 1 : 0), 0);
+      return { ...r, score };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map((r, idx) => ({ id: r.id, titulo: r.titulo, area: r.area, tipo: r.tipo, bm25_rank: idx + 1 }));
+}
+
 // ─── BM25 SEARCH ─────────────────────────────────────────────────────────────
 /**
  * BM25 via SQLite FTS5. Ideal para:
@@ -102,11 +121,8 @@ function bm25Search(db, query, topK = 20) {
   if (!query || !db) return [];
 
   try {
-    // Sanitizar query para FTS5
-    const sanitized = query
-      .replace(/['"]/g, ' ')
-      .replace(/[()]/g, ' ')
-      .trim();
+    // Términos sueltos con OR: una tarea larga no tiene que aparecer entera.
+    const sanitized = terminos(query).map((t) => `"${t}"`).join(' OR ');
 
     if (!sanitized) return [];
 
@@ -283,73 +299,167 @@ function rrfFusion(bm25Results, vectorResults, db, topK = 10) {
  */
 async function recall(query, options = {}, projectRoot) {
   projectRoot = projectRoot || process.cwd();
-  const { topK = 10, tipo = null, area = null } = options;
+  let salida;
+  try {
+    salida = await recallInterno(query, options, projectRoot);
+  } catch (e) {
+    const t = traza();
+    if (t) t.recordMemoryRead(query, [], { error: e.message, via: options.via }, projectRoot);
+    throw e;
+  }
+  const t = traza();
+  if (t) t.recordMemoryRead(query, salida.results || [], { via: options.via, error: salida.source === 'unavailable' ? 'DB unavailable' : null }, projectRoot);
+  return salida;
+}
+
+// ─── PRESUPUESTO, VIGENCIA Y CACHÉ (H32) ─────────────────────────────────────
+
+const PRESUPUESTO_TOKENS = 1500;          // por llamada, salvo que se pida otro
+const ESTIMACION = 'bytes/4';             // declarada: no es el tokenizador real
+const RESUMEN_CHARS = 200;
+const MIN_VECTOR_SOLO = 0.35;             // sin coincidencia léxica hace falta más similitud
+const NO_APLICAR = new Set(['OBSOLETO', 'HISTORICO', 'SUPERSEDED']);
+const cache = new Map();
+const CACHE_MAX = 50;
+
+const vigente = () => require('./memoria-vigente.cjs');
+const costoTokens = (obj) => Math.ceil(Buffer.byteLength(JSON.stringify(obj), 'utf8') / 4);
+
+/** Cambia con cualquier escritura en la base (archivo principal o WAL). */
+function huellaGrafo(projectRoot) {
+  const base = path.join(projectRoot, '.agentic', 'memoria.db');
+  return ['', '-wal'].map((s) => { try { const st = fs.statSync(base + s); return `${st.mtimeMs}:${st.size}`; } catch { return '-'; } }).join('|');
+}
+
+function archivosDe(fila) {
+  const v = fila.archivos_aplica;
+  if (!v) return [];
+  try { const a = JSON.parse(v); if (Array.isArray(a)) return a.map(String); } catch { /* lista separada por comas */ }
+  return String(v).split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
+}
+
+function resumir(texto) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  return t.length > RESUMEN_CHARS ? t.slice(0, RESUMEN_CHARS - 1) + '…' : t;
+}
+
+async function recallInterno(query, options, projectRoot) {
+  const { topK = 10, tipo = null, area = null, detalle = false } = options;
+  const presupuesto = Number.isFinite(options.presupuestoTokens) ? options.presupuestoTokens : PRESUPUESTO_TOKENS;
+  const excluir = new Set((options.excluir || []).map(String));
+
+  const contexto = options.contexto || null;
+  const huella = huellaGrafo(projectRoot);
+  const clave = JSON.stringify([path.resolve(projectRoot), options.tenant || null, query, topK, tipo, area, detalle, presupuesto, [...excluir].sort(), contexto]);
+  const enCache = cache.get(clave);
+  if (enCache && enCache.huella === huella && !options.sinCache) {
+    return { ...JSON.parse(enCache.salida), cache: 'hit' };
+  }
 
   const db = openDB(projectRoot);
   if (!db) return { results: [], source: 'unavailable' };
 
-  // Sincronizar FTS si es necesario
+  let salida;
   try {
-    const ftsCount = db.prepare("SELECT COUNT(*) as n FROM nodos_fts").get()?.n || 0;
-    const nodeCount = db.prepare("SELECT COUNT(*) as n FROM nodos WHERE estado='ACTIVO'").get()?.n || 0;
-    if (ftsCount < nodeCount * 0.8) syncFTS(db); // re-sync si hay >20% desincronizado
-  } catch {}
+    // Recall no crea el índice FTS (eso es el comando index). Sin él, la
+    // búsqueda léxica se hace sobre los nodos en lectura.
+    let hayFts = false;
+    try { hayFts = !!db.prepare("SELECT 1 AS x FROM sqlite_master WHERE name = 'nodos_fts'").get(); } catch {}
+    const bm25Results = hayFts ? bm25Search(db, query, topK * 2) : lexicoSinFts(db, query, topK * 2);
+    const vectorResults = await vectorSearch(db, query, projectRoot, topK * 2);
 
-  // BM25 search
-  const bm25Results = bm25Search(db, query, topK * 2);
+    const lexicos = new Set(bm25Results.map((r) => String(r.id)));
+    let candidatos = rrfFusion(bm25Results, vectorResults, db, topK * 3)
+      .filter((r) => lexicos.has(String(r.id)) || (r.vector_score || 0) >= MIN_VECTOR_SOLO);
 
-  // Vector search (async)
-  const vectorResults = await vectorSearch(db, query, projectRoot, topK * 2);
+    let obsoletos = 0;
+    let yaEntregados = 0;
+    const filas = [];
+    for (const r of candidatos) {
+      let f = null;
+      try { f = db.prepare('SELECT * FROM nodos WHERE id = ?').get(r.id); } catch {}
+      if (!f) continue;
+      const inactivo = f.estado !== 'ACTIVO' || NO_APLICAR.has(f.vigencia_tipo);
+      const protegidoViejo = inactivo && f.estado !== 'ELIMINADO' && f.vigencia_tipo !== 'SUPERSEDED' && vigente().esProtegido(f);
+      if (inactivo && !protegidoViejo) { obsoletos++; continue; }
+      if (tipo && f.tipo !== tipo) continue;
+      if (area && !String(f.area || '').toLowerCase().includes(String(area).toLowerCase())) continue;
+      if (excluir.has(String(f.id))) { yaEntregados++; continue; }
+      const item = {
+        id: f.id,
+        titulo: f.titulo,
+        tipo: f.tipo,
+        area: f.area,
+        confianza: f.confianza || null,
+        vigencia: f.vigencia_tipo || null,
+        archivos: archivosDe(f),
+        resumen: resumir(f.contenido),
+        relevance_score: r.relevance_score,
+      };
+      if (f.vigencia_tipo === 'SOSPECHOSO' || protegidoViejo) item.verificar = true;
+      if (contexto || protegidoViejo) {
+        const v = vigente().evaluar(f, contexto || {});
+        if (v.aplicable === 'NO') continue;
+        item.aplicabilidad = v;
+      }
+      if (detalle) item.contenido = f.contenido;
+      filas.push(item);
+      if (filas.length >= topK) break;
+    }
 
-  // Si ninguno tiene resultados, fallback a query simple
-  if (bm25Results.length === 0 && vectorResults.length === 0) {
-    const fbParams = [];
-    let fbExtra = '';
-    if (tipo) { fbExtra += " AND tipo = ?"; fbParams.push(tipo); }
-    if (area) { fbExtra += " AND area LIKE ?"; fbParams.push('%' + area + '%'); }
-    const fallback = db.prepare(`
-      SELECT id, titulo, contenido, area, tipo, confianza, aplicado
-      FROM nodos
-      WHERE estado = 'ACTIVO'
-        AND confianza IN ('ALTA', 'MEDIA')
-        ${fbExtra}
-      ORDER BY aplicado DESC
-      LIMIT ?
-    `).all(...fbParams, topK);
+    const results = [];
+    let usados = 0;
+    for (const item of filas) {
+      const c = costoTokens(item);
+      if (usados + c > presupuesto) break;
+      results.push(item);
+      usados += c;
+    }
+    const omitidos = filas.length - results.length;
 
-    db.close();
-    return {
-      results: fallback,
-      source: 'fallback_no_query_match',
+    salida = {
+      results,
       query,
+      source: results.length
+        ? `${hayFts ? 'bm25' : 'lexico'}(${bm25Results.length}) + vector(${vectorResults.length}) → rrf`
+        : 'sin_coincidencia',
+      total_found: results.length,
+      presupuesto: { tokens: presupuesto, usados, estimacion: ESTIMACION, truncado: omitidos > 0, omitidos },
+      excluidos: { obsoletos, ya_entregados: yaEntregados },
+      detalle: detalle ? 'incluido' : 'bajo demanda: detalle(id)',
     };
+  } finally {
+    try { db.close(); } catch {}
   }
 
-  // RRF fusion
-  let results = rrfFusion(bm25Results, vectorResults, db, topK * 2);
+  cache.set(clave, { huella, salida: JSON.stringify(salida) });
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  return { ...salida, cache: 'miss' };
+}
 
-  // Aplicar filtros post-fusion
-  if (tipo) results = results.filter(r => r.tipo === tipo);
-  if (area) results = results.filter(r => r.area?.toLowerCase().includes(area.toLowerCase()));
-
-  results = results.slice(0, topK);
-
-  // Enriquecer con contenido completo si está disponible
-  results = results.map(r => {
+/**
+ * Detalle bajo demanda de un nodo: contenido completo y, si sus archivos tienen
+ * descripción vigente en code-summaries, esa descripción. Lo obsoleto no se da.
+ */
+function detalle(id, projectRoot) {
+  projectRoot = projectRoot || process.cwd();
+  const db = openDB(projectRoot);
+  if (!db) return { ok: false, reason: 'unavailable' };
+  try {
+    const f = db.prepare('SELECT * FROM nodos WHERE id = ?').get(id);
+    if (!f) return { ok: false, reason: 'NO_EXISTE' };
+    if (f.estado !== 'ACTIVO' || NO_APLICAR.has(f.vigencia_tipo)) return { ok: false, reason: 'NO_VIGENTE', vigencia: f.vigencia_tipo || f.estado };
+    const archivos = archivosDe(f);
+    const descripciones = {};
     try {
-      const full = db.prepare("SELECT titulo, contenido, area, tipo, confianza FROM nodos WHERE id = ?").get(r.id);
-      if (full) return { ...r, ...full };
-    } catch {}
-    return r;
-  });
-
-  db.close();
-  return {
-    results,
-    query,
-    source: `bm25(${bm25Results.length}) + vector(${vectorResults.length}) → rrf`,
-    total_found: results.length,
-  };
+      const cs = require('./code-summaries.cjs');
+      for (const a of archivos) { const d = cs.getFresh(a, projectRoot); if (d) descripciones[a] = d; }
+    } catch { /* sin descripciones */ }
+    return {
+      ok: true, id: f.id, titulo: f.titulo, tipo: f.tipo, area: f.area, confianza: f.confianza,
+      vigencia: f.vigencia_tipo || null, verificar: f.vigencia_tipo === 'SOSPECHOSO', archivos, contenido: f.contenido, descripciones,
+    };
+  } finally { try { db.close(); } catch {} }
 }
 
 // ─── REMEMBER — ESCRIBIR EN MEMORIA CON VALIDACIÓN ───────────────────────────
@@ -360,18 +470,27 @@ async function recall(query, options = {}, projectRoot) {
  */
 function remember(entry, options = {}, projectRoot) {
   projectRoot = projectRoot || process.cwd();
+  const r = rememberInterno(entry, options, projectRoot);
+  const t = traza();
+  if (t) t.recordMemoryWrite(entry, r, { tipo: options.tipo, area: options.area, via: options.via }, projectRoot);
+  return r;
+}
+
+function rememberInterno(entry, options, projectRoot) {
   const { tipo = 'patron', area = 'global', confianza = 'BAJA', archivos = [] } = options;
 
-  const db = openDB(projectRoot);
+  const db = openDB(projectRoot, { write: true });
   if (!db) return { ok: false, error: 'DB unavailable' };
 
-  // Generar hash del contexto
-  const hashCtx = crypto.createHash('md5')
-    .update(entry + area + tipo)
-    .digest('hex')
-    .substring(0, 8);
+  // Identidad de la entrada y huella de los archivos a los que aplica son dos
+  // cosas distintas: la primera evita duplicados, la segunda detecta contexto
+  // cambiado. Las dos salen de memory-hash.cjs, el mismo que usa el validador.
+  const mh = require('./memory-hash.cjs');
+  const dedup = mh.dedupHash(entry, tipo, area);
+  const hashCtx = mh.contextHash(archivos, projectRoot).hash;
 
-  const id = `${tipo}_${hashCtx}`;
+  const integerId = db.all('PRAGMA table_info(nodos)').some(c => c.name === 'id' && /INTEGER/i.test(c.type));
+  let id = integerId ? null : `${tipo}_${dedup.slice(3, 15)}`;
 
   // Verificar duplicado por similitud de texto
   const jaccardSim = (a, b) => {
@@ -413,6 +532,7 @@ function remember(entry, options = {}, projectRoot) {
       JSON.stringify(archivos)
     );
 
+    if (integerId) id = Number(db.get('SELECT last_insert_rowid() AS id').id);
     // Actualizar FTS
     try {
       db.prepare("INSERT OR REPLACE INTO nodos_fts(id, titulo, contenido, area, tipo) VALUES (?, ?, ?, ?, ?)")
@@ -420,7 +540,7 @@ function remember(entry, options = {}, projectRoot) {
     } catch {}
 
     db.close();
-    return { ok: true, id, hash: hashCtx };
+    return { ok: true, id, hash: dedup, context_hash: hashCtx };
   } catch (e) {
     db.close();
     return { ok: false, error: e.message };
@@ -438,7 +558,7 @@ function indexMarkdown(projectRoot) {
 
   if (!fs.existsSync(memoriaPath)) return { indexed: 0 };
 
-  const db = openDB(projectRoot);
+  const db = openDB(projectRoot, { write: true });
   if (!db) return { indexed: 0 };
 
   let indexed = 0;
@@ -527,12 +647,17 @@ if (require.main === module) {
 
       recall(query, { topK, tipo }, projectRoot).then(result => {
         console.log(`\n📚 KDD Memory Recall — "${query}"`);
-        console.log(`   Source: ${result.source} | Found: ${result.total_found}\n`);
+        console.log(`   Source: ${result.source} | Found: ${result.total_found}`);
+        if (result.presupuesto) {
+          const p = result.presupuesto;
+          console.log(`   Presupuesto: ${p.usados}/${p.tokens} tokens (${p.estimacion})${p.truncado ? ` — TRUNCADO, ${p.omitidos} omitidos` : ''}\n`);
+        }
+        if (!result.results.length) console.log('   Sin coincidencias: no se rellena con otras entradas.\n');
         result.results.forEach((r, i) => {
           const conf = r.confianza === 'ALTA' ? '⭐' : r.confianza === 'MEDIA' ? '○' : '·';
-          console.log(`  ${i+1}. ${conf} [${r.tipo}] ${r.titulo?.substring(0,60)}`);
-          console.log(`     Area: ${r.area} | Score: ${r.relevance_score} | Aplicado: ${r.aplicado || 0}×`);
-          if (r.contenido && r.contenido.length > 80) console.log(`     ${r.contenido.substring(0,120)}...`);
+          console.log(`  ${i+1}. ${conf} [${r.tipo}] #${r.id} ${r.titulo?.substring(0,60)}${r.verificar ? '  (SOSPECHOSO: verificar)' : ''}`);
+          console.log(`     Area: ${r.area} | Score: ${r.relevance_score}${r.archivos?.length ? ' | ' + r.archivos.join(', ') : ''}`);
+          if (r.resumen) console.log(`     ${r.resumen}`);
           console.log('');
         });
       });
@@ -555,7 +680,7 @@ if (require.main === module) {
       break;
 
     case 'sync': {
-      const db = openDB(projectRoot);
+      const db = openDB(projectRoot, { write: true });
       if (!db) { console.log('❌ DB unavailable'); break; }
       const n = syncFTS(db);
       db.close();
@@ -579,4 +704,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { recall, remember, indexMarkdown, syncFTS, getStats, bm25Search };
+module.exports = { recall, detalle, remember, indexMarkdown, syncFTS, getStats, bm25Search, terminos, huellaGrafo, PRESUPUESTO_TOKENS };

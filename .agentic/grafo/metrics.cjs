@@ -30,7 +30,7 @@ function computeCycleMetrics(db) {
   let ciclos = [];
   try {
     ciclos = db.prepare(`
-      SELECT estado, stops_count, tests_pasando, tests_generados,
+      SELECT ciclo_id, estado, stops_count, tests_pasando, tests_generados,
              review_blockers, fases_completadas, fases_total, duracion_ms,
              patrones_aplicados, errores_evitados, sync_grafo, fecha_inicio
       FROM ciclos ORDER BY fecha_inicio DESC LIMIT 100
@@ -39,19 +39,22 @@ function computeCycleMetrics(db) {
 
   if (ciclos.length === 0) return { error: 'Sin ciclos registrados' };
 
+  const ec = require('./estado-ciclo.cjs');
+  let eventosStop = [];
+  try { eventosStop = db.prepare("SELECT id, event_id, incident_id, cycle_id FROM gate_events WHERE verdict = 'STOP'").all(); } catch {}
   const total = ciclos.length;
-  const completados = ciclos.filter(c => c.estado === 'COMPLETADO').length;
-  const stops = ciclos.filter(c => c.estado === 'STOP').length;
+  const cierre = ec.resumenCierre(ciclos);
+  const { porCiclo } = ec.stopsPorCiclo(eventosStop);
+  const detenidos = ciclos.filter(c => ec.stopsDelCiclo(c, porCiclo) > 0).length;
   const conRework = ciclos.filter(c => c.stops_count > 0).length;
 
-  const successRate = total > 0 ? Math.round((completados / total) * 100) : 0;
+  const successRate = cierre.tasa_cierre;
   const reworkRate  = total > 0 ? Math.round((conRework / total) * 100) : 0;
-  const stopRate    = total > 0 ? Math.round((stops / total) * 100) : 0;
+  const stopRate    = total > 0 ? Math.round((detenidos / total) * 100) : 0;
 
-  // Tests
-  const totalTests   = ciclos.reduce((s, c) => s + (c.tests_generados || 0), 0);
-  const passingTests = ciclos.reduce((s, c) => s + (c.tests_pasando || 0), 0);
-  const testPassRate = totalTests > 0 ? Math.round((passingTests / totalTests) * 100) : 0;
+  // tests_generados es el universo ejecutado; un ciclo con más aprobadas que ejecutadas no se suma.
+  const tests = ec.tasaTests(ciclos);
+  const testPassRate = tests.tasa;
 
   // Fases
   const totalFases = ciclos.reduce((s, c) => s + (c.fases_total || 0), 0);
@@ -78,6 +81,10 @@ function computeCycleMetrics(db) {
     rework_rate: reworkRate,
     stop_rate: stopRate,
     test_pass_rate: testPassRate,
+    tests_estado: tests.status,
+    tests_inconsistentes: tests.inconsistentes,
+    cierre,
+    stops_unicos: ec.incidentesStop(ciclos, eventosStop).total,
     fase_completion_rate: faseRate,
     patrones_aplicados: patronesAplicados,
     errores_evitados: erroresEvitados,
@@ -136,37 +143,28 @@ function computeMemoryMetrics(db) {
   return mem;
 }
 
-// ─── ESTIMACIÓN DE TOKEN SAVINGS ─────────────────────────────────────────────
+// ─── USO Y AHORRO DE TOKENS (medido, ver costo-uso.cjs) ──────────────────────
 
 /**
- * Estima el ahorro de tokens en el proyecto actual vs trabajar sin Agentic.
- * Basado en: ciclos completados + patrones aplicados + queries SQLite vs lecturas de archivo.
+ * Uso real reportado por el proveedor, estimaciones aparte, y ahorro solo
+ * donde hay una comparación de tareas equivalentes con calidad. Sin eso el
+ * ahorro es null: no se deriva de constantes por patrón o por ciclo.
  */
-function estimateTokenSavings(db) {
-  const cycleMetrics = computeCycleMetrics(db);
-  const memMetrics   = computeMemoryMetrics(db);
-  if (cycleMetrics?.error || memMetrics?.error) return { error: 'Datos insuficientes' };
-
-  // Cada patrón aplicado via SQLite en lugar de leer archivo: ~200 tokens ahorrados
-  const savingsFromPatterns = (cycleMetrics.patrones_aplicados || 0) * 200;
-  // Cada error evitado (no tuvo que debuggear ni re-ejecutar): ~500 tokens ahorrados
-  const savingsFromErrors = (cycleMetrics.errores_evitados || 0) * 500;
-  // Cada ciclo completo sin stop: ~800 tokens ahorrados vs tener que re-contextualizar
-  const successCiclos = Math.round((cycleMetrics.ciclos_total || 0) * (cycleMetrics.success_rate || 0) / 100);
-  const savingsFromFlow = successCiclos * 800;
-  // AST queries: evitar lecturas manuales de archivos
-  const savingsFromAST = (memMetrics.ast_files || 0) * 150;
-
-  const totalEstimado = savingsFromPatterns + savingsFromErrors + savingsFromFlow + savingsFromAST;
-
+function estimateTokenSavings(db, projectRoot = process.cwd()) {
+  const cu = require('./costo-uso.cjs');
+  const registros = cu.leer(projectRoot);
+  const bench = cu.benchmark(registros);
+  const probadas = Object.entries(bench.clases)
+    .filter(([, c]) => c.veredicto === 'MENOS_TOKENS_MISMA_O_MEJOR_CALIDAD')
+    .map(([clase, c]) => ({ clase, diferencia_tokens_pct: c.diferencia_tokens_pct, n_baseline: c.baseline.n, n_kdd: c.kdd.n }));
   return {
-    total_tokens_estimados_ahorrados: totalEstimado,
-    por_patrones: savingsFromPatterns,
-    por_errores_evitados: savingsFromErrors,
-    por_flujo_sin_interrupciones: savingsFromFlow,
-    por_ast_queries: savingsFromAST,
-    nota: 'Estimación conservadora. Variación real: ±40% según complejidad del proyecto.',
-    baseline_comparacion: 'Claude sin memoria: re-explora codebase en cada sesión',
+    uso: cu.resumen(registros),
+    ahorro_por_clase: probadas.length ? probadas : null,
+    benchmark: bench,
+    total_tokens_estimados_ahorrados: null,
+    nota: probadas.length
+      ? 'Ahorro medido por clase de tarea con línea base y calidad; no se extrapola.'
+      : 'Sin comparación de tareas equivalentes con calidad: ahorro sin dato (null).',
   };
 }
 
@@ -242,7 +240,7 @@ function computeTrend(db, n = 10) {
     ciclo: i + 1,
     id: c.ciclo_id,
     estado: c.estado,
-    test_rate: c.tests_generados > 0 ? Math.round((c.tests_pasando / c.tests_generados) * 100) : null,
+    test_rate: c.tests_generados > 0 && c.tests_pasando <= c.tests_generados ? Math.round((c.tests_pasando / c.tests_generados) * 100) : null,
     rework: c.stops_count > 0 ? 1 : 0,
     fecha: c.fecha_inicio?.substring(0, 10),
   }));
@@ -250,11 +248,22 @@ function computeTrend(db, n = 10) {
 
 // ─── PRINT ────────────────────────────────────────────────────────────────────
 
+function printUso(s) {
+  const dato = (v) => (v === null || v === undefined ? 'sin dato' : v.toLocaleString());
+  console.log('\n  ── TOKENS ──────────────────────────────────────');
+  console.log(`  Real (proveedor):   ${dato(s.uso.real.total)} en ${s.uso.real.llamadas} llamadas` +
+    ` (input ${dato(s.uso.real.input)}, output ${dato(s.uso.real.output)}, caché leída ${dato(s.uso.real.cache_read)}, escrita ${dato(s.uso.real.cache_write)})`);
+  console.log(`  Estimado (bytes/4): ${dato(s.uso.estimado.input)} en ${s.uso.estimado.llamadas} registros — no se suma al real`);
+  if (s.uso.sin_dato) console.log(`  Sin usage:          ${s.uso.sin_dato} llamadas (no cuentan como 0)`);
+  if (s.ahorro_por_clase) for (const a of s.ahorro_por_clase) console.log(`  Ahorro ${a.clase}: ${a.diferencia_tokens_pct}% (n=${a.n_baseline}/${a.n_kdd}, calidad igual o mejor)`);
+  else console.log('  Ahorro:             sin dato — falta benchmark de tareas equivalentes con calidad');
+}
+
 function printSummary(projectRoot) {
   const db = openDB(projectRoot);
   const cycles = computeCycleMetrics(db);
   const mem    = computeMemoryMetrics(db);
-  const savings = estimateTokenSavings(db);
+  const savings = estimateTokenSavings(db, projectRoot);
   const autonomy = computeAutonomyScore(db);
 
   console.log('\n═══════════════════════════════════════════════════');
@@ -264,9 +273,10 @@ function printSummary(projectRoot) {
   if (!cycles?.error) {
     console.log('\n  ── CICLOS ──────────────────────────────────────');
     console.log(`  Total ciclos:       ${cycles.ciclos_total}`);
-    console.log(`  Tasa de éxito:      ${cycles.success_rate}%`);
+    console.log(`  Tasa de éxito:      ${cycles.success_rate == null ? 'sin dato' : cycles.success_rate + '%'} (${cycles.cierre.cerrados} cerrados íntegros, ${cycles.cierre.por_clase.CON_PENDIENTES} con pendientes)`);
+    console.log(`  STOP únicos:        ${cycles.stops_unicos}`);
     console.log(`  Tasa de retrabajo:  ${cycles.rework_rate}%`);
-    console.log(`  Tests pass rate:    ${cycles.test_pass_rate}%`);
+    console.log(`  Tests pass rate:    ${cycles.test_pass_rate == null ? 'sin dato' : cycles.test_pass_rate + '%'}${cycles.tests_estado === 'DATA_INCONSISTENT' ? ` ⚠ datos inconsistentes en ${cycles.tests_inconsistentes.length} ciclo(s)` : ''}`);
     console.log(`  Fases completadas:  ${cycles.fase_completion_rate}%`);
     console.log(`  Patrones aplicados: ${cycles.patrones_aplicados}`);
     console.log(`  Errores evitados:   ${cycles.errores_evitados}`);
@@ -283,13 +293,7 @@ function printSummary(projectRoot) {
     console.log(`  Knowledge docs:     ${mem.knowledge_docs}`);
   }
 
-  if (!savings?.error) {
-    console.log('\n  ── TOKEN SAVINGS (estimado) ────────────────────');
-    console.log(`  Total ahorrado:     ~${savings.total_tokens_estimados_ahorrados.toLocaleString()} tokens`);
-    console.log(`  Por patrones KDD:   ~${savings.por_patrones.toLocaleString()}`);
-    console.log(`  Por errores evitad: ~${savings.por_errores_evitados.toLocaleString()}`);
-    console.log(`  Por flujo continuo: ~${savings.por_flujo_sin_interrupciones.toLocaleString()}`);
-  }
+  printUso(savings);
 
   if (!autonomy?.error) {
     console.log('\n  ── AUTONOMY SCORE ──────────────────────────────');
@@ -321,9 +325,8 @@ if (require.main === module) {
     }
     case 'tokens': {
       const db = openDB(projectRoot);
-      const s = estimateTokenSavings(db);
-      console.log('\nToken savings estimado:');
-      console.log(`  Total: ~${s.total_tokens_estimados_ahorrados?.toLocaleString() ?? 'N/A'} tokens`);
+      const s = estimateTokenSavings(db, projectRoot);
+      printUso(s);
       console.log(`  Nota: ${s.nota}`);
       break;
     }
@@ -342,7 +345,7 @@ if (require.main === module) {
       const trend = computeTrend(db, n);
       console.log(`\nTrend últimos ${n} ciclos:`);
       trend.forEach(t => {
-        const ok = t.estado === 'COMPLETADO' ? '✅' : '🛑';
+        const ok = require('./estado-ciclo.cjs').icono(t.estado);
         const tests = t.test_rate !== null ? `tests:${t.test_rate}%` : 'sin tests';
         console.log(`  ${ok} ${t.fecha} [${t.id}] ${tests}`);
       });
@@ -420,51 +423,22 @@ function computeLongMemEvalScore(db) {
 /**
  * 2. Token Reduction Index
  *
- * Compara el costo estimado de tokens con vs sin Agentic KDD.
- * Meta del reporte: reducción > 70% en repositorios de alta densidad.
- *
- * Metodología: cada consulta via SQLite evita leer ~N archivos completos.
+ * Reducción MEDIDA por clase de tarea (costo-uso.cjs benchmark). Sin tareas
+ * equivalentes con línea base, muestra y calidad, el índice es null: antes
+ * salía de 8000 frente a 500 tokens fijos y siempre "pasaba".
  */
-function computeTokenReductionIndex(db) {
-  try {
-    const cycles = db.prepare("SELECT COUNT(*) as n FROM ciclos").get()?.n || 0;
-    if (cycles === 0) return { index: 0, passes: false, details: 'Sin ciclos' };
-
-    // Promedio de patterns/errors aplicados por ciclo
-    let avgPatterns = 0;
-    try {
-      const rows = db.prepare("SELECT patrones_aplicados FROM ciclos WHERE patrones_aplicados IS NOT NULL LIMIT 50").all();
-      if (rows.length > 0) {
-        const total = rows.reduce((s, r) => {
-          try { const v = JSON.parse(r.patrones_aplicados || '[]'); return s + (Array.isArray(v) ? v.length : (typeof v === 'number' ? v : 0)); } catch { return s; }
-        }, 0);
-        avgPatterns = total / rows.length;
-      }
-    } catch {}
-
-    // Estimar tokens ahorrados por ciclo:
-    // - Sin KDD: ~8K tokens para contextualizar proyecto
-    // - Con KDD: ~500 tokens por query SQLite
-    const tokensWithKDD    = 500 + (avgPatterns * 100);
-    const tokensWithoutKDD = 8000;
-    const reductionPct = ((tokensWithoutKDD - tokensWithKDD) / tokensWithoutKDD) * 100;
-
-    // Calcular índice real desde métricas acumuladas
-    const cycleMetrics = computeCycleMetrics(db);
-    const totalPatterns = cycleMetrics?.patrones_aplicados || 0;
-    const totalSavings  = (totalPatterns * 500) + (cycles * 2000); // conservador
-
-    return {
-      index: Math.round(Math.max(0, Math.min(reductionPct, 95))),
-      total_tokens_saved_estimate: totalSavings,
-      avg_patterns_per_cycle: Math.round(avgPatterns * 10) / 10,
-      tokens_per_cycle_with_kdd: Math.round(tokensWithKDD),
-      tokens_per_cycle_without_kdd: tokensWithoutKDD,
-      target: '> 70% (reporte requiere > 70%)',
-      passes: reductionPct >= 70,
-      note: 'Estimación conservadora basada en ciclos y patrones aplicados',
-    };
-  } catch (e) { return { index: 0, passes: false, error: e.message }; }
+function computeTokenReductionIndex(db, projectRoot = process.cwd()) {
+  const s = estimateTokenSavings(db, projectRoot);
+  const clases = s.benchmark.clases;
+  const medidas = Object.entries(clases).filter(([, c]) => c.diferencia_tokens_pct !== null && c.veredicto !== 'CALIDAD_PEOR');
+  return {
+    index: null,
+    por_clase: Object.fromEntries(Object.entries(clases).map(([k, c]) => [k, { reduccion_pct: c.diferencia_tokens_pct === null ? null : -c.diferencia_tokens_pct, veredicto: c.veredicto }])),
+    total_tokens_saved_estimate: null,
+    target: '> 70% por clase, con calidad igual o mejor',
+    passes: medidas.length ? medidas.every(([, c]) => -c.diferencia_tokens_pct >= 70) : null,
+    note: medidas.length ? 'Medido por clase; no se agrega en un porcentaje universal.' : 'Sin benchmark comparable: sin dato.',
+  };
 }
 
 /**
@@ -524,10 +498,10 @@ function computeMemoryQualityScore(db) {
 /**
  * Reporte unificado de los 3 benchmarks del informe.
  */
-function computeReportBenchmarks(db) {
+function computeReportBenchmarks(db, projectRoot = process.cwd()) {
   return {
     longmemeval: computeLongMemEvalScore(db),
-    token_reduction: computeTokenReductionIndex(db),
+    token_reduction: computeTokenReductionIndex(db, projectRoot),
     memory_quality: computeMemoryQualityScore(db),
     report_summary: null, // se completa abajo
   };
@@ -561,9 +535,10 @@ if (require.main === module) {
     console.log(`     Passes: ${b.longmemeval.passes ? '✅' : '❌'}`);
 
     console.log('\n  ② Token Reduction Index');
-    console.log(`     Index:  ${b.token_reduction.index}%  [target: >70%]`);
-    console.log(`     Saved:  ~${b.token_reduction.total_tokens_saved_estimate?.toLocaleString()} tokens`);
-    console.log(`     Passes: ${b.token_reduction.passes ? '✅' : '❌'}`);
+    for (const [clase, c] of Object.entries(b.token_reduction.por_clase)) {
+      console.log(`     ${clase}: ${c.reduccion_pct === null ? 'sin dato' : c.reduccion_pct + '%'} (${c.veredicto})`);
+    }
+    console.log(`     Passes: ${b.token_reduction.passes === null ? 'sin dato' : b.token_reduction.passes ? '✅' : '❌'}`);
 
     console.log('\n  ③ Memory Quality Score (CodeBERTScore proxy)');
     console.log(`     Score:  ${b.memory_quality.score}%`);

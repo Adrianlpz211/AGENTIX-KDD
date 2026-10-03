@@ -66,3 +66,12 @@ _LOCKS.md
 .claude/
 dev.log
 dashboard-original.cjs
+
+# Datos y pruebas locales: solo fuentes de framework en el paquete
+.agentic/memoria/
+.agentic/telemetria/
+.agentic/_*/
+.agentic/_*.json*
+.agentic/actualizacion-agentix.md
+sandbox/
+test/

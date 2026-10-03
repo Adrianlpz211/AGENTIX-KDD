@@ -1,15 +1,16 @@
 # Agentix KDD — Architecture
 
 
-> **Los números de este archivo se cuentan, no se estiman.**
-> Comprobados el 03/09/2026 contra el repo: 75 módulos en `.agentic/grafo/`,
-> 40 tablas y 78 índices en `memoria.db`, 54 herramientas en el servidor MCP,
-> 18 archivos de test. Decía 39 módulos y 11 tablas — quedaron congelados en
-> una versión vieja y nadie los volvió a mirar. Si vuelves a tocarlos, cuéntalos:
+> **Este archivo no lleva contadores escritos a mano.** Ya se congelaron dos
+> veces y quedaron desfasados en silencio. Los números
+> vivos — módulos, herramientas MCP, archivos de test, versión — se calculan:
 >
 > ```bash
-> ls .agentic/grafo/*.cjs | wc -l
+> node scripts/sync-version.cjs --inventario
 > ```
+>
+> `node scripts/sync-version.cjs --check` (en el CI) falla si un documento
+> derivado vuelve a escribir un contador fijo o si la versión diverge.
 
 
 > **One-line summary:** Agentix KDD is a development OS for AI agents — it gives your coding agent persistent memory, enforced quality gates, and a self-healing pipeline across every session.
@@ -29,9 +30,9 @@
 │         Pipeline  →  aa: [task]                  │
 │  Analyst → Build → TDD×3 → QA → Review → Memory │
 ├─────────────────────────────────────────────────┤
-│  Engine  (.agentic/grafo/ — 75 modules)          │
+│  Engine  (.agentic/grafo/)                       │
 ├─────────────────────────────────────────────────┤
-│  Interfaces: CLI (akdd) · MCP (54 tools) · Dash  │
+│  Interfaces: CLI (akdd) · MCP · Dashboard        │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +54,7 @@ These modules run on every `aa:` cycle. They are the backbone of the system. Do 
 | `spec-gate.cjs` | Validates changes against business rules in memory |
 | `install-hooks.cjs` | Git post-commit hook — triggers post-cycle in background |
 | `git-hooks/post-commit` | Shell hook — always exits 0, never blocks commits |
-| `mcp-server.cjs` | MCP server — 54 tools exposed via stdio |
+| `mcp-server.cjs` | MCP server — tools exposed via stdio |
 | `embeddings.cjs` | Hybrid memory search (Jina v2 code + BM25 fallback) |
 
 **Entry point for users:** `aa: [task]` → pipeline runs automatically.

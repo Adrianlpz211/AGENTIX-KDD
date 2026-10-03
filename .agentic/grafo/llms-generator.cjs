@@ -41,35 +41,80 @@ function openDB(projectRoot) {
 
 // ─── LEER CONFIG DEL PROYECTO ────────────────────────────────────────────────
 
-function readProjectConfig(projectRoot) {
+/*
+ * Esquema del config.md que este generador entiende. Dos formatos reales
+ * conviven: el de `aa: configurar` ("Nombre:", "Descripción:", bloque yaml en
+ * "## Stack", sección "## Módulos") y el antiguo en mayúsculas
+ * ("PROYECTO:", "STACK:", "DESCRIPCIÓN:"). Antes solo se leía el antiguo, así
+ * que con un config real el llms.txt salía sin nombre, descripción ni stack.
+ */
+const CONFIG_SCHEMA_VERSION = 1;
+const CAMPOS = {
+  proyecto: ['PROYECTO', 'Nombre', 'Proyecto', 'NOMBRE'],
+  descripcion: ['DESCRIPCIÓN', 'DESCRIPCION', 'Descripción', 'Descripcion'],
+  stack: ['STACK', 'Stack'],
+};
+/* Claves que existen en los config.md reales y este generador no usa: se aceptan sin aviso. */
+const CONOCIDAS_SIN_USO = ['CONFIGURADO', 'VERSION', 'Tipo', 'Entrypoint', 'Motor', 'Memoria', 'Agentes', 'test', 'TEST'];
+const VACIO = /^[-—–\s"']*$/;
+
+function seccion(content, titulo) {
+  const re = new RegExp(`^##\\s+${titulo}[^\\n]*\\n([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, 'im');
+  const m = content.match(re);
+  return m ? m[1] : null;
+}
+
+function leerConfigProyecto(projectRoot) {
   const configPath = path.join(projectRoot, '.agentic', 'config.md');
-  if (!fs.existsSync(configPath)) return {};
+  const out = { schema_version: CONFIG_SCHEMA_VERSION, campos: {}, origen: {}, desconocidos: [] };
+  if (!fs.existsSync(configPath)) return out;
+  const content = fs.readFileSync(configPath, 'utf8').replace(/\r\n/g, '\n');
+  const sinBloques = content.replace(/```[\s\S]*?```/g, '').replace(/<!--[\s\S]*?-->/g, '');
 
-  const content = fs.readFileSync(configPath, 'utf8');
-  const config  = {};
-
-  // Extraer campos clave del config.md
-  const extractField = (key) => {
-    const match = content.match(new RegExp(`${key}:\\s*(.+)`));
-    return match ? match[1].trim() : null;
-  };
-
-  config.proyecto   = extractField('PROYECTO');
-  config.stack      = extractField('STACK');
-  config.descripcion= extractField('DESCRIPCIÓN') || extractField('DESCRIPCION');
-  config.modulos    = [];
-
-  // Extraer módulos listados
-  const modulosMatch = content.match(/MÓDULOS[^\n]*\n([\s\S]*?)(?=\n##|\n\*\*|$)/i);
-  if (modulosMatch) {
-    config.modulos = modulosMatch[1]
-      .split('\n')
-      .map(l => l.replace(/^[-*\s]+/, '').trim())
-      .filter(Boolean)
-      .slice(0, 20);
+  const claves = new Map();
+  for (const linea of sinBloques.split('\n')) {
+    const m = /^\s*(?:[-*]\s*)?\*{0,2}([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ ]{0,30}?)\*{0,2}:\s*(.*)$/.exec(linea);
+    if (m && !/^https?$/i.test(m[1]) && !claves.has(m[1].trim())) claves.set(m[1].trim(), m[2].trim());
   }
+  const usadas = new Set();
+  for (const [campo, alias] of Object.entries(CAMPOS)) {
+    for (const a of alias) {
+      if (claves.has(a) && !VACIO.test(claves.get(a))) { out.campos[campo] = claves.get(a); out.origen[campo] = a; usadas.add(a); break; }
+      if (claves.has(a)) usadas.add(a);
+    }
+  }
+  if (!out.campos.stack) {
+    const s = seccion(content, 'Stack');
+    if (s) {
+      const valores = [];
+      for (const m of s.matchAll(/^\s*(language|runtime|framework|base_datos|database|ui|orm)\s*:\s*(.+)$/gim)) {
+        const v = m[2].trim();
+        if (!VACIO.test(v) && !valores.includes(v)) valores.push(v);
+      }
+      if (valores.length) { out.campos.stack = valores.join(', '); out.origen.stack = '## Stack'; }
+    }
+  }
+  const mods = seccion(content, 'M[óo]dulos') || (/MÓDULOS[^\n]*\n([\s\S]*?)(?=\n##|\n\*\*|$)/i.exec(content) || [])[1];
+  if (mods) {
+    out.campos.modulos = mods.split('\n')
+      .filter((l) => /^\s*[-*]\s+/.test(l))
+      .map((l) => l.replace(/^\s*[-*]\s+/, '').trim())
+      .filter((l) => l && !/^_.*_$/.test(l))
+      .slice(0, 20);
+    out.origen.modulos = '## Módulos';
+  }
+  for (const k of claves.keys()) {
+    if (usadas.has(k) || CONOCIDAS_SIN_USO.includes(k)) continue;
+    if (Object.values(CAMPOS).some((a) => a.includes(k))) continue;
+    out.desconocidos.push(k);
+  }
+  return out;
+}
 
-  return config;
+/* Forma histórica que usan los generadores de abajo. */
+function readProjectConfig(projectRoot) {
+  const c = leerConfigProyecto(projectRoot).campos;
+  return { proyecto: c.proyecto || null, stack: c.stack || null, descripcion: c.descripcion || null, modulos: c.modulos || [] };
 }
 
 // ─── GENERAR llms.txt ─────────────────────────────────────────────────────────
@@ -422,4 +467,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generateLlmsTxt, generateLlmsFullTxt, generateKnowledgeGraph, generateAll };
+module.exports = { generateLlmsTxt, generateLlmsFullTxt, generateKnowledgeGraph, generateAll, leerConfigProyecto, readProjectConfig, CONFIG_SCHEMA_VERSION };

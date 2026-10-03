@@ -63,35 +63,100 @@ function parseTasks(content) {
     const descMatch  = block.match(/^[-*]\s+Descripción:\s*(.+)$/im);
     const agentMatch = block.match(/^[-*]\s+Agente:\s*(.+)$/im);
 
-    const depNames = depsMatch ? depsMatch[1].split(',').map(d => d.trim()).filter(Boolean) : [];
+    const depNames = depsMatch ? depsMatch[1].split(',').map(d => d.trim()).filter(Boolean)
+      .filter(d => !SIN_DEPENDENCIAS.test(d)) : [];
 
     tasks.push({
       id: ts.num,
       name: ts.name,
-      status: stateMatch?.[1]?.trim() || 'PENDIENTE',
+      status: normalizarEstado(stateMatch?.[1]),
       dependencies: depNames,
       dep_ids: [], // se resuelven después
+      missing_deps: [],
       files: filesMatch ? filesMatch[1].split(',').map(f => f.trim()).filter(Boolean) : [],
       description: descMatch?.[1]?.trim() || '',
       agent: agentMatch?.[1]?.trim() || 'auto',
     });
   }
 
-  // Resolver dep_ids desde nombres
+  /* Una dependencia se resuelve por id ("2", "Tarea 2", "T2", "#2") o por nombre
+     exacto. Nada de coincidencias parciales: enlazaban la tarea equivocada.
+     Lo que no se resuelve queda en missing_deps — nunca desaparece. */
   for (const task of tasks) {
-    task.dep_ids = task.dependencies.map(depName => {
-      const dn = depName.toLowerCase();
-      // Prioridad: id exacto → nombre exacto → (último recurso) inclusión.
-      // El includes bidireccional como primer criterio enlazaba dependencias erróneas.
-      const resolved =
-        tasks.find(t => String(t.id) === depName) ||
-        tasks.find(t => t.name.toLowerCase() === dn) ||
-        tasks.find(t => t.name.toLowerCase().includes(dn) || dn.includes(t.name.toLowerCase()));
-      return resolved?.id ?? null;
-    }).filter(id => id !== null);
+    task.dep_ids = [];
+    task.missing_deps = [];
+    for (const depName of task.dependencies) {
+      const id = resolverDependencia(depName, tasks);
+      if (id === null) task.missing_deps.push(depName);
+      else if (!task.dep_ids.includes(id)) task.dep_ids.push(id);
+    }
   }
 
   return tasks;
+}
+
+const SIN_DEPENDENCIAS = /^(ninguna|ninguno|none|n\/a|-|—|no)$/i;
+const ESTADOS = ['PENDIENTE', 'EN_PROGRESO', 'COMPLETADA', 'BLOQUEADA'];
+
+function normalizarEstado(v) {
+  const s = String(v || '').trim().toUpperCase().replace(/\s+/g, '_');
+  return ESTADOS.includes(s) ? s : (s ? s : 'PENDIENTE');
+}
+
+function resolverDependencia(depName, tasks) {
+  const m = String(depName).trim().match(/^(?:tarea|task|t)?\s*#?\s*(\d+)$/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    return tasks.some(t => t.id === n) ? n : null;
+  }
+  const dn = String(depName).trim().toLowerCase();
+  const porNombre = tasks.filter(t => t.name.toLowerCase() === dn);
+  return porNombre.length === 1 ? porNombre[0].id : null;
+}
+
+/**
+ * Errores tipados del grafo de tareas. Se validan antes de ejecutar nada.
+ * @returns {{code:string, task:number, detail:string}[]}
+ */
+function validarGrafo(tasks) {
+  const errores = [];
+  const vistos = new Map();
+  for (const t of tasks) {
+    if (vistos.has(t.id)) errores.push({ code: 'DUPLICATE_ID', task: t.id, detail: `Tarea ${t.id} aparece más de una vez` });
+    vistos.set(t.id, t);
+  }
+  for (const t of tasks) {
+    if (t.dep_ids.includes(t.id)) errores.push({ code: 'SELF_REFERENCE', task: t.id, detail: `Tarea ${t.id} depende de sí misma` });
+    for (const d of t.missing_deps || []) {
+      errores.push({ code: 'MISSING_DEPENDENCY', task: t.id, detail: `Tarea ${t.id} depende de "${d}", que no existe` });
+    }
+  }
+  for (const id of enCiclo(tasks)) {
+    errores.push({ code: 'CYCLE', task: id, detail: `Tarea ${id} está en un ciclo de dependencias` });
+  }
+  return errores;
+}
+
+/** IDs que forman parte de algún ciclo (incluida la autorreferencia). */
+function enCiclo(tasks) {
+  const porId = new Map(tasks.map(t => [t.id, t]));
+  const estado = new Map();
+  const ciclo = new Set();
+  const pila = [];
+  const visitar = (id) => {
+    estado.set(id, 1);
+    pila.push(id);
+    for (const d of (porId.get(id)?.dep_ids || [])) {
+      if (!porId.has(d)) continue;
+      if (estado.get(d) === 1) {
+        for (let k = pila.indexOf(d); k < pila.length; k++) ciclo.add(pila[k]);
+      } else if (!estado.get(d)) visitar(d);
+    }
+    pila.pop();
+    estado.set(id, 2);
+  };
+  for (const t of tasks) if (!estado.get(t.id)) visitar(t.id);
+  return [...ciclo].sort((a, b) => a - b);
 }
 
 // ─── WAVE EXECUTION ──────────────────────────────────────────────────────────
@@ -102,42 +167,52 @@ function parseTasks(content) {
  * Wave 2 = tareas cuyas dependencias están en Wave 1
  * ...
  *
+ * Una tarea BLOQUEADA, en ciclo, con dependencia desconocida o duplicada no es
+ * ejecutable, y tampoco lo es nada que dependa de ella. Las ramas
+ * independientes siguen. No hay "ola de emergencia" con lo que sobra.
+ *
  * @param {Task[]} tasks
- * @returns {{ waves: Task[][], cycles: number[] }} waves y task IDs con ciclos
+ * @returns {{ waves: Task[][], cycles: number[], blocked: {id:number, reason:string}[], errors: object[] }}
  */
 function buildWaves(tasks) {
-  const pendingTasks = tasks.filter(t => t.status !== 'COMPLETADA');
-  const completedIds = new Set(tasks.filter(t => t.status === 'COMPLETADA').map(t => t.id));
+  const errors = validarGrafo(tasks);
+  const cycles = enCiclo(tasks);
+  const porId = new Map(tasks.map(t => [t.id, t]));
 
-  const waves = [];
-  const assigned = new Set([...completedIds]);
-  const cycles = [];
+  const motivo = new Map();
+  for (const e of errors) if (!motivo.has(e.task)) motivo.set(e.task, e.code);
+  for (const t of tasks) if (t.status === 'BLOQUEADA' && !motivo.has(t.id)) motivo.set(t.id, 'BLOCKED');
 
-  let maxIterations = pendingTasks.length + 1;
-  let remaining = [...pendingTasks];
-
-  while (remaining.length > 0 && maxIterations-- > 0) {
-    const wave = remaining.filter(t => {
-      const unresolvedDeps = t.dep_ids.filter(depId => !assigned.has(depId));
-      return unresolvedDeps.length === 0;
-    });
-
-    if (wave.length === 0) {
-      // Hay un ciclo o dependencias no resolubles
-      const cycleIds = remaining.map(t => t.id);
-      cycles.push(...cycleIds);
-      console.warn(`[SPEC-MANAGER] ⚠️ Ciclo o dependencia irresoluble en tareas: ${cycleIds.join(', ')}`);
-      // Agregar igualmente como Wave fallback
-      waves.push(remaining);
-      break;
+  /* Los descendientes de algo bloqueado heredan el bloqueo. */
+  let cambio = true;
+  while (cambio) {
+    cambio = false;
+    for (const t of tasks) {
+      if (motivo.has(t.id) || t.status === 'COMPLETADA') continue;
+      const dep = t.dep_ids.find(d => motivo.has(d) && porId.get(d)?.status !== 'COMPLETADA');
+      if (dep !== undefined) { motivo.set(t.id, 'BLOCKED_BY_' + dep); cambio = true; }
     }
+  }
 
+  const completedIds = new Set(tasks.filter(t => t.status === 'COMPLETADA').map(t => t.id));
+  const assigned = new Set(completedIds);
+  const waves = [];
+  let remaining = tasks.filter(t => t.status !== 'COMPLETADA' && !motivo.has(t.id));
+
+  while (remaining.length > 0) {
+    const wave = remaining.filter(t => t.dep_ids.every(d => assigned.has(d)));
+    if (wave.length === 0) break;
     waves.push(wave);
     wave.forEach(t => assigned.add(t.id));
     remaining = remaining.filter(t => !assigned.has(t.id));
   }
+  for (const t of remaining) motivo.set(t.id, 'UNRESOLVED');
 
-  return { waves, cycles };
+  const blocked = [...motivo.entries()]
+    .filter(([id]) => porId.get(id)?.status !== 'COMPLETADA')
+    .map(([id, reason]) => ({ id, reason }))
+    .sort((a, b) => a.id - b.id);
+  return { waves, cycles, blocked, errors };
 }
 
 // ─── ESTADO DEL SPEC ─────────────────────────────────────────────────────────
@@ -154,7 +229,7 @@ function getSpecStatus(specDir) {
   const blocked = tasks.filter(t => t.status === 'BLOQUEADA').length;
   const inProgress = tasks.filter(t => t.status === 'EN_PROGRESO').length;
 
-  const { waves } = buildWaves(tasks);
+  const { waves, blocked: bloqueadas, errors } = buildWaves(tasks);
   const nextWave = waves.find(w => w.length > 0);
 
   return {
@@ -166,6 +241,8 @@ function getSpecStatus(specDir) {
     percent: total > 0 ? Math.round((completed / total) * 100) : 0,
     next_wave: nextWave?.map(t => ({ id: t.id, name: t.name, agent: t.agent })) ?? [],
     waves_total: waves.length,
+    not_runnable: bloqueadas,
+    errors,
     all_done: completed === total && total > 0,
   };
 }
@@ -189,14 +266,7 @@ function validateSpec(specDir, moduleName) {
     const tasks = parseTasks(content);
     if (tasks.length === 0) issues.push('tasks.md no tiene tareas definidas');
 
-    // Verificar que las dependencias referenciadas existen
-    for (const task of tasks) {
-      for (const depId of task.dep_ids) {
-        if (!tasks.find(t => t.id === depId)) {
-          warnings.push(`Tarea ${task.id} referencia dependencia ${depId} que no existe`);
-        }
-      }
-    }
+    for (const e of validarGrafo(tasks)) issues.push(`${e.code}: ${e.detail}`);
   }
 
   if (fs.existsSync(reqPath)) {
@@ -335,14 +405,18 @@ function updateTaskStatus(projectRoot, moduleName, taskId, newStatus) {
 
   let content = fs.readFileSync(tasksPath, 'utf8');
 
-  // Reemplazar "## Tarea N: ..." bloque con nuevo estado
-  const pattern = new RegExp(
-    `(##\\s+(?:Tarea\\s+)?${taskId}[:\\s].+[\\s\\S]*?)(^[-*]\\s+Estado:\\s*)(.+)$`,
-    'im'
-  );
-  content = content.replace(pattern, `$1$2${newStatus}`);
+  /* Solo dentro del bloque de esa tarea: si no tiene línea de estado, no se
+     toca la de la tarea siguiente. */
+  const cabeceras = [...content.matchAll(/^##\s+(?:Tarea\s+)?(\d+)[:\s]+.+$/gm)];
+  const i = cabeceras.findIndex(m => parseInt(m[1], 10) === Number(taskId));
+  if (i === -1) return false;
+  const desde = cabeceras[i].index;
+  const hasta = cabeceras[i + 1] ? cabeceras[i + 1].index : content.length;
+  const bloque = content.slice(desde, hasta);
+  const nuevo = bloque.replace(/^([-*]\s+Estado:\s*)(.+)$/im, `$1${newStatus}`);
+  if (nuevo === bloque && !/^[-*]\s+Estado:/im.test(bloque)) return false;
 
-  fs.writeFileSync(tasksPath, content);
+  fs.writeFileSync(tasksPath, content.slice(0, desde) + nuevo + content.slice(hasta));
   return true;
 }
 
@@ -365,12 +439,21 @@ if (require.main === module) {
       const tasksPath = path.join(projectRoot, SPECS_DIR, moduleName, 'tasks.md');
       if (!fs.existsSync(tasksPath)) { console.error(`tasks.md no encontrado para '${moduleName}'`); process.exit(1); }
       const tasks = parseTasks(fs.readFileSync(tasksPath, 'utf8'));
-      const { waves } = buildWaves(tasks);
+      const { waves, blocked, errors } = buildWaves(tasks);
       console.log(`\nWaves para '${moduleName}' (${waves.length} waves):\n`);
       waves.forEach((wave, i) => {
         console.log(`Wave ${i + 1}:`);
         wave.forEach(t => console.log(`  [${t.id}] ${t.name} → agente: ${t.agent}`));
       });
+      if (errors.length) {
+        console.log('\nErrores del grafo:');
+        errors.forEach(e => console.log(`  ⛔ ${e.code} — ${e.detail}`));
+      }
+      if (blocked.length) {
+        console.log('\nNo ejecutables:');
+        blocked.forEach(b => console.log(`  [${b.id}] ${b.reason}`));
+      }
+      if (errors.length) process.exitCode = 1;
       break;
     }
     case 'status': {
@@ -425,6 +508,7 @@ if (require.main === module) {
 module.exports = {
   parseTasks,
   buildWaves,
+  validarGrafo,
   getSpecStatus,
   validateSpec,
   createSpecFromTemplate,

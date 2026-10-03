@@ -1,0 +1,31 @@
+{
+  "policy_version": 1,
+  "nota": "Valores iniciales de política, no garantía de consumo. Se calibran con scripts/benchmark-esfuerzo.cjs.",
+  "tiers": {
+    "LOW": {
+      "context_budget_bytes": 12000,
+      "tool_calls_soft_limit": 8,
+      "max_repair_attempts": 1,
+      "recall_top_k": 3,
+      "required_roles": ["builder"],
+      "required_gates": ["scope", "protected-files", "security", "leases", "relevant-check"]
+    },
+    "MEDIUM": {
+      "context_budget_bytes": 40000,
+      "tool_calls_soft_limit": 24,
+      "max_repair_attempts": 2,
+      "recall_top_k": 6,
+      "required_roles": ["analyst", "builder", "qa"],
+      "required_gates": ["scope", "protected-files", "security", "leases", "affected-tests", "preservation", "qa-directed"]
+    },
+    "HIGH": {
+      "context_budget_bytes": 100000,
+      "tool_calls_soft_limit": 60,
+      "max_repair_attempts": 3,
+      "recall_top_k": 10,
+      "required_roles": ["analyst", "builder", "qa", "reviewer"],
+      "required_gates": ["scope", "protected-files", "security", "leases", "plan", "blast-radius", "tdd", "preservation", "qa"]
+    }
+  },
+  "escalation_conditions": ["UNEXPECTED_DEPENDENCY", "REPEATED_FAILURE", "WIDER_IMPACT", "AMBIGUOUS_CRITERIA", "NO_PROGRESS", "RISK_DISCOVERED"]
+}

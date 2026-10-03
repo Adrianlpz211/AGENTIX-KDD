@@ -503,8 +503,11 @@ function detectCrossTenantLeak(content, filename, keys) {
 
 // ── Gate principal ────────────────────────────────────────────────────────────
 
-function runSecurityGate(files, projectRoot) {
+/* opts.readContent(file) → texto | null: el pre-commit pasa el contenido del
+   ÍNDICE, que es lo que se va a commitear; el worktree puede ser otro. */
+function runSecurityGate(files, projectRoot, opts) {
   projectRoot = projectRoot || process.cwd();
+  const leer = opts && typeof opts.readContent === 'function' ? opts.readContent : null;
   const allFindings = [];
   const scannedFiles = [];
   const sensitiveFiles = [];
@@ -514,13 +517,23 @@ function runSecurityGate(files, projectRoot) {
 
   (files || []).forEach(file => {
     const full = path.isAbsolute(file) ? file : path.join(projectRoot, file);
-    const content = safeRead(full);
+    const content = leer ? leer(file) : safeRead(full);
     if (content == null) return;
     const filename = path.basename(full);
     scannedFiles.push(file);
 
     // Escudo (secretos/PII/injection) → en TODOS los archivos
     allFindings.push(...scanShield(content, filename));
+
+    // SQL armado pegando datos (OWASP A03) — el gate no lo miraba: CERO
+    // comprobaciones, medido el 05/09/2026, en un proyecto de SQL crudo.
+    // WARN-only por diseño: es heuristica, y determinista puede frenar pero
+    // heuristico solo avisa. Ver sql-injection-scan.cjs para el detalle de por
+    // que exige un CAMINO de peticion y no un nombre de variable.
+    try {
+      const sqlScan = require(path.join(__dirname, 'sql-injection-scan.cjs'));
+      allFindings.push(...sqlScan.escanear(content, filename));
+    } catch { /* un detector que falla no puede tumbar el gate entero */ }
 
     // Cross-tenant agnóstico (v3.16.3) → en TODOS los archivos con rutas, sin
     // importar su clasificación de riesgo (el hueco era justo que server.js

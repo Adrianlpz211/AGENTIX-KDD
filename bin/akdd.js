@@ -6,12 +6,11 @@ const { update }    = require('../src/update');
 const { onboard }   = require('../src/onboard');
 const { graph }     = require('../src/graph');
 const { dashboard } = require('../src/dashboard');
-const { analyze }   = require('../src/analyze');
 const { mcpSetup, mcpStatus } = require('../src/mcp-setup');
 const pkg  = require('../package.json');
 const path = require('path');
 const fs   = require('fs');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const args    = process.argv.slice(2);
 const command = args[0];
@@ -25,6 +24,8 @@ const HELP = `
   Setup:
     akdd init              Install Agentic KDD in the current project
     akdd update            Update agents + engine (memory stays intact)
+                           [--ref=<branch|tag|sha>] [--from=<file.tar.gz>] [--sha256=<hex>]
+                           [--migrate] [--deps] · akdd update --rollback
     akdd onboard           Analyze existing project + pre-populate memory
     akdd analyze           Cross-artifact consistency check
     akdd locks             Lock Manager status
@@ -153,82 +154,132 @@ function findGrafo() {
   return p;
 }
 
-function runGrafo(cmd, extra) {
-  const grafo = findGrafo();
-  const fullCmd = extra ? `node "${grafo}" ${cmd} ${extra}` : `node "${grafo}" ${cmd}`;
-  try { execSync(fullCmd, { stdio: 'inherit', cwd: process.cwd() }); }
-  catch(e) { process.exit(e.status || 1); }
+/* Cada argumento viaja como un elemento de argv, sin shell: un nombre con
+   espacios, comillas, backticks o $() es un dato, no un comando. */
+function ejecutar(script, argv, { tolerante = false } = {}) {
+  const limpio = argv.filter((a) => a !== '' && a != null).map(String);
+  const r = spawnSync(process.execPath, [script, ...limpio], { stdio: 'inherit', cwd: process.cwd() });
+  if (tolerante) return;
+  if (r.error) { console.error(`  ${path.basename(script)}: ${r.error.message}`); process.exit(1); }
+  if (r.status) process.exit(r.status);
+  if (r.signal) process.exit(1);
 }
 
-function runModule(name, cmd, extra) {
+function runGrafo(...argv) { ejecutar(findGrafo(), argv); }
+
+function runModule(name, ...argv) {
   const p = path.join(process.cwd(), '.agentic', 'grafo', name);
-  if (!fs.existsSync(p)) { console.log(`\n  ${name} not found. Run: akdd update\n`); process.exit(1); }
-  const fullCmd = [`node "${p}"`, cmd || '', extra || ''].join(' ').trim().replace(/\s+/g,' ');
-  try { execSync(fullCmd, { stdio: 'inherit', cwd: process.cwd() }); }
-  catch(e) { process.exit(e.status || 1); }
+  if (!fs.existsSync(p)) { console.error(`\n  ${name} not found. Run: akdd update\n`); process.exit(1); }
+  ejecutar(p, argv);
 }
+
+function uso(texto) { console.error(`\n  Uso: ${texto}\n`); process.exitCode = 1; }
+
+const ANALYZE_SUBS = ['run', 'contracts', 'memory', 'spec'];
 
 switch (command) {
 
   case 'init':    init(); break;
-  case 'update':  update(); break;
+  case 'update': {
+    const flag = (n) => { const a = args.find((x) => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
+    if (args.includes('--rollback')) require('../src/update').rollback();
+    else update({ ref: flag('ref'), archivo: flag('from'), sha256: flag('sha256'), migrate: args.includes('--migrate'), deps: args.includes('--deps') });
+    break;
+  }
   case 'onboard': onboard(); break;
-  case 'analyze': runModule('akdd-analyze.cjs', args[0] || 'run'); break;
-  case 'locks':   runModule('lock-manager.cjs', args[0] || 'status', args[1] || ''); break;
+  case 'analyze': {
+    const sub = arg1 || 'run';
+    if (!ANALYZE_SUBS.includes(sub)) { uso(`akdd analyze [${ANALYZE_SUBS.join('|')}]`); break; }
+    runModule('akdd-analyze.cjs', sub);
+    break;
+  }
+  case 'locks':   runModule('lock-manager.cjs', arg1 || 'status', ...args.slice(2)); break;
+  case 'effort': {
+    const sub = arg1;
+    if (['decide', 'reevaluar', 'show'].includes(sub)) runModule('effort-router.cjs', ...args.slice(1));
+    else uso('akdd effort <decide "<tarea>" [--paths=a,b] [--type=T] [--json]|reevaluar <id> <EVENTO>|show <id>>');
+    break;
+  }
+  case 'host-hooks': {
+    if (['install', 'uninstall', 'status'].includes(arg1 || 'status')) runModule('host-hooks.cjs', arg1 || 'status', ...args.slice(2));
+    else uso('akdd host-hooks <install|uninstall|status> [--host=cursor|claude|all]');
+    break;
+  }
+  case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
+  case 'teams': {
+    const sub = arg1 || 'status';
+    if (['init', 'plan', 'run', 'status', 'pause', 'resume', 'disable', 'pending', 'resolve', 'import', 'verify', 'views'].includes(sub)) runModule('teams-manager.cjs', sub, ...args.slice(2));
+    else if (sub === 'goal') runModule('goal-check.cjs', ...args.slice(2));
+    else if (sub === 'watch') runModule('teams-watch.cjs', ...args.slice(2));
+    else if (sub === 'vigilar') runModule('builder-inactividad.cjs', ...args.slice(2));
+    else uso('akdd teams <init [--aprobar-migracion]|plan <plan.json>|run|status|pause|resume|disable|pending|resolve <id> <decisión>|import <archivo>|verify <id> --gates=<json>|views|goal|watch --rol=R>');
+    break;
+  }
+  case 'ws': {
+    const sub = arg1 || 'estado';
+    if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar', 'teams'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));
+    else uso('akdd ws <activar|contacto <id> <número o nombre>|elegir <id> <n>|reintentar <id>|desactivar|estado|politica|procesar|teams>');
+    break;
+  }
+  case 'restore': {
+    const sub = arg1 || 'list';
+    if (['list', 'create', 'show', 'preview', 'apply', 'resume', 'invalidate'].includes(sub)) runModule('restore-manager.cjs', sub, ...args.slice(2));
+    else uso('akdd restore <list|create --label=L [--files=a,b]|show <id>|preview <id>|apply <id> --expected-current-hash=H [--confirmar]|resume|invalidate <id> <motivo>>');
+    break;
+  }
+  case 'context': {
+    if (arg1 === 'armar') runModule('context-pack.cjs', ...args.slice(1));
+    else uso('akdd context armar "<objetivo>" --paths=a,b [--task=T] [--rol=builder|qa|analyst]');
+    break;
+  }
   case 'clickup': case 'cu': {
     const sub = arg1;
     if (sub === 'on')            runModule('clickup-bridge.cjs', 'on');
     else if (sub === 'status')   runModule('clickup-bridge.cjs', 'status');
-    else if (sub === 'set-list') runModule('clickup-bridge.cjs', 'set-list', arg2 || '');
+    else if (sub === 'set-list') runModule('clickup-bridge.cjs', 'set-list', arg2);
     else if (sub === 'pull' || sub === 'sprint') runModule('clickup-bridge.cjs', 'pull', args.includes('--auto') ? '--auto' : '');
-    else if (sub === 'done')     runModule('clickup-bridge.cjs', 'done', `${arg2 || ''} ${args.find(a => a.startsWith('--status=')) || ''}`.trim());
-    else if (sub === 'comment')  runModule('clickup-bridge.cjs', 'comment', `${arg2 || ''} "${args.slice(3).filter(a => !a.startsWith('--')).join(' ')}"`);
-    else console.log('\n  Uso: akdd cu <on|set-list <id>|status|sprint [--auto]|done <id>|comment <id> "texto">\n');
+    else if (sub === 'done')     runModule('clickup-bridge.cjs', 'done', arg2, args.find(a => a.startsWith('--status=')));
+    else if (sub === 'comment')  runModule('clickup-bridge.cjs', 'comment', arg2, args.slice(3).filter(a => !a.startsWith('--')).join(' '));
+    else uso('akdd cu <on|set-list <id>|status|sprint [--auto]|done <id>|comment <id> "texto">');
     break;
   }
   case 'hooks': {
     const sub = arg1 || 'install';
     if (sub === 'uninstall')   runModule('install-hooks.cjs', '--uninstall');
     else if (sub === 'status') runModule('install-hooks.cjs', '--status');
-    else                       runModule('install-hooks.cjs', '');
+    else                       runModule('install-hooks.cjs', args.includes('--compose') ? '--compose' : '');
     break;
   }
   case 'reason': {
     if (!arg1 || arg1 === 'status') runModule('reasoning-bank.cjs', 'status');
-    else runModule('reasoning-bank.cjs', 'recall', `"${arg1}"${arg2 ? ' ' + arg2 : ''}`);
+    else runModule('reasoning-bank.cjs', 'recall', arg1, arg2);
     break;
   }
-  case 'analyze': analyze(); break;
 
   // ── v3.0: Health ──────────────────────────────────────────────────────
-  case 'health': {
-    const fixFlag = args.includes('--fix') ? '--fix' : '';
-    runModule('health-check.cjs', fixFlag);
-    break;
-  }
+  case 'health': runModule('health-check.cjs', args.includes('--fix') ? '--fix' : ''); break;
 
   // ── v3.16.9: Doctor (reparación generalizada) ───────────────────────────
-  case 'doctor': runModule('doctor.cjs', ''); break;
+  case 'doctor': runModule('doctor.cjs'); break;
+  case 'capabilities': runModule('capabilities.cjs', ...args.slice(1)); break;
 
   // ── v3.17.0: CSS Token Gate ──────────────────────────────────────────────
   // Sin args → scan (inventario de tokens + oportunidades de tokenización).
   // Con archivos → gate sobre esos archivos (WARN si hay valores hardcodeados
   // que ya existen como token).
-  case 'tokens': runModule('css-token-gate.cjs', args.slice(1).map(f => `"${f}"`).join(' ')); break;
+  case 'tokens': runModule('css-token-gate.cjs', ...args.slice(1)); break;
 
   // ── v3.18.0: Línea de tiempo (cuánto tomó cada tarea) ───────────────────
   // El CLAUDE.md ya rutea estos nombres desde el chat; aquí existen también en
-  // terminal, que es donde el CHANGELOG los anuncia. El texto de la tarea se
-  // vuelve a entrecomillar: el shell ya se comió las comillas originales y sin
-  // esto "arreglar el login" llegaría como tres argumentos sueltos.
+  // terminal, que es donde el CHANGELOG los anuncia.
   case 'tiempo':
-    runModule('linea-tiempo.cjs', args.slice(1).map(a => /\s/.test(a) ? `"${a}"` : a).join(' '));
+    runModule('linea-tiempo.cjs', ...args.slice(1));
     break;
   case 'tiempos':
-    runModule('linea-tiempo.cjs', 'tiempos', args[1] ? `"${args.slice(1).join(' ')}"` : '');
+    runModule('linea-tiempo.cjs', 'tiempos', args.slice(1).join(' '));
     break;
   case 'rebobina':
-    runModule('linea-tiempo.cjs', 'ventana', args.slice(1).join(' '));
+    runModule('linea-tiempo.cjs', 'ventana', ...args.slice(1));
     break;
   case 'orden':
     runModule('linea-tiempo.cjs', 'orden');
@@ -243,68 +294,64 @@ switch (command) {
   case 'decay':   runGrafo('decay'); break;
 
   case 'buscar':
-    if (!arg1) { console.log('\n  Uso: akdd buscar "query" [area]\n'); break; }
-    runGrafo('buscar', `"${arg1}"${arg2 ? ' ' + arg2 : ''}`);
+    if (!arg1) { uso('akdd buscar "query" [area]'); break; }
+    runGrafo('buscar', arg1, arg2);
     break;
 
   case 'impacto':
-    if (!arg1) { console.log('\n  Uso: akdd impacto "NombreModulo"\n'); break; }
-    runGrafo('impacto', `"${arg1}"`);
+    if (!arg1) { uso('akdd impacto "NombreModulo"'); break; }
+    runGrafo('impacto', arg1);
     break;
 
   // ── v3.0: Memory Audit ────────────────────────────────────────────────
   case 'audit': runModule('memory-audit.cjs', 'report'); break;
 
   case 'forget': {
-    if (!arg1) { console.log('\n  Uso: akdd forget <id> "<razón>"\n'); break; }
     const reason = args.slice(2).join(' ');
-    if (!reason) { console.log('\n  Uso: akdd forget <id> "<razón>"\n'); break; }
-    runModule('memory-audit.cjs', 'forget', `${arg1} "${reason}"`);
+    if (!arg1 || !reason) { uso('akdd forget <id> "<razón>"'); break; }
+    runModule('memory-audit.cjs', 'forget', arg1, reason);
     break;
   }
 
   // ── v3.0: AST ─────────────────────────────────────────────────────────
   case 'ast': {
     const sub = arg1 || 'index';
-    const tgt = arg2 || '';
     if (sub === 'stats') runModule('ast-indexer.cjs', 'stats');
     else if (sub === 'symbols') {
-      if (!tgt) { console.log('\n  Uso: akdd ast symbols <archivo>\n'); break; }
-      runModule('ast-indexer.cjs', 'symbols', `"${tgt}"`);
+      if (!arg2) { uso('akdd ast symbols <archivo>'); break; }
+      runModule('ast-indexer.cjs', 'symbols', arg2);
     } else {
-      runModule('ast-indexer.cjs', 'index', tgt);
+      runModule('ast-indexer.cjs', 'index', arg2);
     }
     break;
   }
 
   case 'ast-impact':
-    if (!arg1) { console.log('\n  Uso: akdd ast-impact <archivo_o_módulo>\n'); break; }
-    runModule('impact-analyzer.cjs', 'analyze', `"${arg1}"`);
+    if (!arg1) { uso('akdd ast-impact <archivo_o_módulo>'); break; }
+    runModule('impact-analyzer.cjs', 'analyze', arg1);
     break;
 
   case 'why':
-    if (!arg1) { console.log('\n  Uso: akdd why <archivo_o_entidad>\n'); break; }
-    runModule('decision-trail.cjs', 'why', `"${arg1}"`);
+    if (!arg1) { uso('akdd why <archivo_o_entidad>'); break; }
+    runModule('decision-trail.cjs', 'why', arg1);
     break;
 
   // ── v3.0: Specs ───────────────────────────────────────────────────────
   case 'spec': {
     const sub = arg1;
     const mod = arg2;
+    const bugfix = args.includes('--bugfix') ? '--bugfix' : '';
     if (!sub || sub === 'list') runModule('spec-manager.cjs', 'list');
-    else if (sub === 'create') {
-      if (!mod) { console.log('\n  Uso: akdd spec create <módulo> [--bugfix]\n'); break; }
-      runModule('spec-manager.cjs', 'create', `"${mod}"${args.includes('--bugfix') ? ' --bugfix' : ''}`);
-    }
-    else if (sub === 'waves')    { if (!mod) { console.log('\n  Uso: akdd spec waves <módulo>\n'); break; } runModule('spec-manager.cjs', 'waves', `"${mod}"`); }
-    else if (sub === 'validate') { if (!mod) { console.log('\n  Uso: akdd spec validate <módulo>\n'); break; } runModule('spec-manager.cjs', 'validate', `"${mod}"`); }
-    else runModule('spec-manager.cjs', 'status', `"${sub}"`);
+    else if (sub === 'create')   { if (!mod) { uso('akdd spec create <módulo> [--bugfix]'); break; } runModule('spec-manager.cjs', 'create', mod, bugfix); }
+    else if (sub === 'waves')    { if (!mod) { uso('akdd spec waves <módulo>'); break; } runModule('spec-manager.cjs', 'waves', mod); }
+    else if (sub === 'validate') { if (!mod) { uso('akdd spec validate <módulo>'); break; } runModule('spec-manager.cjs', 'validate', mod); }
+    else runModule('spec-manager.cjs', 'status', sub);
     break;
   }
 
   case 'spec-create':
-    if (!arg1) { console.log('\n  Uso: akdd spec-create <módulo> [--bugfix]\n'); break; }
-    runModule('spec-manager.cjs', 'create', `"${arg1}"${args.includes('--bugfix') ? ' --bugfix' : ''}`);
+    if (!arg1) { uso('akdd spec-create <módulo> [--bugfix]'); break; }
+    runModule('spec-manager.cjs', 'create', arg1, args.includes('--bugfix') ? '--bugfix' : '');
     break;
 
   // ── v3.0: Knowledge ───────────────────────────────────────────────────
@@ -313,7 +360,7 @@ switch (command) {
     break;
 
   case 'knowledge':
-    runModule('knowledge-ingestor.cjs', 'ingest', arg1 || '');
+    runModule('knowledge-ingestor.cjs', 'ingest', arg1);
     break;
 
   // ── v3.0: Metrics ─────────────────────────────────────────────────────
@@ -324,21 +371,19 @@ switch (command) {
   // ── v3.0: Decision Trail ──────────────────────────────────────────────
   case 'trail': {
     if (!arg1)                    runModule('decision-trail.cjs', 'recent', '5');
-    else if (arg1 === 'why')      { if (!arg2) { console.log('\n  Uso: akdd trail why <entidad>\n'); break; } runModule('decision-trail.cjs', 'why', `"${arg2}"`); }
-    else if (arg1 === 'timeline') { if (!arg2) { console.log('\n  Uso: akdd trail timeline <módulo>\n'); break; } runModule('decision-trail.cjs', 'timeline', `"${arg2}"`); }
-    else runModule('decision-trail.cjs', 'ciclo', `"${arg1}"`);
+    else if (arg1 === 'why')      { if (!arg2) { uso('akdd trail why <entidad>'); break; } runModule('decision-trail.cjs', 'why', arg2); }
+    else if (arg1 === 'timeline') { if (!arg2) { uso('akdd trail timeline <módulo>'); break; } runModule('decision-trail.cjs', 'timeline', arg2); }
+    else runModule('decision-trail.cjs', 'ciclo', arg1);
     break;
   }
-
-
 
   // ── v3.3: Contract Guard ────────────────────────────────────────────────────
   case 'contracts': {
     const sub = arg1 || 'status';
-    if (sub === 'list')     runModule('contract-guard.cjs', 'list', arg2 || '');
-    else if (sub === 'blast')  { if (!arg2) { console.log('\n  Uso: akdd contracts blast <archivo>\n'); break; } runModule('contract-guard.cjs', 'blast', `"${arg2}"`); }
-    else if (sub === 'gate')   runModule('contract-guard.cjs', 'gate');
-    else if (sub === 'verify') runModule('contract-guard.cjs', 'verify', arg2 || '');
+    if (sub === 'list')     runModule('contract-guard.cjs', 'list', arg2);
+    else if (sub === 'blast')  { if (!arg2) { uso('akdd contracts blast <archivo>'); break; } runModule('contract-guard.cjs', 'blast', arg2); }
+    else if (sub === 'gate')   runModule('contract-guard.cjs', 'gate', ...args.slice(2));
+    else if (sub === 'verify') runModule('contract-guard.cjs', 'verify', arg2);
     else if (sub === 'promote')runModule('contract-guard.cjs', 'promote');
     else runModule('contract-guard.cjs', 'status');
     break;
@@ -347,9 +392,9 @@ switch (command) {
   // ── v3.3: Creative Engine ───────────────────────────────────────────────────
   case 'creative': {
     const sub = arg1 || 'level';
-    if (sub === 'suggest')  runModule('creative-engine.cjs', 'suggest', arg2 || '');
-    else if (sub === 'apply')   { if (!arg2) { console.log('\n  Uso: akdd creative apply <id>\n'); break; } runModule('creative-engine.cjs', 'apply', `"${arg2}"`); }
-    else if (sub === 'dismiss') { if (!arg2) { console.log('\n  Uso: akdd creative dismiss <id>\n'); break; } runModule('creative-engine.cjs', 'dismiss', `"${arg2}"`); }
+    if (sub === 'suggest')  runModule('creative-engine.cjs', 'suggest', arg2);
+    else if (sub === 'apply')   { if (!arg2) { uso('akdd creative apply <id>'); break; } runModule('creative-engine.cjs', 'apply', arg2); }
+    else if (sub === 'dismiss') { if (!arg2) { uso('akdd creative dismiss <id>'); break; } runModule('creative-engine.cjs', 'dismiss', arg2); }
     else if (sub === 'wins')    runModule('creative-engine.cjs', 'wins');
     else runModule('creative-engine.cjs', 'level');
     break;
@@ -359,29 +404,32 @@ switch (command) {
   case 'recall':
     runModule('kdd-memory.cjs', 'recall', args.slice(1).join(' '));
     break;
-  case 'memory':
+  case 'memory': {
     const sub = arg1 || 'stats';
     if (sub === 'index')  runModule('kdd-memory.cjs', 'index');
     else if (sub === 'sync') runModule('kdd-memory.cjs', 'sync');
     else runModule('kdd-memory.cjs', 'stats');
     break;
-  case 'validate':
+  }
+  case 'validate': {
     const vsub = arg1 || 'report';
     if (vsub === 'scan')       runModule('knowledge-validator.cjs', 'scan');
     else if (vsub === 'report') runModule('knowledge-validator.cjs', 'report');
     else runModule('knowledge-validator.cjs', 'validate', arg1);
     break;
-  case 'telemetry':
+  }
+  case 'telemetry': {
     const tsub = arg1 || 'summary';
-    if (tsub === 'view')    runModule('telemetry.cjs', 'view', arg2 || '');
+    if (tsub === 'view')    runModule('telemetry.cjs', 'view', arg2);
     else runModule('telemetry.cjs', 'summary');
     break;
+  }
 
   // ── v3.3: Autonomous Decision Engine ──────────────────────────────────────
   case 'decide': {
     const files = args.slice(1);
-    if (!files.length) { console.log('\n  Uso: akdd decide <archivo> [archivos...]\n'); break; }
-    runModule('autonomous-decision.cjs', 'analyze', files.map(f => `"${f}"`).join(' '));
+    if (!files.length) { uso('akdd decide <archivo> [archivos...]'); break; }
+    runModule('autonomous-decision.cjs', 'analyze', ...files);
     break;
   }
   case 'deferred': {
@@ -391,8 +439,8 @@ switch (command) {
   }
   case 'sprint-plan': {
     const objective = args.slice(1).join(' ');
-    if (!objective) { console.log('\n  Uso: akdd sprint-plan "objetivo del sprint"\n'); break; }
-    runModule('autonomous-decision.cjs', 'sprint', `--objective "${objective}"`);
+    if (!objective) { uso('akdd sprint-plan "objetivo del sprint"'); break; }
+    runModule('autonomous-decision.cjs', 'sprint', '--objective', objective);
     break;
   }
 
@@ -448,7 +496,7 @@ switch (command) {
         console.log('  El código lo genera el jefe con: akdd collab invite\n');
         break;
       }
-      runModule('collab-manager.cjs', 'join', `"${arg2}"`);
+      runModule('collab-manager.cjs', 'join', arg2);
     } else if (sub === 'push') {
       runModule('collab-manager.cjs', 'push');
     } else if (sub === 'pull') {
@@ -461,7 +509,7 @@ switch (command) {
 
   // ── Graph Visualization ───────────────────────────────────────────────
   case 'graph-viz': {
-    runModule('graph-server.cjs', '', process.cwd());
+    runModule('graph-server.cjs', process.cwd());
     break;
   }
 
@@ -487,9 +535,8 @@ switch (command) {
     const esExito = args.includes('--success');
     const outIdx  = args.indexOf('--output');
     const outFile = outIdx >= 0 ? args[outIdx + 1] : null;
-    const flags   = [esExito ? '--success' : '', outFile ? `--output "${outFile}"` : ''].filter(Boolean).join(' ');
-    try { execSync(`node "${grafo}" ci-report ${flags}`, { stdio: 'inherit', cwd: process.cwd(), timeout: 60000 }); }
-    catch(e) { process.exit(0); }
+    /* El reporte de CI nunca tumba el job: por eso es tolerante. */
+    ejecutar(grafo, ['ci-report', esExito ? '--success' : '', ...(outFile ? ['--output', outFile] : [])], { tolerante: true });
     break;
   }
 
@@ -509,7 +556,7 @@ switch (command) {
     console.log(HELP); break;
 
   default:
-    console.log(`\n  Unknown command: ${command}`);
-    console.log('  Run akdd --help for usage\n');
+    console.error(`\n  Unknown command: ${command}`);
+    console.error('  Run akdd --help for usage\n');
     process.exit(1);
 }

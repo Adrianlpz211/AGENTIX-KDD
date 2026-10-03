@@ -1,0 +1,12 @@
+#!/bin/sh
+# Agentic KDD managed hook
+# Canario con el mensaje de ESTE commit ($1), no con el COMMIT_EDITMSG viejo.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+RUNNER="$ROOT/.agentic/grafo/hook-runner.cjs"
+[ -f "$RUNNER" ] || exit 0
+if ! command -v node >/dev/null 2>&1; then
+  [ "$AKDD_SKIP_GATES" = "1" ] && exit 0
+  echo "  COMMIT BLOQUEADO — node no está en el PATH: el canario de Agentic KDD no pudo revisar el commit."
+  exit 1
+fi
+exec node "$RUNNER" commit-msg "$@"

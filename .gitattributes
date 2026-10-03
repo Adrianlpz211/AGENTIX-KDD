@@ -31,7 +31,7 @@
 
 # ── Shell y hooks: LF obligatorio, CRLF los rompe ───────────────────────────
 *.sh      text eol=lf
-.agentic/grafo/git-hooks/post-commit text eol=lf
+.agentic/grafo/git-hooks/* text eol=lf
 
 # ── Scripts de Windows: CRLF obligatorio, LF los rompe ──────────────────────
 *.ps1     text eol=crlf

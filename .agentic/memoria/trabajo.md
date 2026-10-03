@@ -2,10 +2,10 @@
 <!-- Actualizada por el Orquestador al iniciar cada tarea y por Memoria al terminar -->
 
 ## Estado actual
-Tarea activa: ninguna
-Módulo en trabajo: —
-Fase actual: —
-Última actualización: —
+Tarea activa: cierre 3.20 — barrera de release verificada de nuevo, publish configurado (solo workflow manual con OIDC), README/MCP revisados
+Módulo en trabajo: actualizacion
+Fase actual: memoria
+Última actualización: 2026-10-03
 
 ## Goal del proyecto
 <!-- El Setup o el equipo define esto. Es el norte que guían todas las decisiones. -->

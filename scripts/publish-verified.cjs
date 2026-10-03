@@ -1,0 +1,13 @@
+'use strict';
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const {herramienta}=require('../src/run-safe');
+const root=path.resolve(__dirname,'..'),pkg=require('../package.json'),dir=path.join(root,'_output','release-'+pkg.version);
+const report=JSON.parse(fs.readFileSync(path.join(dir,'verification.json')));
+if(report.status!=='PASS'||report.version!==pkg.version)throw Error('RELEASE_NOT_VERIFIED');
+if(Date.now()-Date.parse(report.finished_at)>60*60*1000)throw Error('RELEASE_REPORT_EXPIRED');
+const tar=path.join(dir,report.package.file);
+if(crypto.createHash('sha256').update(fs.readFileSync(tar)).digest('hex')!==report.package.sha256)throw Error('TARBALL_CHANGED');
+if(!process.argv.includes('--dry-run')&&!process.env.GITHUB_ACTIONS)throw Error('Use el workflow manual o --dry-run para inspeccionar; publicación externa requiere decisión expresa.');
+const args=['publish',tar,'--access','public','--registry','https://registry.npmjs.org/','--ignore-scripts'];
+if(process.argv.includes('--dry-run'))args.push('--dry-run');
+process.stdout.write(herramienta('npm',args,{cwd:root,encoding:'utf8',timeout:180000}));

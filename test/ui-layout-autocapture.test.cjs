@@ -137,6 +137,44 @@ test('list no revienta sobre una base sin la tabla', (t) => {
   assert.equal(db.ok, true, 'debe poder registrar sobre una base recién creada');
 });
 
+/* ── P05: lo capturado solo no reemplaza la base aprobada ─────────────────── */
+
+test('P05: un valor CSS no visto queda candidato y la base confiable no cambia', (t) => {
+  const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
+  assert.ok(uilm.recordDecision(root, { elementId: '#panel', property: 'right', value: '12px', reason: 'pedido del dev' }).ok);
+  const f = escribir(root, '#panel { right: 24px }');
+  const r = guard(root, { files: [f], motivo: 'commit cualquiera' });
+  const h = r.findings.find((x) => x.difiereDeBase);
+  assert.ok(h, 'un valor distinto a la base aprobada se reporta');
+  assert.equal(h.decidido, '12px');
+
+  const db = abrir(path.join(root, '.agentic', 'memoria.db'));
+  try { assert.equal(uilm.baseConfiable(db, '#panel', 'right').value, '12px', 'la captura no pisa la base'); }
+  finally { db.close(); }
+
+  assert.equal(uilm.aprobarDecision(root, { elementId: '#panel', property: 'right' }).reason, 'SIN_EVIDENCIA_NI_DECISION');
+  assert.equal(uilm.aprobarDecision(root, { elementId: '#panel', property: 'right', evidencia: { status: 'FAIL', execution_id: 'e', subject_hash: 's' } }).reason,
+    'SIN_EVIDENCIA_NI_DECISION', 'una corrida que falló no aprueba');
+  assert.ok(uilm.aprobarDecision(root, { elementId: '#panel', property: 'right', aprobador: 'ana', motivo: 'rediseño' }).ok);
+  const db2 = abrir(path.join(root, '.agentic', 'memoria.db'));
+  try { assert.equal(uilm.baseConfiable(db2, '#panel', 'right').value, '24px'); }
+  finally { db2.close(); }
+  assert.equal(guard(root, { files: [f], motivo: 'otra vez' }).findings.length, 0, 'ya aprobado no vuelve a avisar');
+});
+
+test('P05/P06: revisar sin capturar no crea la tabla y no dice sano', (t) => {
+  const root = proyectoDePrueba();
+  if (!root) return t.skip(motivoSinDriver());
+  const f = escribir(root, '#panel { right: 24px }');
+  const r = guard(root, { files: [f], capturar: false });
+  assert.equal(r.status, 'UNVERIFIED');
+  const db = abrir(path.join(root, '.agentic', 'memoria.db'));
+  try {
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'ui_layout_decisions'").get(), undefined, 'un lector no hace DDL');
+  } finally { db.close(); }
+});
+
 /* ── canario: que post-cycle siga llamándolo, y mirando donde duele ────────── */
 
 test('post-cycle captura de verdad y mira css y js, no solo html', () => {

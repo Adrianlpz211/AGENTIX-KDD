@@ -101,6 +101,9 @@ const taskType   = opts.type || 'feature';
 const modules    = (opts.modules || opts.m || area).split(',').map(s => s.trim()).filter(Boolean);
 const hookMode   = opts.hook === true || opts.hook === 'true';
 const silent     = opts.silent === true || opts.silent === 'true' || hookMode;
+/* Desde la cola del post-commit llega el SHA exacto: se analiza ESE commit,
+   no el HEAD de cuando le toque correr. */
+const COMMIT_REF = /^[0-9a-f]{7,64}$/i.test(String(opts.commit || '')) ? String(opts.commit) : 'HEAD';
 
 // ── DB adapter (supports both better-sqlite3 and node:sqlite) ─────────────────
 
@@ -182,42 +185,49 @@ function ensureSchema(db) {
  * define "este ciclo" sin depender de que nadie lo marque.
  */
 /**
- * Un puerto de desarrollo que este respondiendo AHORA.
- * Se prueban los habituales y se devuelve el primero que contesta cualquier
- * cosa. Deliberadamente sin configuracion: si hace falta configurar algo, la
- * gente no lo configura y el control no corre nunca.
+ * Servidor declarado del proyecto, con su identidad comprobada, y las rutas
+ * que tocó el commit. Ver dev-target.cjs. Sin declaración: UNVERIFIED.
  */
-function puertoVivo() {
-  const net = require('net');
-  const { execSync } = require('child_process');
-  for (const p of [3000, 3001, 5173, 8080, 4200, 8000]) {
-    const ok = (() => {
-      try {
-        execSync(`node -e "const n=require('net');const s=n.connect(${p},'127.0.0.1');s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1200)"`,
-          { stdio: 'ignore', timeout: 4000 });
-        return true;
-      } catch { return false; }
-    })();
-    if (ok) return p;
-  }
-  return null;
+function resolverObjetivoSync(files) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, [path.join(GRAFO_DIR, 'dev-target.cjs'), ...files],
+    { cwd: ROOT, encoding: 'utf8', timeout: 20000 });
+  try { return JSON.parse(r.stdout); }
+  catch { return { status: 'UNVERIFIED', reason_code: 'ERROR', message: 'dev-target no respondió' }; }
 }
 
 
-function contarStops() {
+/**
+ * Cierra el ciclo con lo que los gates devolvieron de verdad. Los STOP se
+ * cuentan por cycle_id; sin ciclo atribuible o con la consulta caída quedan
+ * en null ("no hay dato"), no en 0.
+ */
+function cerrarCicloConGates(db, results) {
+  if (results.ciclo) {
+    try {
+      const pc = require(path.join(GRAFO_DIR, 'pipeline-controller.cjs'));
+      const c = pc.puedeCerrar(ROOT, results.ciclo);
+      if (c.status !== 'NO_STATE') results.pipeline = c;
+    } catch { /* sin estado del controlador: se cierra con los gates de aquí */ }
+  }
+  const salida = { estado: estadoFinal(results), stops: null, cierre: null };
+  try {
+    const gt = require(path.join(GRAFO_DIR, 'gate-telemetry.cjs'));
+    salida.stops = gt.contarStopsDelCiclo(db, results.ciclo);
+  } catch (e) { salida.stops = { status: 'ERROR', incidentes: null, error: e.message }; }
+  if (!results.ciclo) return Object.assign(salida, { cierre: { status: 'ERROR', reason_code: 'SIN_CICLO' } });
   try {
     const g = require(path.join(GRAFO_DIR, 'grafo.cjs'));
-    const db = g.initDB ? g.initDB() : null;
-    if (!db) return 0;
-    const anterior = db.get
-      ? db.get('SELECT fecha_fin FROM ciclos ORDER BY id DESC LIMIT 1')
-      : null;
-    const desde = anterior && anterior.fecha_fin ? anterior.fecha_fin : null;
-    const fila = desde
-      ? db.get("SELECT COUNT(*) c FROM gate_events WHERE verdict = 'STOP' AND ts > ?", desde)
-      : db.get("SELECT COUNT(*) c FROM gate_events WHERE verdict = 'STOP' AND ts > datetime('now','-1 day')");
-    return (fila && fila.c) || 0;
-  } catch { return 0; }
+    const c = results.contratos || {};
+    salida.cierre = g.cerrarCiclo(results.ciclo, {
+      estado: salida.estado,
+      tests_pasando: typeof c.pasando === 'number' ? c.pasando : undefined,
+      tests_generados: typeof c.pasando === 'number' ? c.pasando + (c.fallando || 0) : undefined,
+      stops_count: salida.stops && salida.stops.status === 'OK' ? salida.stops.incidentes : null,
+    });
+  } catch (e) { salida.cierre = { status: 'ERROR', error: e.message }; }
+  try { require(path.join(GRAFO_DIR, 'ciclo-actual.cjs')).cerrar(ROOT); } catch {}
+  return salida;
 }
 
 
@@ -238,12 +248,16 @@ function registrarCiclo(db, cycleData) {
 
     // Call grafo.cjs registrarCiclo
     const { registrarCiclo: regCiclo } = require(path.join(GRAFO_DIR, 'grafo.cjs'));
+    let enCurso = null;
+    try { enCurso = require(path.join(GRAFO_DIR, 'ciclo-actual.cjs')).actual(ROOT); } catch {}
     const id = regCiclo({
+      ciclo_id:          enCurso && enCurso.cycle_id,
       tarea:             datos.tarea || taskName,
       tipo_tarea:        datos.tipo_tarea || taskType,
       modulo:            datos.modulo || area,
       area:              datos.area || area,
-      estado:            'COMPLETADO',
+      // Se abre aquí y se cierra después de los gates (cerrarCicloConGates).
+      estado:            'EN_CURSO',
       context_guard:     datos.context_guard || 'OK',
       fases_total:       datos.fases_total || modules.length || 1,
       fases_completadas: datos.fases_completadas || modules.length || 1,
@@ -255,7 +269,7 @@ function registrarCiclo(db, cycleData) {
       tests_pasando:      datos.tests_pasando || testsPassing,
       review_blockers:    0,
       review_required:    0,
-      stops_count:        contarStops(),
+      stops_count:        null,
       sync_grafo:         true,
       duracion_ms:        (arranqueTarea && arranqueTarea.duracion_ms) || datos.duracion_ms || 0,
       fecha_inicio:       (arranqueTarea && arranqueTarea.fecha_inicio) || null,
@@ -264,9 +278,8 @@ function registrarCiclo(db, cycleData) {
       fases: modules.map((m, i) => ({
         num:     i + 1,
         nombre:  m,
-        agente:  'back',
-        estado:  'COMPLETADO',
-        gate_result: 'PASS',
+        agente:  'post-cycle',
+        estado:  'EN_CURSO',
         intentos: 1,
         duracion_ms: 0,
         memoria_leida: [],
@@ -290,29 +303,40 @@ function registrarCiclo(db, cycleData) {
 
 function registrarContratos() {
   const tddGatePath = path.join(GRAFO_DIR, 'tdd-gate.cjs');
-  if (!fs.existsSync(tddGatePath)) return { success: false, reason: 'tdd-gate.cjs not found' };
+  if (!fs.existsSync(tddGatePath)) return { success: false, status: 'ERROR', reason: 'tdd-gate.cjs not found' };
+  const ultimo = path.join(AGENTIC_DIR, '_tdd_ultimo.json');
+  try { fs.unlinkSync(ultimo); } catch { /* no había */ }
 
-  try {
-    const result = execSync(
-      `node "${tddGatePath}" run ${area}`,
-      // Plan 5 T8: 60s mataba suites reales (Lumo) ANTES de que el timeout
-      // interno del tdd-gate (120s) actuara — el padre estrangulaba al hijo.
-      { cwd: ROOT, stdio: 'pipe', timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 180000 }
-    ).toString();
-
-    const passMatch   = result.match(/Pasando:\s+(\d+)/);
-    const pasando     = passMatch ? parseInt(passMatch[1]) : 0;
-
-    return { success: true, pasando };
-  } catch(e) {
-    const esTimeout = /ETIMEDOUT/i.test(e.message);
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, [tddGatePath, 'run', area], {
+    cwd: ROOT, stdio: 'pipe', encoding: 'utf8', windowsHide: true,
+    // Plan 5 T8: el padre no puede estrangular al hijo antes de su propio timeout.
+    timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 180000,
+  });
+  if (r.error && r.error.code === 'ETIMEDOUT') {
     return {
-      success: false,
-      reason: esTimeout
-        ? `timeout — suite pesada; sube AKDD_TEST_TIMEOUT_MS o corre a mano: node .agentic/grafo/tdd-gate.cjs run ${area}`
-        : e.message.slice(0, 100),
+      success: false, status: 'ERROR', reason_code: 'TIMEOUT',
+      reason: `timeout — suite pesada; sube AKDD_TEST_TIMEOUT_MS o corre a mano: node .agentic/grafo/tdd-gate.cjs run ${area}`,
     };
   }
+  let res = null;
+  try { res = JSON.parse(fs.readFileSync(ultimo, 'utf8')); } catch { /* sin resultado estructurado */ }
+  if (!res) {
+    return { success: false, status: 'ERROR', reason_code: 'NO_RESULT', reason: ((r.stderr || r.stdout || '').trim().split('\n').pop() || 'tdd-gate sin resultado').slice(0, 120) };
+  }
+  return {
+    success: res.success && r.status === 0,
+    status: res.status,
+    reason_code: res.reason_code,
+    reason: res.success ? null : `${res.status} (${res.reason_code || '—'})`,
+    pasando: res.passed,
+    fallando: res.failed,
+    contracts: res.contracts,
+  };
+}
+
+function estadoFinal(r) {
+  return require(path.join(GRAFO_DIR, 'estado-ciclo.cjs')).estadoFinal(r);
 }
 
 /**
@@ -691,21 +715,27 @@ function guardarConfigEnBD(db) {
 
 // ── Step 7: Escribir log de observabilidad ────────────────────────────────────
 
-function escribirLog() {
+function escribirLog(results) {
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
     const month = new Date().toISOString().slice(0, 7);
     const logPath = path.join(LOG_DIR, `log-${month}.md`);
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const r = results || {};
+    const tdd = r.contratos || {};
+    const cierre = r.cierre || {};
+    const stops = cierre.stops || {};
+    const pasando = typeof tdd.pasando === 'number' ? tdd.pasando : 'sin dato';
+    const fallando = typeof tdd.fallando === 'number' ? tdd.fallando : 'sin dato';
+    const pg = r.preservation ? `${r.preservation.status}${r.preservation.reason_code ? ' (' + r.preservation.reason_code + ')' : ''}` : 'no corrió';
 
     const entry = `\n## ${timestamp} — ${taskName}
-Módulo: ${modules.join(', ')} | Área KDD: ${area}
-Context Guard: ✓
-Agentes: Analista → Back → TDD → QA → post-cycle
-Tests: ${testsPassing} pasando | 0 fallando
-Resultado: ✅ COMPLETADO
-post-cycle: ✓ ciclo registrado, contratos actualizados, specs generadas
+Módulo: ${modules.join(', ')} | Área KDD: ${area} | Ciclo: ${r.ciclo || 'sin registrar'}
+TDD: ${tdd.status || 'sin dato'}${tdd.reason_code ? ' (' + tdd.reason_code + ')' : ''} · Tests: ${pasando} pasando | ${fallando} fallando
+Preservation: ${pg}
+STOP del ciclo: ${stops.status === 'OK' ? stops.incidentes : 'sin dato'}
+Resultado: ${cierre.estado || 'EN_CURSO'}
 `;
 
     fs.appendFileSync(logPath, entry, 'utf8');
@@ -723,14 +753,10 @@ function verificarDependencias() {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-    if (!deps['better-sqlite3']) {
-      if (!silent) console.log('  ⚠️  better-sqlite3 no está en package.json — instalando...');
-      try {
-        execSync('npm install better-sqlite3 --save --silent', { cwd: ROOT, stdio: 'pipe', timeout: 30000 });
-        if (!silent) console.log('  ✅ better-sqlite3 instalado');
-      } catch(e) {
-        if (!silent) console.log('  ⚠️  No se pudo instalar better-sqlite3 (continuando con node:sqlite)');
-      }
+    /* Cerrar un ciclo no instala nada en el package.json del proyecto: solo avisa.
+       Sin better-sqlite3 el motor usa node:sqlite. */
+    if (!deps['better-sqlite3'] && !silent) {
+      console.log('  ℹ️  better-sqlite3 no está en package.json — se usa node:sqlite. Para el driver nativo: npm install better-sqlite3');
     }
   } catch(e) {}
 }
@@ -844,7 +870,7 @@ async function main() {
       // se puede detectar por más ciclos que se acumulen.
       let archivosTocados = [];
       try {
-        const diff = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
+        const diff = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
         archivosTocados = diff.split('\n').map(f => f.trim()).filter(Boolean);
       } catch { /* sin git o sin commits todavía — queda vacío, no es error */ }
 
@@ -903,7 +929,7 @@ async function main() {
   // el hallazgo y lo registran en la libreta (source:'mechanical').
   let commitFilesForScans = [];
   try {
-    commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
+    commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
       .toString().split('\n').map(f => f.trim()).filter(Boolean);
   } catch {}
 
@@ -998,34 +1024,35 @@ async function main() {
     }
   } catch { if (!silent) console.log('  2.8 UI Layout Memory... ⚠️  omitido'); }
 
-  // Step 2.85: Browser Gate condicional - solo si hay un servidor vivo.
-  //
-  // El browser-gate existia y era papel: necesitaba que alguien lo invocara a
-  // mano con la URL. Ahora, si el commit toco front Y hay un servidor de
-  // desarrollo respondiendo en un puerto habitual, corre solo y deja en la
-  // libreta los errores de consola y de pagina. Si no hay servidor, no dice
-  // nada y no molesta: un control que exige montar un entorno para poder
-  // correr es un control que no corre.
+  // Step 2.85: Browser Gate sobre el servidor DECLARADO del proyecto y las
+  // rutas que tocó el commit (dev-target.cjs). Ya no se usa el primer puerto
+  // que conteste: otra app en 3000 se revisaba en lugar del proyecto. Sin URL
+  // declarada, sin identidad que coincida, sin navegador o con timeout el
+  // resultado es UNVERIFIED — nunca un PASS. El servidor es del dev: aquí no
+  // se arranca ni se apaga.
   try {
     const bgPath = path.join(GRAFO_DIR, 'browser-gate.cjs');
-    const frontTocado = commitFilesForScans.some(f =>
-      /\.(html?|css|scss|js|jsx|ts|tsx|vue|svelte)$/i.test(f));
-    if (fs.existsSync(bgPath) && frontTocado) {
-      const puerto = puertoVivo();
-      if (puerto) {
-        const { execSync } = require('child_process');
-        const salida = execSync(
-          `node "${bgPath}" http://127.0.0.1:${puerto}`,
-          { cwd: ROOT, stdio: 'pipe', timeout: 90000 }
-        ).toString();
-        if (!silent) {
-          const mal = /error|ERROR|❌/.test(salida);
-          console.log(mal
-            ? `  2.85 Browser Gate... hallazgos en el puerto ${puerto} - ver libreta`
-            : `  2.85 Browser Gate... sin errores de consola en el puerto ${puerto}`);
+    const frontTocado = commitFilesForScans.filter(f =>
+      /\.(html?|css|scss|less|js|jsx|ts|tsx|vue|svelte|astro)$/i.test(f));
+    if (fs.existsSync(bgPath) && frontTocado.length) {
+      const objetivo = resolverObjetivoSync(frontTocado);
+      if (objetivo.status !== 'READY') {
+        if (!silent) console.log(`  2.85 Browser Gate... UNVERIFIED (${objetivo.reason_code}: ${objetivo.message})`);
+      } else {
+        const { spawnSync } = require('child_process');
+        const urls = objetivo.urls.length ? objetivo.urls : [];
+        const estados = [];
+        for (const u of urls) {
+          const r = spawnSync(process.execPath, [bgPath, u, '--json'], { cwd: ROOT, encoding: 'utf8', timeout: 90000 });
+          let res = null;
+          try { res = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).pop()); } catch { /* salida no JSON */ }
+          estados.push({ url: u, status: res && res.status ? res.status : 'UNVERIFIED' });
         }
-      } else if (!silent) {
-        console.log('  2.85 Browser Gate... - (ningun servidor de desarrollo escuchando)');
+        if (!silent) {
+          for (const e of estados) console.log(`  2.85 Browser Gate... ${e.status} ${e.url}`);
+          if (!urls.length) console.log('  2.85 Browser Gate... UNVERIFIED (ningún archivo del commit tiene ruta conocida)');
+          if (objetivo.sinRuta.length) console.log(`       sin ruta conocida (declárala en .agentic/dev-server.json "rutas"): ${objetivo.sinRuta.slice(0, 5).join(', ')}`);
+        }
       }
     }
   } catch { if (!silent) console.log('  2.85 Browser Gate... omitido'); }
@@ -1055,6 +1082,21 @@ async function main() {
       console.log('  2.9 CSS Token Gate... — (sin archivos CSS/HTML en este commit)');
     }
   } catch { if (!silent) console.log('  2.9 CSS Token Gate... ⚠️  omitido'); }
+
+  // Step 2.95: Simple Gate — ¿ya existía? (dependencia nativa, función o bloque
+  // repetido). Informativo: nunca frena; el LOC neto es diagnóstico.
+  try {
+    const sgPath = path.join(GRAFO_DIR, 'simple-gate.cjs');
+    if (fs.existsSync(sgPath) && commitFilesForScans.length) {
+      const sg = require(sgPath);
+      const r = sg.analizar(ROOT, sg.cambiosDe(ROOT, commitFilesForScans, { base: COMMIT_REF + '~1' }));
+      if (!silent) console.log(r.sugerencias.length
+        ? `  2.95 Simple Gate... 💡 ${r.sugerencias.length} sugerencia(s) (informativo):\n` + r.sugerencias.slice(0, 5).map((s) => `       · [${s.tipo}] ${s.archivo}: ${s.detalle}`).join('\n')
+        : `  2.95 Simple Gate... ✅ sin sugerencias (${r.costo.archivos_leidos} archivos, ${r.costo.ms} ms)`);
+    } else if (!silent) {
+      console.log('  2.95 Simple Gate... — (sin archivos en este commit)');
+    }
+  } catch { if (!silent) console.log('  2.95 Simple Gate... ⚠️  omitido'); }
 
   // Step 2.10: Canario Gate — un arreglo no se cierra sin un test que lo detecte.
   //
@@ -1120,9 +1162,17 @@ async function main() {
          nunca, porque el mensaje era idéntico al de un proyecto sin memoria. */
       const dbPG = openDB();
       if (dbPG && typeof cg.runPreservationGate === 'function') {
-        if (typeof cg.migrateSchema === 'function') { try { cg.migrateSchema(dbPG); } catch {} }
+        if (typeof cg.schemaDisponible === 'function' ? !cg.schemaDisponible(dbPG) : false) {
+          results.preservation = {
+            status: 'UNVERIFIED', reason_code: 'SCHEMA_AUSENTE', blocking: false,
+            reparar: 'migración explícita con backup (no se crea el esquema en el cierre)',
+          };
+          if (!silent) console.log('  2.11 Preservation Gate... ⚠️  UNVERIFIED (SCHEMA_AUSENTE): no se altera el esquema');
+          try { dbPG.close(); } catch {}
+        } else {
         const pg = cg.runPreservationGate(dbPG, ROOT, (results && results.ciclo) || `post-${Date.now()}`,
           commitFilesForScans || [], { sinSuiteCompleta: true });
+        results.preservation = { status: pg.status, reason_code: pg.reason_code, blocking: pg.blocking };
         const roturas = (pg.violations || []).length;
 
         /* Cada rotura deja su arista causal: "este cambio rompio aquello".
@@ -1132,11 +1182,16 @@ async function main() {
         if (roturas) registrarRegresiones(dbPG, pg.violations, commitFilesForScans || []);
 
         if (!silent) {
-          console.log(roturas
-            ? `  2.11 Preservation Gate... ⚠️  ${roturas} contrato(s) roto(s) — ver contract_violations`
-            : '  2.11 Preservation Gate... ✅ nada de lo que estaba verde se rompio');
+          const motivo = pg.reason_code ? ` (${pg.reason_code})` : '';
+          let linea;
+          if (roturas) linea = `⚠️  ${roturas} contrato(s) roto(s) — ver contract_violations`;
+          else if (pg.status === 'PASS') linea = `✅ ${pg.contracts_checked} contrato(s) en riesgo siguen verdes`;
+          else if (pg.status === 'SKIP') linea = `— SKIP${motivo}: ${pg.skipped_reason || 'nada que verificar'}`;
+          else linea = `⚠️  ${pg.status}${motivo}: ${pg.skipped_reason || 'sin evidencia de que lo verde siga verde'}`;
+          console.log('  2.11 Preservation Gate... ' + linea);
         }
         try { dbPG.close(); } catch {}
+        }
       } else if (!silent) {
         console.log('  2.11 Preservation Gate... — (sin base o sin la funcion)');
       }
@@ -1188,6 +1243,52 @@ async function main() {
       (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
   }
 
+  // Step 2.13: dependencias con vulnerabilidades conocidas (OWASP A06).
+  //
+  // SOLO si el commit tocó package.json o un lock. Las dependencias no cambian
+  // en cada commit — cambian cuando alguien instala algo. Correrlo siempre seria
+  // redescubrir lo mismo mil veces gastando una consulta de red cada vez; asi
+  // corre una vez cada tantos dias, exactamente el dia que importa.
+  //
+  // Este SI es determinista, al contrario del detector de SQL: npm audit
+  // consulta una base de datos de vulnerabilidades con su CVE. O el paquete
+  // esta en la lista o no esta. Aun asi es WARN-only: nadie deberia quedarse
+  // sin cerrar su ciclo porque el registro de npm este caido.
+  try {
+    const daPath = path.join(GRAFO_DIR, 'deps-audit.cjs');
+    if (fs.existsSync(daPath)) {
+      const da = require(daPath);
+      // Cambio de dependencias: siempre. Sin cambio: como mucho una vez al día,
+      // para ver avisos nuevos sobre el mismo lock sin consultar en cada commit.
+      const toca = da.hayCambioDeDependencias(commitFilesForScans || [])
+        ? { revisar: true, motivo: 'cambio de dependencias' }
+        : da.tocaRevisar(ROOT, []);
+      if (!toca.revisar) {
+        if (!silent) console.log('  2.13 Deps Audit... — (' + toca.motivo + ')');
+      } else {
+        const r = da.auditar(ROOT);
+        if (!silent) {
+          if (!r.disponible) {
+            console.log('  2.13 Deps Audit... — (' + r.motivo + ')');
+          } else if (r.graves) {
+            console.log('  2.13 Deps Audit... ⚠️  ' + r.conteo.critical + ' crítica(s) y ' +
+              r.conteo.high + ' alta(s)' + (r.nuevos && r.nuevos.length ? ', ' + r.nuevos.length + ' nueva(s)' : '') +
+              ' — correr: node .agentic/grafo/deps-audit.cjs');
+          } else if (r.total) {
+            console.log('  2.13 Deps Audit... ✅ ' + r.total + ' sin gravedad');
+          } else {
+            console.log('  2.13 Deps Audit... ✅ ninguna vulnerabilidad conocida');
+          }
+        }
+      }
+    } else if (!silent) {
+      console.log('  2.13 Deps Audit... — (no instalado)');
+    }
+  } catch (e) {
+    if (!silent) console.log('  2.13 Deps Audit... ⚠️  omitido' +
+      (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
+  }
+
   // Step 3: Register modules
   if (!silent) process.stdout.write('  3. Registrando módulos... ');
   results.modulos = registrarModulos(db);
@@ -1209,8 +1310,13 @@ async function main() {
   if (!silent) console.log('✅');
 
   // Step 7: Write observability log
+  results.cierre = cerrarCicloConGates(db, results);
+  if (!silent) {
+    const st = results.cierre.stops || {};
+    console.log(`  6.9 Cierre del ciclo... ${results.cierre.estado} · STOP: ${st.status === 'OK' ? st.incidentes + ' (' + st.eventos + ' eventos)' : 'sin dato (' + st.status + ')'}`);
+  }
   if (!silent) process.stdout.write('  7. Escribiendo log... ');
-  escribirLog();
+  escribirLog(results);
   results.log = true;
   if (!silent) console.log('✅');
 

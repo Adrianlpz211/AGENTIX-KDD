@@ -43,3 +43,15 @@ Causa: la capa 2 de la estrategia declarada en la cabecera del archivo ("tree-si
 Solución: pendiente — o se conecta en la fase 2 de precisión, o se retira para no dar falsa sensación de que tree-sitter está activo
 Evitar: creer que la precisión de tree-sitter está activa — hoy TODO el grafo AST sale del fallback regex
 Aplicar cuando: se evalúe la ruta de precisión exacta (fase 2)
+
+## [2026-10-02] [actualizacion] — La barrera de release se puso roja por un aviso de tar, no por un fallo
+Estado: RESUELTO
+Confianza: BAJA
+Aplicado: 0
+Útil: 0
+Contexto: scripts/release-check.cjs → test/init-update-uniforme.test.cjs (H26) empaqueta el checkout entero con src/tar-extract.js createTarGz mientras el resto de la suite escribe estado en .agentic/
+Síntoma: `tar terminó con código 1` con stderr `tar: AGENTIX-KDD-main/.agentic: file changed as we read it`. Pasaba suelto (`npm test`) y fallaba dentro de `npm run release:check`: carrera, no determinista
+Causa: GNU tar devuelve 1 (no 2) cuando un archivo cambió mientras lo leía; el .tar.gz queda completo. run-safe trata cualquier código ≠0 como error. Además el fixture incluía memoria.db-wal, telemetria/, _executions/ y _output/, que son exactamente lo que cambia solo
+Solución: `avisoTolerable(err)` en tar-extract (código 1 y TODAS las líneas de stderr son ese aviso → el archivo vale); `EXCLUIR_ESTADO_VOLATIL` compartido por los tests que empaquetan el repo (nombres sueltos, válidos en GNU tar y bsdtar; `_LOCKS.md` NO va porque es managed). Test: test/tar-aviso-tolerable.test.cjs
+Evitar: tratar el código 1 de GNU tar como fatal; empaquetar el checkout con la base y las trazas dentro; excluir con `_*` (se lleva `_LOCKS.md`)
+Aplicar cuando: un test o script empaquete el proyecto en vivo, o una barrera falle con "file changed as we read it"

@@ -16,9 +16,17 @@
 const path    = require('path');
 const fs      = require('fs');
 const crypto  = require('crypto');
-const { execSync } = require('child_process');
+const esc     = require('./escenarios.cjs');
 
 // ─── SCHEMA ───────────────────────────────────────────────────────────────────
+// Solo lo llaman los que ESCRIBEN (register, deprecate, fix, proteger, renombrar).
+// Leer (check, verify, status) nunca crea tablas: sin tablas, el estado es
+// "no verificado", no "sano".
+
+function tablasPresentes(db) {
+  const r = safe(() => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'protected_behaviors'").get());
+  return !!r;
+}
 
 function ensureSchema(db) {
   db.exec(`
@@ -132,21 +140,134 @@ function inferTestPatterns(filePaths) {
     .filter((v, i, a) => a.indexOf(v) === i);
 }
 
-function findRelatedBehaviors(db, filePaths) {
-  const behaviors = safe(() =>
-    db.prepare(`
-      SELECT * FROM protected_behaviors
-      WHERE status = 'active'
-        AND confidence IN ('HIGH', 'MEDIA')
-    `).all()
-  ) || [];
+/**
+ * ¿La entrada protegida `entrada` cubre el archivo `archivo`? Por segmentos:
+ * igual, o `archivo` dentro del directorio `entrada`. Una entrada vieja que es
+ * solo un nombre de archivo (sin carpeta) cubre ese nombre exacto.
+ * "auth" no cubre "oauth-helper.js".
+ */
+function cubre(entrada, archivo) {
+  const e = esc.clave(entrada).replace(/\/+$/, '');
+  const a = esc.clave(archivo);
+  if (!e || !a) return false;
+  if (a === e || a.startsWith(e + '/')) return true;
+  if (!e.includes('/')) return a.split('/').pop() === e;
+  return false;
+}
 
-  const fpNorm = filePaths.map(f => f.replace(/\\/g, '/').toLowerCase());
+/** Estados con los que un escenario sigue siendo aplicable al changeset. */
+const ESTADOS_APLICABLES = ['active', 'candidate', 'stale'];
 
-  return behaviors.filter(b => {
-    const bFiles = parseJ(b.related_files, []).map(f => f.replace(/\\/g, '/').toLowerCase());
-    return bFiles.some(bf => fpNorm.some(fp => fp.includes(bf) || bf.includes(fp)));
+/**
+ * Behaviors afectados: los que protegen un archivo cambiado, o un archivo que
+ * depende (transitivamente) de uno cambiado según el índice AST. Si el índice
+ * no está o es parcial, la selección se marca `parcial` — no se deduce "nada
+ * afectado" de un índice incompleto.
+ */
+function seleccionarBehaviors(db, filePaths, projectRoot) {
+  const behaviors = safe(() => db.prepare(
+    `SELECT * FROM protected_behaviors WHERE status IN (${ESTADOS_APLICABLES.map(() => '?').join(',')})`
+  ).all(...ESTADOS_APLICABLES)) || [];
+
+  const cambiados = (filePaths || []).map(esc.norm).filter(Boolean);
+  let afectados = cambiados.map((f) => ({ file: f, depth: 0, via: null }));
+  let parcial = null;
+  const br = safe(() => require(path.join(__dirname, 'blast-radius.cjs')));
+  const grafo = br ? safe(() => br.aristas(db)) : null;
+  if (!grafo) parcial = 'SIN_INDICE_AST';
+  else {
+    const c = br.cierre(grafo, cambiados);
+    afectados = c.nodos;
+    if (c.truncado) parcial = c.truncado;
+    else if (cambiados.some((f) => !grafo.indexados.has(esc.clave(f)))) parcial = 'ARCHIVO_SIN_INDICE';
+  }
+
+  const relacionados = behaviors.filter((b) => {
+    const entradas = [...parseJ(b.related_files, []), ...parseJ(b.test_patterns, [])];
+    const hit = afectados.find((n) => entradas.some((e) => cubre(e, n.file)));
+    if (hit) b._via = hit.depth > 0 ? { archivo: hit.file, depende_de: hit.via } : null;
+    return !!hit;
   });
+  return { behaviors: relacionados, parcial, afectados: afectados.length };
+}
+
+function findRelatedBehaviors(db, filePaths, projectRoot) {
+  return seleccionarBehaviors(db, filePaths, projectRoot).behaviors;
+}
+
+/** Transición de estado auditada en la libreta (gate_events). */
+function transicion(db, behaviorId, de, a, motivo, extra = {}) {
+  const telemetry = safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')));
+  if (!telemetry) return false;
+  const marca = extra.execution_id || crypto.randomUUID();
+  return !!safe(() => telemetry.recordGateEvent(db, {
+    gate: 'preservation-transition', verdict: String(a).toUpperCase(), behavior_id: behaviorId,
+    event_id: `tr:${behaviorId}:${a}:${marca}`, source: 'mechanical',
+    detalle: Object.assign({ de, a, motivo }, extra),
+  }));
+}
+
+/** Evidencia del escenario `patron` dentro de una corrida (ruta exacta, o nombre único). */
+function evidenciaPara(evidencia, patron, sujetoVigente) {
+  if (!evidencia || !evidencia.escenarios) return null;
+  const n = esc.norm(patron);
+  let e = evidencia.escenarios[n];
+  if (!e) {
+    const porClave = Object.keys(evidencia.escenarios).filter((k) => cubre(n, k));
+    e = porClave.length === 1 ? evidencia.escenarios[porClave[0]] : null;
+  }
+  /* Evidencia de otra versión del código no prueba la actual. */
+  if (e && e.status === 'PASS' && sujetoVigente && e.subject_hash !== sujetoVigente) {
+    return Object.assign({}, e, { status: 'UNVERIFIED', reason_code: 'SUJETO_DISTINTO' });
+  }
+  return e;
+}
+
+/** Ejecuciones verificadas distintas de un escenario: { ejecuciones, sujetos }. */
+function historialVerificado(db, behaviorId) {
+  const filas = safe(() => db.prepare(
+    "SELECT detalle FROM gate_events WHERE gate = 'preservation' AND verdict = 'VERIFIED' AND behavior_id = ?"
+  ).all(behaviorId)) || [];
+  const sujetos = new Set();
+  filas.forEach((f) => { const d = parseJ(f.detalle, {}); if (d.subject_hash) sujetos.add(d.subject_hash); });
+  return { ejecuciones: filas.length, sujetos: sujetos.size };
+}
+
+/* PROTECTED automático: ejecuciones verificadas distintas del MISMO escenario,
+   sobre al menos dos versiones distintas del código. Repetir la corrida sobre
+   el mismo código no suma. */
+const CRITERIO_PROTEGIDO = { ejecuciones: 5, sujetos: 2 };
+
+/**
+ * Acredita un PASS del escenario. Solo cuenta una vez por execution_id: un
+ * replay de la misma corrida no sube el contador.
+ */
+function acreditar(db, behavior, e) {
+  const telemetry = safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')));
+  if (!telemetry || !e || e.status !== 'PASS' || !e.execution_id || !e.subject_hash) return { acreditado: false };
+  const nuevo = !!safe(() => telemetry.recordGateEvent(db, {
+    gate: 'preservation', verdict: 'VERIFIED', behavior_id: behavior.id,
+    event_id: `pres:${behavior.id}:${e.execution_id}`, cycle_id: null, source: 'mechanical',
+    detalle: { execution_id: e.execution_id, subject_hash: e.subject_hash, evidence_id: e.evidence_id,
+      policy_id: e.policy_id, descubrimiento: e.descubrimiento },
+  }));
+  if (!nuevo) return { acreditado: false, replay: true };
+  const h = historialVerificado(db, behavior.id);
+  const estadoPrevio = behavior.status;
+  let confianza = behavior.confidence === 'HIGH' ? 'HIGH' : 'MEDIA';
+  if (confianza !== 'HIGH' && h.ejecuciones >= CRITERIO_PROTEGIDO.ejecuciones && h.sujetos >= CRITERIO_PROTEGIDO.sujetos) {
+    confianza = 'HIGH';
+    transicion(db, behavior.id, 'verified', 'protected', 'estabilidad', {
+      execution_id: e.execution_id, criterio: CRITERIO_PROTEGIDO, observado: h,
+    });
+  }
+  safe(() => db.prepare(
+    "UPDATE protected_behaviors SET pass_count = ?, confidence = ?, status = 'active', last_verified_at = datetime('now') WHERE id = ?"
+  ).run(h.ejecuciones, confianza, behavior.id));
+  if (estadoPrevio !== 'active') {
+    transicion(db, behavior.id, estadoPrevio, 'verified', 'PASS del escenario', { execution_id: e.execution_id });
+  }
+  return { acreditado: true, pass_count: h.ejecuciones, confidence: confianza };
 }
 
 // Bug real encontrado el 18/07/2026 probando el mecanismo de RECOVERY contra
@@ -169,64 +290,48 @@ function detectTestRunner(projectRoot) {
   return 'unknown';
 }
 
-function runTestFile(testPattern, projectRoot) {
-  try {
-    const isWin = process.platform === 'win32';
-    const shell = isWin ? 'cmd.exe' : 'sh';
-    const flag  = isWin ? '/c' : '-c';
-
-    // Detect Python project
-    const isPython =
-      fs.existsSync(path.join(projectRoot, 'requirements.txt')) ||
-      fs.existsSync(path.join(projectRoot, 'backend', 'requirements.txt'));
-
-    // Sanitizar testPattern: solo caracteres válidos de ruta/patrón de test.
-    // Elimina metacaracteres de shell ("`$;&|()<>) para evitar inyección de comandos,
-    // ya que testPattern proviene de la DB (nombres de archivo) e se interpola en el shell.
-    const safePattern = String(testPattern || '').replace(/[^A-Za-z0-9._/\\*\- ]/g, '');
-
-    let cmd;
-    if (isPython) {
-      // testPattern for pytest = test file or -k expression
-      const backendDir = fs.existsSync(path.join(projectRoot, 'backend', 'requirements.txt'))
-        ? 'backend' : '.';
-      cmd = `cd ${backendDir} && pytest -x -v 2>&1`;
-    } else {
-      // SIN comillas alrededor del patrón — segundo bug real encontrado en la
-      // misma sesión: al pasar por cmd.exe /c con el comando completo como UN
-      // string, las comillas NO se consumen como en un shell normal — llegan
-      // LITERALES al argumento (vitest recibía el filtro como
-      // "tests/unit/x.test.ts" con comillas incluidas y no matcheaba ningún
-      // archivo real → "No test files found", falso negativo). safePattern ya
-      // viene sanitizado (solo rutas, sin espacios en la práctica), así que
-      // no perder la protección de shell-injection al quitar las comillas.
-      const runner = detectTestRunner(projectRoot);
-      cmd = runner === 'jest'
-        ? `npm test -- --testPathPattern=${safePattern} 2>&1`
-        : `npm test -- ${safePattern} 2>&1`;
-    }
-
-    const result = require('child_process').spawnSync(
-      shell, [flag, cmd],
-      // Plan 5 T8: configurable — suites pesadas reales (Lumo) superan 60s
-      { cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 60000, encoding: 'utf8', stdio: 'pipe' }
-    );
-    
-    const output = (result.stdout || '') + (result.stderr || '');
-    const clean  = output.replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
-    
-    const passed = clean.match(/(\d+)\s+passed/i)?.[1];
-    const failed = clean.match(/(\d+)\s+failed/i)?.[1];
-    
-    return {
-      passed:     parseInt(passed || '0'),
-      failed:     parseInt(failed || '0'),
-      allPassed:  result.status === 0 || (!failed && !!passed),
-      output:     clean.slice(-500),
-    };
-  } catch(e) {
-    return { passed: 0, failed: 1, allPassed: false, output: e.message };
+/**
+ * Descriptor del runner para correr UN archivo: comando base y directorio.
+ * El archivo nunca se interpola a mano: lo agrega tdd-gate.runTests, que lo
+ * valida y rechaza si trae caracteres de shell (no lo "limpia").
+ */
+function descriptorRunner(projectRoot) {
+  const backend = path.join(projectRoot, 'backend');
+  if (fs.existsSync(path.join(backend, 'requirements.txt'))) return { runner: 'pytest', comando: 'pytest -x -v', cwd: backend };
+  if (fs.existsSync(path.join(projectRoot, 'requirements.txt')) || fs.existsSync(path.join(projectRoot, 'pyproject.toml'))) {
+    return { runner: 'pytest', comando: 'pytest -x -v', cwd: projectRoot };
   }
+  const runner = detectTestRunner(projectRoot);
+  // jest toma el posicional como regex; --runTestsByPath lo toma como ruta exacta.
+  if (runner === 'jest') return { runner, comando: 'npm test -- --runTestsByPath', cwd: projectRoot };
+  return { runner, comando: null, cwd: projectRoot };
+}
+
+/** Ruta real del escenario: tal cual si existe; si es solo un nombre, debe ser único. */
+function localizarEscenario(patron, projectRoot) {
+  const n = esc.norm(patron);
+  if (fs.existsSync(path.join(projectRoot, n))) return { ok: true, archivo: n };
+  if (n.includes('/')) return { ok: false, reason_code: 'ESCENARIO_NO_EXISTE' };
+  const tdd = safe(() => require(path.join(__dirname, 'tdd-gate.cjs')));
+  const todos = tdd ? (safe(() => tdd.findTestFiles(projectRoot)) || []) : [];
+  const iguales = todos.map(esc.norm).filter((f) => cubre(n, f));
+  if (iguales.length === 1) return { ok: true, archivo: iguales[0] };
+  return { ok: false, reason_code: iguales.length ? 'ESCENARIO_AMBIGUO' : 'ESCENARIO_NO_EXISTE', candidatos: iguales };
+}
+
+function runTestFile(testPattern, projectRoot) {
+  const loc = localizarEscenario(testPattern, projectRoot);
+  if (!loc.ok) {
+    return { status: 'UNVERIFIED', reason_code: loc.reason_code, allPassed: false, passed: 0, failed: 0, evidencia: null };
+  }
+  const d = descriptorRunner(projectRoot);
+  const ev = esc.ejecutarEscenario(projectRoot, loc.archivo, { comando: d.comando || undefined, cwd: d.cwd });
+  const e = ev.escenarios[loc.archivo];
+  return {
+    status: e.status, reason_code: e.reason_code, allPassed: e.status === 'PASS',
+    passed: e.status === 'PASS' ? 1 : 0, failed: e.status === 'FAIL' ? 1 : 0,
+    archivo: loc.archivo, runner: d.runner, evidencia: ev,
+  };
 }
 
 // ─── CONTENCIÓN POR LÍNEAS (v3.13 — números, no palabras) ─────────────────────
@@ -256,10 +361,10 @@ function lineContainmentVerdict(db, behavior, filesToChange, projectRoot) {
     } catch { return DOUBT('módulos de soporte no disponibles'); }
     if (typeof gitCtx.getChangedLines !== 'function') return DOUBT('getChangedLines no disponible');
 
-    const bFiles = parseJ(behavior.related_files, []).map(f => norm(f).toLowerCase());
+    const bFiles = parseJ(behavior.related_files, []);
     const changedRelated = (filesToChange || [])
       .map(norm)
-      .filter(fp => bFiles.some(bf => fp.toLowerCase().includes(bf) || bf.includes(fp.toLowerCase())));
+      .filter(fp => bFiles.some(bf => cubre(bf, fp)));
     if (!changedRelated.length) return DOUBT('sin archivos del behavior en el changeset');
 
     // 1. FRESCURA — el índice debe describir EXACTAMENTE el contenido en disco
@@ -289,10 +394,7 @@ function lineContainmentVerdict(db, behavior, filesToChange, projectRoot) {
     //    symbol_name (nada de LIKE/substring: esa clase de matching de texto ya
     //    produjo 3 bugs reales el 2026-07-15). Anclaje no localizable → DOUBT.
     const ubicaciones = [];
-    const dentroDelBehavior = (file) => {
-      const rf = norm(file).toLowerCase();
-      return bFiles.some(bf => rf.includes(bf) || bf.includes(rf));
-    };
+    const dentroDelBehavior = (file) => bFiles.some(bf => cubre(bf, file));
     // Mapeo prefijo→kind (Plan 2, Fase B): los flujos de endpoint usan el flow
     // COMPLETO como symbol_name ('GET /x'); los flujos UI usan el nombre SIN el
     // prefijo ('FORM form#login' → símbolo 'form#login' de kind 'form').
@@ -401,7 +503,6 @@ function computeTouchedSymbols(db, changedFiles, projectRoot) {
  * Si alguno falla → STOP.
  */
 function checkBeforeBuild(db, filesToChange, projectRoot) {
-  ensureSchema(db);
   projectRoot = projectRoot || process.cwd();
 
   // Telemetría (Plan 5, T1): la libreta donde por fin quedan los veredictos.
@@ -432,13 +533,20 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
     }
   }
 
-  const related = findRelatedBehaviors(db, filesToChange);
-  if (related.length === 0) {
-    return { passed: true, reason: 'No protected behaviors related to this changeset' };
+  if (!tablasPresentes(db)) {
+    return { passed: true, status: 'UNVERIFIED', reason_code: 'SIN_TABLAS',
+      reason: 'Sin registro de comportamientos protegidos: preservación no verificada (no es lo mismo que sana).' };
   }
 
-  const highConfidence = related.filter(b => b.confidence === 'HIGH');
-  const mediaConfidence = related.filter(b => b.confidence === 'MEDIA');
+  const sel = seleccionarBehaviors(db, filesToChange, projectRoot);
+  const related = sel.behaviors;
+  if (related.length === 0) {
+    return { passed: true, status: sel.parcial ? 'UNVERIFIED' : 'NO_APLICA', reason_code: sel.parcial || 'SIN_ESCENARIOS_RELACIONADOS',
+      reason: 'No protected behaviors related to this changeset' + (sel.parcial ? ` (selección parcial: ${sel.parcial})` : '') };
+  }
+
+  const highConfidence = related.filter(b => b.status === 'active' && b.confidence === 'HIGH');
+  const mediaConfidence = related.filter(b => !(b.status === 'active' && b.confidence === 'HIGH'));
   const violations = [];
   const warnings   = [];
   const notices    = []; // v3.13 — behaviors compartidos cuyas zonas protegidas NO se tocan
@@ -466,6 +574,10 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
       ? verdict.hits.map(h => `${h.etiqueta} (líneas ${h.start}-${h.end})`).join(', ')
       : null;
     const patterns = parseJ(behavior.test_patterns, []);
+    if (!patterns.length) {
+      violations.push({ behavior_id: behavior.id, behavior: behavior.description, module: behavior.module,
+        test_pattern: null, status: 'UNVERIFIED', reason_code: 'SIN_ESCENARIO_EJECUTABLE', confidence: 'HIGH', zona });
+    }
     patterns.forEach(pattern => {
       const result = runTestFile(pattern, projectRoot);
       if (!result.allPassed) {
@@ -475,6 +587,8 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
           module:       behavior.module,
           test_pattern: pattern,
           failed:       result.failed,
+          status:       result.status,
+          reason_code:  result.reason_code,
           confidence:   'HIGH',
           zona,
         });
@@ -510,7 +624,8 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
     warnings.push({
       behavior:   behavior.description,
       module:     behavior.module,
-      confidence: 'MEDIA',
+      confidence: behavior.status === 'candidate' ? 'CANDIDATE' : (behavior.confidence || 'MEDIA'),
+      estado:     behavior.status,
       ...(verdict.mode === 'HIT'
         ? { zona: verdict.hits.map(h => `${h.etiqueta} (líneas ${h.start}-${h.end})`).join(', ') }
         : {}),
@@ -522,13 +637,14 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
       file: (filesToChange && filesToChange[0]) || null, detalle: { test: v.test_pattern, zona: v.zona || null } }));
     return {
       passed:     false,
+      status:     violations.some(v => v.status === 'FAIL' || v.status === 'ERROR') ? 'FAIL' : 'UNVERIFIED',
       violations,
       warnings,
       notices,
       message:    [
         `🛑 REGRESSION GUARD STOP: ${violations.length} protected behavior(s) at risk:`,
         ...violations.map(v =>
-          `  [HIGH] "${v.behavior}" (${v.module}) — test "${v.test_pattern}" currently failing${v.zona ? ` — tocas ${v.zona}` : ''}`
+          `  [HIGH] "${v.behavior}" (${v.module}) — test "${v.test_pattern}" ${v.status === 'FAIL' ? 'currently failing' : `sin verificar (${v.status}${v.reason_code ? ': ' + v.reason_code : ''})`}${v.zona ? ` — tocas ${v.zona}` : ''}`
         ),
         '',
         'Fix the failing tests before modifying these files.',
@@ -537,10 +653,13 @@ function checkBeforeBuild(db, filesToChange, projectRoot) {
     };
   }
 
-  const result = { passed: true };
+  /* Sin violaciones HIGH el build puede seguir, pero solo es PASS si no quedó
+     nada aplicable sin verificar: MEDIA y candidatos no se corrieron aquí. */
+  const result = { passed: true, status: warnings.length || sel.parcial ? 'UNVERIFIED' : 'PASS' };
+  if (sel.parcial) result.parcial = sel.parcial;
   if (warnings.length > 0) {
     result.warnings = warnings;
-    result.message = `⚠️  REGRESSION GUARD WARN: ${warnings.length} MEDIA behavior(s) in changeset path — proceed carefully.` +
+    result.message = `⚠️  REGRESSION GUARD WARN: ${warnings.length} MEDIA/candidate behavior(s) in changeset path — proceed carefully.` +
       warnings.filter(w => w.zona).map(w => `\n  ⚠️  [${w.module}] tocas ${w.zona}`).join('');
   }
   if (notices.length > 0) {
@@ -585,6 +704,46 @@ function inferSourceFromTests(testFiles, root) {
   return [...fuentes];
 }
 
+/* Archivos que un escenario protege: fuente de UI, estilos, plantillas, SQL y
+   configuración cuentan igual que el código. */
+const ES_FUENTE = /\.(js|ts|jsx|tsx|mjs|cjs|py|css|scss|sass|less|html?|vue|svelte|astro|hbs|ejs|njk|sql|prisma|graphql|gql)$/i;
+const ES_CONFIG = /(^|\/)(package\.json|tsconfig[^/]*\.json|[^/]*\.config\.(js|cjs|mjs|ts)|vite\.config\.[a-z]+|requirements\.txt|pyproject\.toml)$/i;
+const esFuente = (f) => {
+  const n = esc.norm(f);
+  return (ES_FUENTE.test(n) || ES_CONFIG.test(n)) &&
+    !/\.(test|spec)\./.test(n) &&
+    !/^\.(claude|agentic|git)\//.test(n) && !/node_modules\//.test(n);
+};
+
+const unir = (a, b, k = esc.clave) => {
+  const vistos = new Set();
+  const out = [];
+  [...(a || []), ...(b || [])].forEach((x) => {
+    if (x == null || x === '') return;
+    const c = k(x);
+    if (!vistos.has(c)) { vistos.add(c); out.push(x); }
+  });
+  return out;
+};
+const claveAncla = (a) => `${esc.clave(a.file)}|${a.symbol_name}|${a.kind}`;
+
+/** Escenario vigente que corre exactamente este test (no las filas viejas por módulo). */
+function filaDeEscenario(db, test) {
+  const filas = safe(() => db.prepare(
+    "SELECT * FROM protected_behaviors WHERE status NOT IN ('retired', 'deprecated')"
+  ).all()) || [];
+  return filas.find((f) => {
+    const tp = parseJ(f.test_patterns, []);
+    return tp.length === 1 && esc.clave(tp[0]) === esc.clave(test);
+  }) || null;
+}
+
+/**
+ * Registra lo que quedó sano: UN escenario por archivo de test. Une lo nuevo
+ * con lo que ya protegía (archivos, flujos, anclas) — nunca lo sustituye ni lo
+ * recorta. Un escenario nuevo nace `candidate`; solo pasa a verificado con
+ * evidencia PASS de ese escenario sobre el sujeto (params.evidencia).
+ */
 function registerBehavior(db, params) {
   ensureSchema(db);
 
@@ -592,7 +751,8 @@ function registerBehavior(db, params) {
     module:       moduleName,
     files:        changedFiles = [],
     testFiles:    testPassed   = [],
-    testOutput,
+    evidencia     = null,
+    subject_hash  = null,
     projectRoot,
   } = params;
 
@@ -602,194 +762,155 @@ function registerBehavior(db, params) {
   // cambiados (hash-gated), y extractFlows lee los flujos UI de ese índice fresco.
   const anchors = computeTouchedSymbols(db, changedFiles, root); // v3.13 — nombres estables, nunca líneas
   const flows   = extractFlows(changedFiles, root, db);
-  const tests   = testPassed.length > 0 ? testPassed : inferTestPatterns(changedFiles);
+  const tests   = (testPassed.length > 0 ? testPassed : inferTestPatterns(changedFiles)).map(esc.norm);
 
-  // related_files: UNIÓN de los cambios que SON fuente real + los archivos que
-  // los tests importan. No un either/or: aunque el changeset traiga basura
-  // (.claude/, config) o venga vacío, la fuente inferida del test siempre
-  // entra, así el behavior sabe qué FUENTE protege, no solo su test (hueco #2).
-  const esFuente = (f) => {
-    const n = String(f).replace(/\\/g, '/');
-    return /\.(js|ts|jsx|tsx|mjs|cjs|py)$/.test(n) &&
-      !/\.(test|spec)\./.test(n) &&
-      !/^\.(claude|agentic|git)\//.test(n) && !/node_modules\//.test(n);
-  };
-  const cambiosFuente = changedFiles.filter(esFuente);
-  const inferidos     = inferSourceFromTests(tests, root);
-  let relatedFiles    = [...new Set([...cambiosFuente, ...inferidos])].slice(0, 10);
-  if (relatedFiles.length === 0) relatedFiles = changedFiles.filter(esFuente).slice(0, 10);
-
-  // Sin changeset Y sin tests → nada que proteger
   if (changedFiles.length === 0 && tests.length === 0) return null;
 
-  // Evitar ruido de FORMs HTML genéricos cuando el suite es global/_output
-  const flowsUseful = flows.filter((f) =>
-    !/^(FORM form#|REQUIRED (input|select)|SELECT select\[)/i.test(f)
-  );
-  const flowsFinal = flowsUseful.length > 0 ? flowsUseful : (
-    tests.length > 0
-      ? tests.slice(0, 8).map((t) => `TEST ${path.basename(String(t))}`)
-      : flows.slice(0, 5)
-  );
+  const cambiosFuente = changedFiles.map(esc.norm).filter(esFuente);
+  const flowsUseful = flows.filter((f) => !/^(FORM form#|REQUIRED (input|select)|SELECT select\[)/i.test(f));
 
-  const description = `${module_} module — ${flowsFinal.length > 0
-    ? flowsFinal.slice(0, 3).join(', ')
-    : `${relatedFiles.length || changedFiles.length} files`} functioning correctly`;
+  const resultados = [];
+  const objetivos = tests.length ? tests : [null];
+  for (const test of objetivos) {
+    const inferidos = test ? inferSourceFromTests([test], root) : [];
+    const relacionados = unir(cambiosFuente, inferidos);
+    const flowsEsc = flowsUseful.length ? flowsUseful : (test ? [`TEST ${path.posix.basename(test)}`] : flows);
+    const previo = test ? filaDeEscenario(db, test) : safe(() => db.prepare(
+      "SELECT * FROM protected_behaviors WHERE module = ? AND test_patterns = '[]' AND status NOT IN ('retired', 'deprecated') LIMIT 1"
+    ).get(module_));
 
-  // Check if behavior for this module already exists
-  const existing = safe(() =>
-    db.prepare(`
-      SELECT id, pass_count, confidence FROM protected_behaviors
-      WHERE module = ? AND status = 'active'
-      LIMIT 1
-    `).get(module_)
-  );
+    let fila;
+    if (previo) {
+      const mergedFiles   = unir(parseJ(previo.related_files, []), relacionados);
+      const mergedFlows   = unir(parseJ(previo.critical_flows, []), flowsEsc, (x) => String(x));
+      const mergedAnchors = unir(parseJ(previo.protected_symbols, []), anchors.filter((a) => a && a.symbol_name), claveAncla);
+      safe(() => db.prepare(
+        'UPDATE protected_behaviors SET critical_flows = ?, related_files = ?, protected_symbols = ? WHERE id = ?'
+      ).run(JSON.stringify(mergedFlows), JSON.stringify(mergedFiles), JSON.stringify(mergedAnchors), previo.id));
+      fila = Object.assign({}, previo);
+    } else {
+      const id = test
+        ? `pb_${module_}_${esc.idEscenario(test).slice(4)}`
+        : `pb_${module_}_sin_test`;
+      const description = `${module_} — ${test ? path.posix.basename(test) : 'sin escenario ejecutable'}` +
+        (flowsEsc.length ? ` (${flowsEsc.slice(0, 3).join(', ')})` : '');
+      safe(() => db.prepare(`
+        INSERT OR IGNORE INTO protected_behaviors
+          (id, module, description, critical_flows, test_patterns, related_files, protected_symbols, pass_count, confidence, status, last_verified_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'MEDIA', 'candidate', NULL)
+      `).run(id, module_, description, JSON.stringify(flowsEsc), JSON.stringify(test ? [test] : []),
+        JSON.stringify(relacionados), JSON.stringify(anchors.filter((a) => a && a.symbol_name))));
+      transicion(db, id, null, 'candidate', 'registro', { test });
+      fila = { id, module: module_, status: 'candidate', confidence: 'MEDIA', pass_count: 0 };
+    }
 
-  if (existing) {
-    const newCount     = existing.pass_count + 1;
-    const newConfidence = newCount >= 5 ? 'HIGH' : 'MEDIA';
-
-    // v3.13 — unir anclas nuevas con las previas (sin duplicar): las
-    // protecciones se acumulan ciclo a ciclo, no se reemplazan.
-    const prev = safe(() => db.prepare('SELECT protected_symbols FROM protected_behaviors WHERE id = ?').get(existing.id));
-    const seenAnchor = new Set();
-    const mergedAnchors = [];
-    [...parseJ(prev && prev.protected_symbols, []), ...anchors].forEach(a => {
-      if (!a || !a.symbol_name) return;
-      const k = `${a.file}|${a.symbol_name}|${a.kind}`.toLowerCase();
-      if (!seenAnchor.has(k)) { seenAnchor.add(k); mergedAnchors.push(a); }
+    const e = test ? evidenciaPara(evidencia, test, subject_hash) : null;
+    const cred = e ? acreditar(db, fila, e) : { acreditado: false };
+    const actual = safe(() => db.prepare('SELECT status, confidence, pass_count FROM protected_behaviors WHERE id = ?').get(fila.id)) || fila;
+    resultados.push({
+      id: fila.id, test, status: actual.status, confidence: actual.confidence, pass_count: actual.pass_count,
+      evidencia: e ? e.status : 'SIN_EVIDENCIA', acreditado: cred.acreditado, replay: !!cred.replay,
+      created: !previo, updated: !!previo,
     });
-
-    safe(() =>
-      db.prepare(`
-        UPDATE protected_behaviors SET
-          pass_count       = ?,
-          confidence       = ?,
-          description      = ?,
-          critical_flows   = ?,
-          test_patterns    = ?,
-          related_files    = ?,
-          protected_symbols = ?,
-          last_verified_at = datetime('now')
-        WHERE id = ?
-      `).run(
-        newCount,
-        newConfidence,
-        description,
-        JSON.stringify(flowsFinal),
-        JSON.stringify(tests),
-        JSON.stringify(relatedFiles),
-        JSON.stringify(mergedAnchors.slice(0, 50)),
-        existing.id
-      )
-    );
-
-    return { id: existing.id, module: module_, pass_count: newCount, confidence: newConfidence, updated: true };
   }
 
-  // Create new behavior
-  const id = `pb_${module_}_${Date.now()}`;
-  safe(() =>
-    db.prepare(`
-      INSERT OR IGNORE INTO protected_behaviors
-        (id, module, description, critical_flows, test_patterns, related_files, protected_symbols, pass_count, confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'MEDIA')
-    `).run(
-      id, module_, description,
-      JSON.stringify(flowsFinal),
-      JSON.stringify(tests),
-      JSON.stringify(relatedFiles),
-      JSON.stringify(anchors.slice(0, 50))
-    )
-  );
-
-  return { id, module: module_, pass_count: 1, confidence: 'MEDIA', created: true };
+  const principal = resultados[0];
+  return Object.assign({ module: module_, escenarios: resultados }, principal);
 }
 
 /**
- * STEP after TDD Gate — verify protected behaviors weren't silently broken.
- * Compares current test output against registered behaviors.
+ * Después de los tests: ¿siguen sanos los escenarios protegidos que este
+ * cambio alcanza? Consume la evidencia estructurada de la corrida (no texto).
+ * Solo un PASS del escenario sobre el sujeto actualiza last_verified_at.
  */
-function verifyAfterTDD(db, testOutput, changedFiles, projectRoot) {
-  ensureSchema(db);
+function verifyAfterTDD(db, evidencia, changedFiles, projectRoot, opts = {}) {
   projectRoot = projectRoot || process.cwd();
+  const sujeto = opts.subject_hash || null;
+  if (!tablasPresentes(db)) return { passed: false, status: 'UNVERIFIED', reason_code: 'SIN_TABLAS', verified: 0 };
+  if (!evidencia || typeof evidencia !== 'object' || !evidencia.escenarios) {
+    return { passed: false, status: 'UNVERIFIED', reason_code: 'SIN_EVIDENCIA_ESTRUCTURADA', verified: 0 };
+  }
 
-  const related = findRelatedBehaviors(db, changedFiles);
-  if (related.length === 0) return { passed: true };
+  const sel = seleccionarBehaviors(db, changedFiles, projectRoot);
+  /* Con el índice incompleto no se puede saber a quién alcanza el cambio:
+     se exige evidencia de TODOS los escenarios aplicables. */
+  const alcance = sel.parcial ? 'todos' : 'afectados';
+  if (sel.parcial) {
+    sel.behaviors = safe(() => db.prepare(
+      `SELECT * FROM protected_behaviors WHERE status IN (${ESTADOS_APLICABLES.map(() => '?').join(',')})`
+    ).all(...ESTADOS_APLICABLES)) || [];
+  }
+  if (sel.behaviors.length === 0) {
+    return { passed: true, status: 'NO_APLICA', reason_code: 'SIN_ESCENARIOS_RELACIONADOS', alcance, verified: 0 };
+  }
 
-  const clean = (testOutput || '').replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
   const violations = [];
+  const sinVerificar = [];
+  let verified = 0;
+  const files = (changedFiles || []).map(esc.norm);
 
-  related.forEach(behavior => {
+  for (const behavior of sel.behaviors) {
     const patterns = parseJ(behavior.test_patterns, []);
-    patterns.forEach(pattern => {
-      // Check if this test file appears in the output as failed
-      const failPattern = new RegExp(`FAIL.*${pattern.replace('.', '\\.')}`, 'i');
-      if (failPattern.test(clean)) {
-        violations.push({
-          behavior_id:  behavior.id,
-          behavior:     behavior.description,
-          module:       behavior.module,
-          test_pattern: pattern,
-        });
-        // Telemetría (Plan 5): regresión DETECTADA post-TDD — a la libreta
-        safe(() => require(path.join(__dirname, 'gate-telemetry.cjs'))
-          .recordGateEvent(db, { gate: 'tdd', verdict: 'FAIL', behavior_id: behavior.id, detalle: { test: pattern } }));
-
-        // Record violation
+    if (!patterns.length) { sinVerificar.push({ behavior_id: behavior.id, reason_code: 'SIN_ESCENARIO_EJECUTABLE' }); continue; }
+    for (const pattern of patterns) {
+      const e = evidenciaPara(evidencia, pattern, sujeto);
+      if (e && (e.status === 'FAIL' || e.status === 'ERROR')) {
+        violations.push({ behavior_id: behavior.id, behavior: behavior.description, module: behavior.module,
+          test_pattern: pattern, status: e.status, reason_code: e.reason_code, execution_id: e.execution_id });
+        safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')).recordGateEvent(db, {
+          gate: 'preservation', verdict: 'FAIL', behavior_id: behavior.id,
+          event_id: `pres-fail:${behavior.id}:${e.execution_id || crypto.randomUUID()}`,
+          detalle: { test: pattern, execution_id: e.execution_id, subject_hash: e.subject_hash, reason_code: e.reason_code },
+        }));
         const vid = `iv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        safe(() =>
-          db.prepare(`
-            INSERT OR IGNORE INTO invariant_violations
-              (id, behavior_id, changed_files, failed_tests, description)
-            VALUES (?, ?, ?, ?, ?)
-          `).run(
-            vid,
-            behavior.id,
-            JSON.stringify(changedFiles),
-            JSON.stringify([pattern]),
-            `${pattern} failed after changes to ${changedFiles.join(', ')}`
-          )
-        );
-
-        // Mark behavior as violated
-        safe(() =>
-          db.prepare(`UPDATE protected_behaviors SET status = 'violated' WHERE id = ?`)
-            .run(behavior.id)
-        );
+        safe(() => db.prepare(`
+          INSERT OR IGNORE INTO invariant_violations (id, behavior_id, changed_files, failed_tests, description)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(vid, behavior.id, JSON.stringify(files), JSON.stringify([pattern]),
+          `${pattern} ${e.status} (${e.reason_code || 'sin código'}) tras cambiar ${files.join(', ')}`));
+        if (behavior.status !== 'violated') {
+          safe(() => db.prepare("UPDATE protected_behaviors SET status = 'violated' WHERE id = ?").run(behavior.id));
+          transicion(db, behavior.id, behavior.status, 'violated', 'escenario falló', { execution_id: e.execution_id });
+          behavior.status = 'violated';
+        }
+      } else if (e && e.status === 'PASS') {
+        acreditar(db, behavior, e);
+        verified++;
       } else {
-        // Test still passing — update verified timestamp
-        safe(() =>
-          db.prepare(`UPDATE protected_behaviors SET last_verified_at = datetime('now') WHERE id = ?`)
-            .run(behavior.id)
-        );
+        sinVerificar.push({ behavior_id: behavior.id, test_pattern: pattern,
+          status: e ? e.status : 'UNVERIFIED', reason_code: e ? e.reason_code : 'ESCENARIO_SIN_EVIDENCIA' });
       }
-    });
-  });
+    }
+  }
 
   if (violations.length > 0) {
     return {
-      passed:     false,
-      violations,
+      passed: false, status: 'FAIL', violations, sin_verificar: sinVerificar, verified,
       message: `⚠️  REGRESSION DETECTED: ${violations.length} previously-healthy behavior(s) broken:\n` +
-        violations.map(v => `  [${v.module}] "${v.behavior}" — ${v.test_pattern} now failing`).join('\n'),
+        violations.map(v => `  [${v.module}] "${v.behavior}" — ${v.test_pattern} ${v.status}`).join('\n'),
     };
   }
-
-  return { passed: true, verified: related.length };
+  if (sinVerificar.length > 0) {
+    return { passed: false, status: 'UNVERIFIED', reason_code: 'ESCENARIOS_SIN_EVIDENCIA',
+      sin_verificar: sinVerificar, verified, alcance, parcial: sel.parcial };
+  }
+  return { passed: true, status: 'PASS', verified, alcance, parcial: sel.parcial };
 }
 
 /**
  * Status report — akdd regression status
  */
 function regressionStatus(db) {
-  ensureSchema(db);
+  if (!tablasPresentes(db)) {
+    return '\n  Regression Guard — sin registro de comportamientos protegidos: estado NO VERIFICADO.\n';
+  }
 
   const behaviors   = safe(() => db.prepare(`SELECT * FROM protected_behaviors ORDER BY confidence DESC, pass_count DESC`).all()) || [];
   const violations  = safe(() => db.prepare(`SELECT * FROM invariant_violations WHERE fixed_at IS NULL ORDER BY created_at DESC`).all()) || [];
 
   const high    = behaviors.filter(b => b.confidence === 'HIGH'   && b.status === 'active');
   const media   = behaviors.filter(b => b.confidence === 'MEDIA'  && b.status === 'active');
+  const candidatos = behaviors.filter(b => b.status === 'candidate' || b.status === 'stale');
   const violated= behaviors.filter(b => b.status === 'violated');
 
   const lines = [
@@ -799,6 +920,7 @@ function regressionStatus(db) {
     '═══════════════════════════════════════════════════',
     `  HIGH (${high.length}):      fully protected behaviors`,
     `  MEDIA (${media.length}):    emerging behaviors (< 5 cycles)`,
+    `  CANDIDATE (${candidatos.length}): registrados, sin ejecución verificada`,
     `  VIOLATED (${violated.length}): currently broken`,
     `  Open violations: ${violations.length}`,
     '',
@@ -819,30 +941,113 @@ function regressionStatus(db) {
     media.forEach(b => lines.push(`  🔶 [${b.module}] ${b.description.substring(0, 60)} (${b.pass_count} cycles)`));
   }
 
+  if (candidatos.length > 0) {
+    lines.push('\n  ── CANDIDATE ───────────────────────────────────');
+    candidatos.forEach(b => lines.push(`  ◻️  [${b.module}] ${b.description.substring(0, 60)} (${b.status})`));
+  }
+
   lines.push('═══════════════════════════════════════════════════\n');
   return lines.join('\n');
 }
 
 /**
- * Deprecate a behavior manually — akdd behaviors deprecate <id>
+ * Retirar un escenario exige una decisión: motivo y quién la tomó.
  */
-function deprecateBehavior(db, id) {
-  ensureSchema(db);
-  const result = safe(() =>
-    db.prepare(`UPDATE protected_behaviors SET status = 'deprecated' WHERE id = ?`).run(id)
-  );
-  return result?.changes > 0;
+function deprecateBehavior(db, id, decision = {}) {
+  const motivo = String(decision.motivo || '').trim();
+  const aprobador = String(decision.aprobador || '').trim();
+  if (!motivo || !aprobador) return { ok: false, reason_code: 'SIN_DECISION' };
+  if (!tablasPresentes(db)) return { ok: false, reason_code: 'SIN_TABLAS' };
+  const previo = safe(() => db.prepare('SELECT status FROM protected_behaviors WHERE id = ?').get(id));
+  if (!previo) return { ok: false, reason_code: 'NO_EXISTE' };
+  safe(() => db.prepare(`UPDATE protected_behaviors SET status = 'retired' WHERE id = ?`).run(id));
+  transicion(db, id, previo.status, 'retired', motivo, { aprobador });
+  return { ok: true, status: 'retired' };
 }
 
 /**
- * Fix a violation — called after the dev confirms the regression was intentional
+ * Cerrar una violación exige volver a correr el escenario sobre el código
+ * recuperado. Sin PASS, la violación sigue abierta.
  */
-function fixViolation(db, behaviorId) {
-  ensureSchema(db);
-  safe(() => {
-    db.prepare(`UPDATE invariant_violations SET fixed_at = datetime('now') WHERE behavior_id = ? AND fixed_at IS NULL`).run(behaviorId);
-    db.prepare(`UPDATE protected_behaviors SET status = 'active', pass_count = 1, confidence = 'MEDIA' WHERE id = ?`).run(behaviorId);
+function fixViolation(db, behaviorId, opts = {}) {
+  if (!tablasPresentes(db)) return { ok: false, reason_code: 'SIN_TABLAS' };
+  const b = safe(() => db.prepare('SELECT * FROM protected_behaviors WHERE id = ?').get(behaviorId));
+  if (!b) return { ok: false, reason_code: 'NO_EXISTE' };
+  const patterns = parseJ(b.test_patterns, []);
+  if (!patterns.length) return { ok: false, reason_code: 'SIN_ESCENARIO_EJECUTABLE' };
+  const ejecutar = opts.ejecutar || ((p) => runTestFile(p, opts.projectRoot || process.cwd()));
+  const corridas = patterns.map((p) => ({ p, r: ejecutar(p) }));
+  const fallida = corridas.find((c) => !c.r || c.r.status !== 'PASS');
+  if (fallida) {
+    return { ok: false, reason_code: 'ESCENARIO_NO_RECUPERADO', test: fallida.p,
+      status: fallida.r ? fallida.r.status : 'UNVERIFIED' };
+  }
+  safe(() => db.prepare(`UPDATE invariant_violations SET fixed_at = datetime('now') WHERE behavior_id = ? AND fixed_at IS NULL`).run(behaviorId));
+  safe(() => db.prepare(`UPDATE protected_behaviors SET status = 'active' WHERE id = ?`).run(behaviorId));
+  const exec = corridas[0].r.evidencia && corridas[0].r.evidencia.execution_id;
+  transicion(db, behaviorId, b.status, 'recovered', 'escenario re-ejecutado en PASS', { execution_id: exec });
+  for (const c of corridas) {
+    const e = c.r.evidencia ? evidenciaPara(c.r.evidencia, c.r.archivo || c.p) : null;
+    if (e) acreditar(db, Object.assign({}, b, { status: 'active' }), e);
+  }
+  return { ok: true, status: 'active' };
+}
+
+/** PROTECTED por decisión explícita (criticidad), con motivo y aprobador trazables. */
+function proteger(db, id, decision = {}) {
+  const motivo = String(decision.motivo || '').trim();
+  const aprobador = String(decision.aprobador || '').trim();
+  if (!motivo || !aprobador) return { ok: false, reason_code: 'SIN_DECISION' };
+  const b = safe(() => db.prepare('SELECT status, confidence FROM protected_behaviors WHERE id = ?').get(id));
+  if (!b) return { ok: false, reason_code: 'NO_EXISTE' };
+  if (b.status !== 'active') return { ok: false, reason_code: 'NO_VERIFICADO' };
+  safe(() => db.prepare("UPDATE protected_behaviors SET confidence = 'HIGH' WHERE id = ?").run(id));
+  transicion(db, id, 'verified', 'protected', motivo, { aprobador, criterio: 'decision' });
+  return { ok: true, confidence: 'HIGH' };
+}
+
+/** Un archivo cambió de ruta: la protección lo sigue, no se pierde. */
+function renombrar(db, desde, hacia, decision = {}) {
+  if (!tablasPresentes(db)) return { ok: false, reason_code: 'SIN_TABLAS' };
+  const de = esc.norm(desde);
+  const a = esc.norm(hacia);
+  if (!de || !a) return { ok: false, reason_code: 'RUTA_INVALIDA' };
+  const mover = (lista) => lista.map((x) => {
+    const k = esc.clave(x);
+    if (k === esc.clave(de)) return a;
+    if (k.startsWith(esc.clave(de) + '/')) return a + esc.norm(x).slice(de.length);
+    return x;
   });
+  const filas = safe(() => db.prepare("SELECT * FROM protected_behaviors WHERE status NOT IN ('retired', 'deprecated')").all()) || [];
+  let movidos = 0;
+  for (const f of filas) {
+    const rf = parseJ(f.related_files, []); const tp = parseJ(f.test_patterns, []);
+    const nrf = mover(rf); const ntp = mover(tp);
+    if (JSON.stringify(nrf) === JSON.stringify(rf) && JSON.stringify(ntp) === JSON.stringify(tp)) continue;
+    safe(() => db.prepare('UPDATE protected_behaviors SET related_files = ?, test_patterns = ? WHERE id = ?')
+      .run(JSON.stringify(nrf), JSON.stringify(ntp), f.id));
+    transicion(db, f.id, f.status, f.status, decision.motivo || 'renombre', { desde: de, hacia: a });
+    movidos++;
+  }
+  return { ok: true, movidos };
+}
+
+/**
+ * Cambio intencional sobre un escenario: delta esperado, alcance, aprobador y
+ * qué pruebas se preservan. Deja el escenario `stale` hasta que vuelva a pasar:
+ * no es una autorización abierta.
+ */
+function cambioIntencional(db, id, cambio = {}) {
+  const faltan = ['delta', 'alcance', 'aprobador'].filter((k) => !String(cambio[k] || '').trim());
+  if (!Array.isArray(cambio.preservadas)) faltan.push('preservadas');
+  if (faltan.length) return { ok: false, reason_code: 'CAMBIO_INCOMPLETO', faltan };
+  const b = safe(() => db.prepare('SELECT status FROM protected_behaviors WHERE id = ?').get(id));
+  if (!b) return { ok: false, reason_code: 'NO_EXISTE' };
+  safe(() => db.prepare("UPDATE protected_behaviors SET status = 'stale' WHERE id = ?").run(id));
+  transicion(db, id, b.status, 'stale', 'cambio intencional', {
+    delta: cambio.delta, alcance: cambio.alcance, aprobador: cambio.aprobador, preservadas: cambio.preservadas,
+  });
+  return { ok: true, status: 'stale' };
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -850,6 +1055,8 @@ function fixViolation(db, behaviorId) {
 if (require.main === module) {
   const cmd  = process.argv[2] || 'status';
   const args = process.argv.slice(3);
+  const opcion = (n) => { const a = args.find((x) => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : ''; };
+  const posicionales = args.filter((a) => !a.startsWith('--'));
 
   const dbPath = path.join(process.cwd(), '.agentic/memoria.db');
   if (!require('fs').existsSync(dbPath)) {
@@ -857,69 +1064,96 @@ if (require.main === module) {
     process.exit(0);
   }
 
-  let DB;
-  try { DB = new (require('better-sqlite3'))(dbPath); }
-  catch { DB = new (require('node:sqlite').DatabaseSync)(dbPath); }
-  ensureSchema(DB);
+  const adapter = require(path.join(__dirname, 'db-adapter.cjs'));
+  const ESCRIBEN = ['check', 'register', 'deprecate', 'fix', 'protect', 'rename'];
+  const escribe = ESCRIBEN.includes(cmd);
+  const DB = escribe ? adapter.openWrite(dbPath) : adapter.openReadOnly(dbPath);
+  let salida = 0;
+  try {
+    if (escribe && cmd !== 'check') ensureSchema(DB);
+    switch (cmd) {
+      case 'status':
+        console.log(regressionStatus(DB));
+        break;
 
-  switch(cmd) {
-    case 'status':
-      console.log(regressionStatus(DB));
-      break;
-
-    case 'check': {
-      const files = args;
-      if (!files.length) { console.log('Usage: regression-guard.cjs check <file1> <file2>...'); break; }
-      const result = checkBeforeBuild(DB, files, process.cwd());
-      if (!result.passed) {
-        console.log(result.message);
-        process.exit(1);
+      case 'check': {
+        if (!posicionales.length) { console.log('Usage: regression-guard.cjs check <file1> <file2>...'); break; }
+        const result = checkBeforeBuild(DB, posicionales, process.cwd());
+        if (!result.passed) { console.log(result.message); salida = 1; break; }
+        console.log(result.message || (result.status === 'PASS' ? '✅ REGRESSION GUARD PASS'
+          : `ℹ️  REGRESSION GUARD ${result.status}${result.reason_code ? ' (' + result.reason_code + ')' : ''}`));
+        break;
       }
-      console.log(result.message || '✅ REGRESSION GUARD PASS');
-      break;
-    }
 
-    case 'register': {
-      const module = args[0] || 'global';
-      const files  = args.slice(1);
-      const result = registerBehavior(DB, { module, files, projectRoot: process.cwd() });
-      if (result) {
-        console.log(`✅ Behavior ${result.created ? 'created' : 'updated'}: [${result.module}] ${result.confidence} (${result.pass_count} cycles)`);
+      case 'register': {
+        const module = posicionales[0] || 'global';
+        const result = registerBehavior(DB, { module, files: posicionales.slice(1), projectRoot: process.cwd() });
+        if (result) {
+          console.log(`✅ Behavior ${result.created ? 'created' : 'updated'}: [${result.module}] ${result.status} ${result.confidence} (${result.pass_count} verificaciones)`);
+        }
+        break;
       }
-      break;
-    }
 
-    case 'deprecate': {
-      const id = args[0];
-      if (!id) { console.log('Usage: regression-guard.cjs deprecate <behavior-id>'); break; }
-      deprecateBehavior(DB, id);
-      console.log(`✅ Behavior ${id} deprecated`);
-      break;
-    }
+      case 'deprecate': {
+        const id = posicionales[0];
+        if (!id) { console.log('Usage: regression-guard.cjs deprecate <behavior-id> --motivo="..." --aprobador="..."'); break; }
+        const r = deprecateBehavior(DB, id, { motivo: opcion('motivo'), aprobador: opcion('aprobador') });
+        console.log(r.ok ? `✅ Behavior ${id} retirado` : `🛑 No se retiró ${id}: ${r.reason_code}`);
+        if (!r.ok) salida = 1;
+        break;
+      }
 
-    case 'fix': {
-      const id = args[0];
-      if (!id) { console.log('Usage: regression-guard.cjs fix <behavior-id>'); break; }
-      fixViolation(DB, id);
-      console.log(`✅ Violation fixed, behavior reset to MEDIA`);
-      break;
-    }
+      case 'fix': {
+        const id = posicionales[0];
+        if (!id) { console.log('Usage: regression-guard.cjs fix <behavior-id>'); break; }
+        const r = fixViolation(DB, id, { projectRoot: process.cwd() });
+        console.log(r.ok ? '✅ Escenario re-ejecutado en PASS: violación cerrada'
+          : `🛑 Violación sigue abierta: ${r.reason_code}${r.test ? ` (${r.test}: ${r.status})` : ''}`);
+        if (!r.ok) salida = 1;
+        break;
+      }
 
-    default:
-      console.log('Commands: status | check <files> | register <module> <files> | deprecate <id> | fix <id>');
+      case 'protect': {
+        const id = posicionales[0];
+        const r = proteger(DB, id, { motivo: opcion('motivo'), aprobador: opcion('aprobador') });
+        console.log(r.ok ? `✅ ${id} PROTECTED` : `🛑 No se protegió ${id}: ${r.reason_code}`);
+        if (!r.ok) salida = 1;
+        break;
+      }
+
+      case 'rename': {
+        const r = renombrar(DB, posicionales[0], posicionales[1], { motivo: opcion('motivo') });
+        console.log(r.ok ? `✅ ${r.movidos} escenario(s) siguen a ${posicionales[1]}` : `🛑 ${r.reason_code}`);
+        if (!r.ok) salida = 1;
+        break;
+      }
+
+      default:
+        console.log('Commands: status | check <files> | register <module> <files> | deprecate <id> --motivo= --aprobador= | fix <id> | protect <id> --motivo= --aprobador= | rename <desde> <hacia>');
+    }
+  } finally {
+    DB.close();
   }
-
-  DB.close();
+  process.exitCode = salida;
 }
 
 module.exports = {
   ensureSchema,
+  tablasPresentes,
   checkBeforeBuild,
   registerBehavior,
   verifyAfterTDD,
   regressionStatus,
   deprecateBehavior,
   fixViolation,
+  proteger,
+  renombrar,
+  cambioIntencional,
+  runTestFile,
+  descriptorRunner,
+  seleccionarBehaviors,
+  cubre,
   lineContainmentVerdict,
   computeTouchedSymbols,
+  CRITERIO_PROTEGIDO,
 };

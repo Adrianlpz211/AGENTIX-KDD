@@ -8,12 +8,14 @@ on:
 
 jobs:
   ci:
-    name: Syntax check & tests
-    runs-on: ubuntu-latest
+    name: Syntax check & tests (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
-        node-version: ['20', '22']
+        os: [ubuntu-latest, windows-latest]
+        node-version: ['20', '22', '24']
 
     steps:
       - uses: actions/checkout@v4
@@ -27,20 +29,11 @@ jobs:
         run: npm ci
 
       - name: Syntax check all .cjs modules
-        run: |
-          echo "Checking Node.js syntax..."
-          failed=0
-          for f in $(find . -name "*.cjs" -not -path "*/node_modules/*" -not -path "*/.git/*"); do
-            if ! node --check "$f" 2>/dev/null; then
-              echo "❌ Syntax error in $f"
-              failed=1
-            fi
-          done
-          if [ $failed -eq 1 ]; then exit 1; fi
-          echo "✅ All .cjs files pass syntax check"
+        run: node scripts/check-syntax.cjs
 
       - name: Run tests
         run: npm test
 
       - name: Check install scripts
+        if: runner.os == 'Linux'
         run: bash -n install.sh && echo "✅ install.sh OK" || echo "⚠️ install.sh not found"

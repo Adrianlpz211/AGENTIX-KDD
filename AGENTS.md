@@ -15,7 +15,7 @@ This project uses **Agentic KDD (Knowledge-Driven Development)** — a framework
 
 The `.agentic/` directory contains:
 - `memoria.db` — SQLite knowledge graph (patterns, errors, decisions, causal edges)
-- `.agentic/grafo/` — 38 Node.js modules (memory, AST, pipeline, preservation, telemetry)
+- `.agentic/grafo/` — Node.js engine modules (memory, AST, pipeline, preservation, telemetry); live count: `node scripts/sync-version.cjs --inventario`
 - `agentes/` — agent instructions per role
 - `telemetria/` — append-only JSONL execution traces (L4 audit requirement)
 - `checkpoint.md` — session continuity across chat resets
@@ -170,4 +170,4 @@ CLAUDE.md               — Claude Code specific (derived from this file)
 ---
 
 *Agentic KDD — A development team of one. A team becomes a legion.*
-*npm: agentic-kdd | agentic-kdd-mcp*
+*npm: agentic-kdd (el servidor MCP viaja dentro del mismo paquete)*

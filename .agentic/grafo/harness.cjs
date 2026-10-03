@@ -59,6 +59,55 @@ const v = {
   truthy:        (val, f) => val ? true : `${f}: debe ser truthy`,
 };
 
+// ─── QA: veredicto derivado de evidencia ─────────────────────────────────────
+
+/**
+ * La QA no la decide lo que el agente diga (`qa_verdict`), sino lo que puede
+ * probar sobre ESTE sujeto (`ctx.subject_hash`):
+ *   - cada criterio de aceptación apunta a una evidencia existente;
+ *   - las evidencias son del mismo subject_hash;
+ *   - una regresión reportada impide PASS aunque el veredicto diga PASS;
+ *   - la suite completa solo se exige si la política la pide, y entonces hace
+ *     falta su evidencia, no el boolean `full_suite_passed`.
+ */
+function verificarQA(output, ctx) {
+  const o = output || {};
+  const schema = {
+    acceptance_criteria: v.minArray(1),
+    evidence: v.minArray(1),
+    regressions: v.array,
+    qa_verdict: v.oneOf(['PASS', 'FAIL', 'WARN']),
+  };
+  const { valid, errors } = assertSchema(o, schema);
+  if (!valid) return block(`QA POST: ${errors.join('; ')}`);
+
+  const sujeto = ctx.subject_hash || null;
+  if (!sujeto) return block('QA POST ⛔: sin subject_hash del cambio no hay contra qué validar la evidencia');
+
+  const delSujeto = o.evidence.filter((e) => e && e.subject_hash === sujeto && typeof e.kind === 'string' && e.ref);
+  const ajenas = o.evidence.length - delSujeto.length;
+  if (ajenas > 0) return block(`QA POST ⛔: ${ajenas} evidencia(s) sin ref o de otro sujeto`);
+  const refs = new Set(delSujeto.map((e) => e.ref));
+
+  const sinPrueba = o.acceptance_criteria.filter((c) => !c || !c.id || c.verified !== true || !refs.has(c.evidence_ref));
+  if (sinPrueba.length) {
+    return block(`QA POST ⛔: criterio(s) sin evidencia: ${sinPrueba.map((c) => (c && c.id) || '?').join(', ')}`);
+  }
+  if (o.regressions.length) {
+    return block(`QA POST ⛔: regresiones reportadas (${o.regressions.join(', ')}) — no hay PASS con regresión`);
+  }
+  const politica = ctx.qa_policy || {};
+  if (politica.requires_full_suite) {
+    const suite = delSujeto.find((e) => e.kind === 'full_suite' && e.status === 'PASS');
+    if (!suite) return block('QA POST ⛔: la política exige suite completa y no hay evidencia `full_suite` PASS del sujeto');
+  } else {
+    const dirigida = delSujeto.find((e) => (e.kind === 'targeted_tests' || e.kind === 'full_suite' || e.kind === 'runner') && e.status === 'PASS');
+    if (!dirigida) return block('QA POST ⛔: falta evidencia de tests (dirigidos o suite) del sujeto');
+  }
+  if (o.qa_verdict === 'FAIL') return block('QA POST ⛔: QA verdict = FAIL. No se avanza.');
+  return pass();
+}
+
 // ─── DEFINICIÓN DE GATES POR PASO ─────────────────────────────────────────────
 
 /**
@@ -136,16 +185,20 @@ const GATE_DEFINITIONS = {
         return block('Implementation PRE: allowed_files no definidos en el plan');
       return pass();
     },
-    post: (output) => {
+    post: (output, ctx) => {
       const schema = {
         files_touched: v.minArray(1),
         diff_summary: v.string,
-        within_scope: v.boolean,
       };
       const { valid, errors } = assertSchema(output, schema);
       if (!valid) return retry(`Implementation POST: ${errors.join('; ')}`);
-      if (!output.within_scope)
+      if (output.within_scope === false)
         return block('Implementation POST: archivos tocados fuera del scope del plan — STOP');
+      /* El alcance se calcula, no se cree: within_scope:true del agente no basta. */
+      const c = ctx || {};
+      const scope = checkScopeDeviation(output.files_touched, c.allowed_files || [],
+        GATE_DEFINITIONS.implementation.denylist, c.project_root || process.cwd());
+      if (!scope.ok) return block('Implementation POST: ' + scope.reason);
       return pass();
     },
     allowlist: null, // se llena desde ctx.allowed_files en tiempo de ejecución
@@ -192,25 +245,7 @@ const GATE_DEFINITIONS = {
       if (!ctx.tdd_passed) return block('QA PRE ⛔: TDD no completado — no se puede ejecutar QA sin tests en verde');
       return pass();
     },
-    post: (output) => {
-      // GATE DURO: QA no es opinión del agente, es un assert
-      const schema = {
-        acceptance_criteria_checked: v.boolean,
-        full_suite_passed: v.boolean,
-        regressions: v.array,
-        qa_verdict: v.oneOf(['PASS', 'FAIL', 'WARN']),
-      };
-      const { valid, errors } = assertSchema(output, schema);
-      if (!valid) return block(`QA POST: ${errors.join('; ')}`);
-
-      if (!output.acceptance_criteria_checked)
-        return block('QA POST ⛔ GATE DURO: Criterios de aceptación no verificados. QA no completado.');
-      if (!output.full_suite_passed)
-        return block(`QA POST ⛔ GATE DURO: Suite completa no pasa. Regresiones: ${output.regressions?.join(', ')}`);
-      if (output.qa_verdict === 'FAIL')
-        return block('QA POST ⛔: QA verdict = FAIL. No se avanza.');
-      return pass();
-    },
+    post: (output, ctx) => verificarQA(output, ctx || {}),
     allowlist: null,
     denylist: [],
   },
@@ -321,7 +356,7 @@ async function ejecutarPaso(gateKey, ctx, execFn, opts = {}) {
     }
 
     // ── POST-GATE ────────────────────────────────────────────────────────────
-    const postResult = gate.post(output);
+    const postResult = gate.post(output, ctx);
     _logGate(gate.name, 'POST', postResult, attempt);
 
     if (postResult.ok) {
@@ -361,23 +396,34 @@ async function ejecutarPaso(gateKey, ctx, execFn, opts = {}) {
  * @param {string[]} [denylist] - patrones siempre prohibidos
  * @returns {GateResult}
  */
-function checkScopeDeviation(attempted_files, allowed_files, denylist = []) {
-  const norm = (p) => path.normalize(p).replace(/\\/g, '/');
-  const out_of_scope = attempted_files.filter(f => {
-    // Si no hay allowlist definida, no bloquear por allowlist (solo por denylist)
-    const inAllowed = allowed_files.length === 0 || allowed_files.some(a =>
-      f.startsWith(a) || f === a || path.normalize(f).startsWith(path.normalize(a))
-    );
-    // Denylist por segmento de path, no substring: 'lib/' no debe bloquear 'public-library/'
-    const inDenied = denylist.some(d => {
-      const nf = norm(f), nd = norm(d);
-      return nf === nd || nf.startsWith(nd.endsWith('/') ? nd : nd + '/');
-    });
-    return !inAllowed || inDenied;
-  });
+function checkScopeDeviation(attempted_files, allowed_files, denylist = [], projectRoot = process.cwd()) {
+  const pn = require('./path-norm.cjs');
+  const fuera = [];
+  for (const f of attempted_files || []) {
+    const r = pn.resolverEnRaiz(projectRoot, f);
+    if (!r.ok) { fuera.push(`${f} (${r.reason})`); continue; }
+    /* Sin allowlist no se bloquea por allowlist, solo por denylist. */
+    const inAllowed = !(allowed_files || []).length || pn.permitido(projectRoot, r.rel, allowed_files);
+    const inDenied = pn.permitido(projectRoot, r.rel, denylist || []);
+    if (!inAllowed || inDenied) fuera.push(r.rel);
+  }
 
-  if (out_of_scope.length > 0) {
-    return block(`Scope Deviation ⛔: archivos fuera del plan detectados: ${out_of_scope.join(', ')}. Detener antes de actuar.`);
+  if (fuera.length > 0) {
+    const r = block(`Scope Deviation ⛔: archivos fuera del plan detectados: ${fuera.join(', ')}. Detener antes de actuar.`);
+    r.out_of_scope = fuera;
+    return r;
+  }
+  /* Lo protegido manda sobre el plan: ni un plan que lo nombre lo vuelve escribible. */
+  const prot = require('./protected-files.cjs').verificar(projectRoot, attempted_files || [], { accion: 'write' });
+  if (prot.status === 'ERROR') {
+    const r = block(`Protected Files ⛔: ${prot.message}. Repara el manifiesto antes de escribir.`);
+    r.reason_code = prot.reason_code;
+    return r;
+  }
+  if (prot.status === 'FAIL') {
+    const r = block(`Protected Files ⛔: ${prot.blocked.map((b) => b.file).join(', ')} está(n) en .agentic/protected_files.`);
+    r.protected = prot.blocked.map((b) => b.file);
+    return r;
   }
   return pass();
 }
@@ -489,6 +535,7 @@ module.exports = {
   // Results
   pass, block, retry, escalate,
   // Utilities
+  verificarQA,
   checkScopeDeviation,
   generateHarnessReport,
 };

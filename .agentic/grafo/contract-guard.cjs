@@ -69,11 +69,10 @@ const STATUS = {
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
 
-function openDB(projectRoot) {
+function openDB(projectRoot, opciones) {
   const dbPath = path.join(projectRoot, '.agentic/memoria.db');
-  try { return new (require('better-sqlite3'))(dbPath); } catch {}
-  try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath); } catch {}
-  throw new Error('No SQLite driver disponible');
+  const readOnly = !!(opciones && opciones.readOnly);
+  return require('./db-adapter.cjs').open(dbPath, { readOnly, legacySwallow: false });
 }
 
 // ─── SCHEMA MIGRATION ────────────────────────────────────────────────────────
@@ -271,7 +270,13 @@ function upsertContract(db, contract, cicloId) {
   const existing = db.prepare('SELECT * FROM verified_contracts WHERE id = ?').get(id);
 
   if (existing) {
-    // Actualizar contrato existente
+    // Sin ejecución identificable, repetir la misma salida no es otra pasada.
+    if (!contract.execution_id) return id;
+    if (esquemaPorTestListo(db)) {
+      const ins = db.prepare(`INSERT OR IGNORE INTO contract_executions (contract_id, execution_id, subject_hash, status)
+        VALUES (?, ?, ?, 'pass')`).run(id, contract.execution_id, contract.subject_hash || null);
+      if (ins && ins.changes === 0) return id;
+    }
     const newPasses = (existing.consecutive_passes || 0) + 1;
     const newTotal  = (existing.verification_count || 0) + 1;
 
@@ -310,8 +315,12 @@ function upsertContract(db, contract, cicloId) {
 
 function autoPromote(db, contractId, consecutivePasses, totalPasses, failureCount) {
   const failureRate = totalPasses > 0 ? failureCount / totalPasses : 0;
-  const contract = db.prepare('SELECT status FROM verified_contracts WHERE id = ?').get(contractId);
+  // Solo un contrato con test propio (test_id, que escribe registerPassingTests)
+  // puede subir: una suite global o una línea de salida no prueban cada contrato.
+  const conTestId = columnas(db, 'verified_contracts').includes('test_id');
+  const contract = db.prepare(`SELECT status, name${conTestId ? ', test_id' : ''} FROM verified_contracts WHERE id = ?`).get(contractId);
   if (!contract) return;
+  if (!conTestId || !contract.test_id || /^Suite: /.test(contract.name || '')) return;
 
   let newStatus = contract.status;
 
@@ -421,17 +430,33 @@ function takeSnapshot(db, projectRoot, cicloId, snapshotType) {
  *   Invocado a mano (`contract-guard.cjs verify`) el respaldo si tiene sentido.
  */
 function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = [], opts = {}) {
+  const { createGateResult } = require('./gate-result.cjs');
   const result = {
-    passed: true,
+    status: 'PASS',
+    reason_code: null,
+    blocking: false,
+    passed: false,
     violations: [],
+    unverified: [],
     blast_radius: 0,
     contracts_checked: 0,
     contracts_protected: 0,
     contracts_verified: 0,
     skipped_reason: null,
+    gate: null,
+  };
+  const terminar = (status, reason, extra) => {
+    const e = extra || {};
+    Object.assign(result, e);
+    result.status = status;
+    result.reason_code = reason;
+    result.passed = status === 'PASS';
+    result.blocking = typeof e.blocking === 'boolean'
+      ? e.blocking
+      : status === 'FAIL' || status === 'ERROR' || (status === 'UNVERIFIED' && result.contracts_protected > 0);
+    return result;
   };
 
-  // Obtener contratos protegidos y verificados
   let contracts = [];
   try {
     contracts = db.prepare(`
@@ -439,91 +464,97 @@ function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = [], opts 
       WHERE status IN ('protected', 'verified')
       ORDER BY status DESC, verification_count DESC
     `).all();
-  } catch { return result; }
-
-  if (contracts.length === 0) {
-    result.skipped_reason = 'No verified contracts yet — run more cycles to build contract base';
-    return result;
+  } catch (e) {
+    return terminar('ERROR', 'CONTRACTS_QUERY_FAILED', { skipped_reason: e.message });
   }
 
-  result.contracts_protected = contracts.filter(c => c.status === STATUS.PROTECTED).length;
-  result.contracts_verified  = contracts.filter(c => c.status === STATUS.VERIFIED).length;
+  if (contracts.length === 0) {
+    return terminar('SKIP', 'NO_CONTRACTS', { blocking: false, skipped_reason: 'Sin contratos verificados todavía' });
+  }
 
-  // Si hay archivos modificados, filtrar contratos relacionados
   let contractsToCheck = contracts;
   if (modifiedFiles.length > 0) {
-    // Calcular blast radius
-    const blastContracts = getContractsInBlastRadius(db, modifiedFiles, contracts);
-    result.blast_radius = blastContracts.length;
-
-    // Solo verificar contratos en el blast radius
-    if (blastContracts.length > 0) {
-      contractsToCheck = blastContracts;
-    } else {
-      // No hay contratos en riesgo → gate pasa automáticamente
-      result.passed = true;
-      result.skipped_reason = `No contracts in blast radius of modified files (${modifiedFiles.length} files)`;
-      return result;
+    contractsToCheck = getContractsInBlastRadius(db, modifiedFiles, contracts, projectRoot);
+    result.blast_radius = contractsToCheck.length;
+    result.blast_coverage = contractsToCheck.analisis.complete ? 'COMPLETE' : 'PARTIAL';
+    if (contractsToCheck.length === 0 && !contractsToCheck.analisis.complete) {
+      /* Sin cobertura completa, un radio vacío no prueba nada: se revisan todos. */
+      contractsToCheck = contracts;
+    } else if (contractsToCheck.length === 0) {
+      return terminar('SKIP', 'NO_CONTRACTS_IN_BLAST_RADIUS', {
+        blocking: false,
+        skipped_reason: `Ningún contrato en el radio de ${modifiedFiles.length} archivo(s)`,
+      });
     }
   }
 
+  result.contracts_protected = contractsToCheck.filter(c => c.status === STATUS.PROTECTED).length;
+  result.contracts_verified  = contractsToCheck.filter(c => c.status === STATUS.VERIFIED).length;
   result.contracts_checked = contractsToCheck.length;
 
-  // Correr solo los test files relacionados
-  const testFilesToRun = [...new Set(
-    contractsToCheck
-      .map(c => c.test_file)
-      .filter(Boolean)
-  )];
+  const sinMapping = contractsToCheck.filter(c => c.mapping_status === 'UNRESOLVED' || !c.test_name);
+  result.unverified = sinMapping.map(c => ({ contract_id: c.id, status: c.status, reason: 'UNRESOLVED_MAPPING' }));
+  const ejecutables = contractsToCheck.filter(c => !sinMapping.includes(c));
 
+  const testFilesToRun = [...new Set(ejecutables.map(c => c.test_file).filter(Boolean))];
+  if (!ejecutables.length) {
+    return terminar('UNVERIFIED', 'NO_EXECUTABLE_MAPPING', {
+      skipped_reason: `${contractsToCheck.length} contrato(s) en riesgo sin test individual mapeado`,
+    });
+  }
   if (testFilesToRun.length === 0 && opts.sinSuiteCompleta) {
-    result.passed = true;
-    result.skipped_reason =
-      `${contractsToCheck.length} contrato(s) en riesgo sin archivo de test mapeado; ` +
-      'no se corre la suite completa desde el post-cycle';
-    return result;
+    return terminar('UNVERIFIED', 'NO_TEST_FILE_MAPPED', {
+      skipped_reason: 'Contratos en riesgo sin archivo de test; el post-cycle no corre la suite completa',
+    });
   }
 
-  let testOutput = '';
-  if (testFilesToRun.length > 0) {
-    testOutput = runSpecificTests(projectRoot, testFilesToRun);
-  } else {
-    // Sin test files mapeados → correr suite completa
-    testOutput = runTests(projectRoot);
+  const ejecucion = runTestsResult(projectRoot, testFilesToRun);
+  if (ejecucion.status === 'ERROR' || ejecucion.status === 'UNVERIFIED') {
+    return terminar(ejecucion.status, 'RUNNER_' + (ejecucion.reason_code || ejecucion.status), {
+      skipped_reason: (ejecucion.failures || []).join('; ').slice(0, 300),
+    });
   }
 
-  const passingTests = new Set(extractPassingTests(testOutput));
-  const failingTests = new Set(extractFailingTests(testOutput));
+  const tests = ejecucion.tests || [];
+  const estadoDe = (contract) => {
+    const candidatos = tests.filter(t => t.test_name === contract.test_name
+      && (!contract.test_file || !t.test_file || path.normalize(t.test_file) === path.normalize(contract.test_file)));
+    if (candidatos.some(t => t.status === 'fail')) return 'fail';
+    if (candidatos.some(t => t.status === 'pass')) return 'pass';
+    return 'missing';
+  };
 
-  // Verificar cada contrato
-  for (const contract of contractsToCheck) {
-    const testName = contract.test_name || contract.name;
-    const isFailing = failingTests.has(testName) ||
-                      [...failingTests].some(t => t.includes(testName) || testName.includes(t));
-
-    if (isFailing) {
-      result.passed = false;
+  for (const contract of ejecutables) {
+    const estado = estadoDe(contract);
+    if (estado === 'fail') {
       result.violations.push({
         contract_id: contract.id,
         contract_name: contract.name,
         module: contract.module,
         status: contract.status,
-        test: testName,
+        test: contract.test_name,
         severity: contract.status === STATUS.PROTECTED ? 'CRITICAL' : 'HIGH',
         message: `${contract.status.toUpperCase()} contract broken: ${contract.name} (${contract.module})`,
       });
-
-      // Registrar la violación en DB
-      recordContractFailure(db, contract.id, cicloId,
-        `Preservation Gate violation in cycle ${cicloId}`);
-    } else if (passingTests.has(testName) ||
-               [...passingTests].some(t => t.includes(testName))) {
-      // Contrato pasó → actualizar
-      upsertContract(db, { id: contract.id, module: contract.module, name: contract.name }, cicloId);
+      recordContractFailure(db, contract.id, cicloId, `Preservation Gate violation in cycle ${cicloId}`);
+    } else if (estado === 'missing') {
+      result.unverified.push({ contract_id: contract.id, status: contract.status, reason: 'TEST_NOT_IN_OUTPUT' });
     }
   }
 
-  return result;
+  const subject = ejecucion.gate && ejecucion.gate.subject_hash;
+  result.gate = createGateResult({
+    gate: 'preservation',
+    status: result.violations.length ? 'FAIL' : (result.unverified.length ? 'UNVERIFIED' : 'PASS'),
+    reason_code: result.violations.length ? 'CONTRACT_BROKEN' : (result.unverified.length ? 'CONTRACT_WITHOUT_EVIDENCE' : null),
+    cycle_id: cicloId,
+    subject_hash: subject,
+    evidence: ejecucion.gate ? ejecucion.gate.evidence : [],
+  });
+
+  if (result.violations.length) return terminar('FAIL', 'CONTRACT_BROKEN');
+  if (result.unverified.length) return terminar('UNVERIFIED', 'CONTRACT_WITHOUT_EVIDENCE');
+  return terminar(result.gate.status, result.gate.reason_code);
 }
 
 // ─── BLAST RADIUS ────────────────────────────────────────────────────────────
@@ -532,44 +563,13 @@ function runPreservationGate(db, projectRoot, cicloId, modifiedFiles = [], opts 
  * Calcula cuántos contratos verificados están en riesgo dado un set de archivos.
  * Usa el AST graph para propagar dependencias.
  */
-function getContractsInBlastRadius(db, modifiedFiles, allContracts) {
-  const atRisk = [];
-
-  // Obtener todos los archivos que dependen de los modificados (via AST)
-  const affectedFiles = new Set(modifiedFiles);
-  try {
-    for (const file of modifiedFiles) {
-      const dependents = db.prepare(`
-        SELECT DISTINCT desde_entidad FROM relaciones_semanticas
-        WHERE (hacia_entidad LIKE ? OR hacia_entidad = ?)
-          AND tipo IN ('depende_de', 'importa', 'usa', 'llama')
-          AND (invalid_at IS NULL OR invalid_at = '')
-      `).all(`%${path.basename(file)}%`, file);
-
-      dependents.forEach(d => affectedFiles.add(d.desde_entidad));
-    }
-  } catch {}
-
-  // Mapear a contratos
-  for (const contract of allContracts) {
-    const sourceFiles = (() => {
-      try { return JSON.parse(contract.source_files || '[]'); } catch { return []; }
-    })();
-
-    const testFile = contract.test_file || '';
-
-    // Contrato está en riesgo si:
-    // 1. Su test file fue modificado
-    // 2. Alguno de sus source files fue modificado
-    // 3. Algún archivo del blast radius toca su módulo
-    const isAtRisk =
-      modifiedFiles.some(f => testFile.includes(path.basename(f)) || f.includes(testFile)) ||
-      sourceFiles.some(sf => affectedFiles.has(sf) || modifiedFiles.some(m => sf.includes(path.basename(m)))) ||
-      [...affectedFiles].some(af => af.toLowerCase().includes(contract.module.toLowerCase()));
-
-    if (isAtRisk) atRisk.push(contract);
-  }
-
+/* Cierre transitivo exacto (blast-radius.cjs). El arreglo devuelto lleva
+   `.analisis` con la cobertura: un radio vacío con huecos no es "nada en riesgo". */
+function getContractsInBlastRadius(db, modifiedFiles, allContracts, projectRoot) {
+  const br = require('./blast-radius.cjs');
+  const analisis = br.analizar(db, projectRoot || process.cwd(), modifiedFiles, { contracts: allContracts });
+  const atRisk = analisis.contracts.slice();
+  atRisk.analisis = analisis;
   return atRisk;
 }
 
@@ -582,19 +582,24 @@ function getBlastRadiusReport(db, projectRoot, targetFile) {
     contracts = db.prepare(`
       SELECT * FROM verified_contracts WHERE status IN ('protected', 'verified')
     `).all();
-  } catch { return { file: targetFile, contracts_at_risk: 0, severity: 'LOW', contracts: [] }; }
+  } catch (e) { return { file: targetFile, contracts_at_risk: 0, severity: 'UNKNOWN', complete: false, reason_code: 'CONTRACTS_QUERY_FAILED', error: e.message, contracts: [] }; }
 
-  const atRisk = getContractsInBlastRadius(db, [targetFile], contracts);
+  const atRisk = getContractsInBlastRadius(db, [targetFile], contracts, projectRoot);
+  const a = atRisk.analisis;
 
-  const severity = atRisk.length <= BLAST_THRESHOLDS.LOW ? 'LOW'
+  let severity = atRisk.length <= BLAST_THRESHOLDS.LOW ? 'LOW'
     : atRisk.length <= BLAST_THRESHOLDS.MEDIUM ? 'MEDIUM'
     : atRisk.length <= BLAST_THRESHOLDS.HIGH ? 'HIGH'
     : 'CRITICAL';
+  if (severity === 'LOW' && !a.complete) severity = 'UNKNOWN';
 
   return {
     file: targetFile,
     contracts_at_risk: atRisk.length,
     severity,
+    complete: a.complete,
+    coverage: a.coverage,
+    affected_files: a.affected.map((n) => n.file),
     protected_contracts: atRisk.filter(c => c.status === STATUS.PROTECTED).length,
     verified_contracts: atRisk.filter(c => c.status === STATUS.VERIFIED).length,
     contracts: atRisk.map(c => ({
@@ -605,6 +610,8 @@ function getBlastRadiusReport(db, projectRoot, targetFile) {
     })),
     recommendation: severity === 'LOW'
       ? 'Safe to modify — minimal contract risk'
+      : severity === 'UNKNOWN'
+        ? 'Partial index — low risk NOT proven; reindex (akdd ast) or run the full suite'
       : severity === 'MEDIUM'
         ? 'Proceed with caution — run preservation gate after changes'
         : severity === 'HIGH'
@@ -655,34 +662,86 @@ function ingestFromCycle(db, projectRoot, cicloId, testOutput) {
 
 // ─── TEST RUNNERS ─────────────────────────────────────────────────────────────
 
-function runTests(projectRoot) {
-  const commands = ['npm test -- --passWithNoTests', 'npx jest --passWithNoTests', 'npx vitest run', 'npm run test'];
-  for (const cmd of commands) {
-    try {
-      const out = execSync(cmd, {
-        cwd: projectRoot, stdio: 'pipe', timeout: 120000
-      }).toString();
-      return out;
-    } catch (e) {
-      const out = (e.stdout?.toString() || '') + (e.stderr?.toString() || '');
-      if (out.length > 100) return out; // test output even if exit code != 0
-    }
+/**
+ * El mismo runner del TDD gate: comando declarado del proyecto, sin Jest
+ * fijo ni --passWithNoTests. Devuelve el resultado completo, no solo texto.
+ */
+function runTestsResult(projectRoot, testFiles) {
+  const tdd = require('./tdd-gate.cjs');
+  const command = tdd.detectTestCommand(projectRoot);
+  if (!command) {
+    return {
+      status: 'UNVERIFIED', reason_code: 'NO_TEST_COMMAND', allPassed: false,
+      output: '', tests: [], failures: ['sin comando de tests declarado'],
+    };
   }
-  return '';
+  return tdd.runTests(command, projectRoot, testFiles && testFiles.length ? testFiles : null);
+}
+
+function runTests(projectRoot) {
+  return runTestsResult(projectRoot, null).output || '';
 }
 
 function runSpecificTests(projectRoot, testFiles) {
-  if (!testFiles || testFiles.length === 0) return runTests(projectRoot);
+  return runTestsResult(projectRoot, testFiles).output || '';
+}
 
-  const fileList = testFiles.map(f => `"${f}"`).join(' ');
-  try {
-    const out = execSync(`npx jest ${fileList} --passWithNoTests`, {
-      cwd: projectRoot, stdio: 'pipe', timeout: 120000
-    }).toString();
-    return out;
-  } catch (e) {
-    return (e.stdout?.toString() || '') + (e.stderr?.toString() || '');
+function columnas(db, tabla) {
+  try { return db.prepare(`PRAGMA table_info(${tabla})`).all().map((c) => c.name); }
+  catch { return []; }
+}
+
+function esquemaPorTestListo(db) {
+  const cols = columnas(db, 'verified_contracts');
+  const ok = ['test_id', 'runner_id', 'runner_command', 'mapping_status', 'last_execution_id'].every((c) => cols.includes(c));
+  if (!ok) return false;
+  try { db.prepare('SELECT 1 FROM contract_executions LIMIT 1').all(); return true; } catch { return false; }
+}
+
+/**
+ * Migración explícita v2 del Contract Guard. Solo `contract-guard.cjs migrate`
+ * la corre. Los contratos viejos atados a "npm test" conservan historial y
+ * nivel, y quedan UNRESOLVED hasta que un test real los respalde.
+ */
+function migrateSchemaV2(db) {
+  migrateSchema(db);
+  const cols = columnas(db, 'verified_contracts');
+  const nuevas = [
+    ['test_id', 'TEXT'],
+    ['runner_id', 'TEXT'],
+    ['runner_command', 'TEXT'],
+    ['mapping_status', "TEXT DEFAULT 'RESOLVED'"],
+    ['last_execution_id', 'TEXT'],
+  ];
+  for (const [nombre, tipo] of nuevas) {
+    if (!cols.includes(nombre)) db.exec(`ALTER TABLE verified_contracts ADD COLUMN ${nombre} ${tipo}`);
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS contract_executions (
+      contract_id  TEXT NOT NULL,
+      execution_id TEXT NOT NULL,
+      subject_hash TEXT,
+      status       TEXT NOT NULL,
+      created_at   TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (contract_id, execution_id)
+    )
+  `);
+  const legacy = db.prepare(`
+    UPDATE verified_contracts
+       SET mapping_status = 'UNRESOLVED',
+           runner_command = COALESCE(runner_command, test_file),
+           test_file = CASE WHEN test_file LIKE '% %' OR test_file IN ('npm test','pytest') THEN NULL ELSE test_file END
+     WHERE test_id IS NULL
+       AND (test_file IS NULL OR test_file LIKE 'npm %' OR test_file LIKE 'npx %' OR test_file IN ('pytest')
+            OR name LIKE '% tests (%/%)')
+  `).run();
+  return { status: 'APPLIED', unresolved: legacy && legacy.changes != null ? legacy.changes : null };
+}
+
+function listUnresolved(db) {
+  try {
+    return db.prepare("SELECT id, module, name, status, runner_command FROM verified_contracts WHERE mapping_status = 'UNRESOLVED'").all();
+  } catch { return []; }
 }
 
 function extractPassingTests(output) {
@@ -750,8 +809,17 @@ if (require.main === module) {
 
   let db;
   try {
-    db = openDB(projectRoot);
-    migrateSchema(db);
+    const dbPath = path.join(projectRoot, '.agentic/memoria.db');
+    if (cmd === 'migrate') {
+      const dryRun = args.includes('--dry-run');
+      const res = require('./db-adapter.cjs').migrate(dbPath, {
+        dryRun,
+        run: (wdb) => migrateSchemaV2(wdb),
+      });
+      console.log(dryRun ? 'Dry-run: no se escribió nada' : `✅ Contract Guard v2 aplicado (${JSON.stringify(res)})`);
+      process.exit(0);
+    }
+    db = openDB(projectRoot, { readOnly: ['status', 'list', 'blast', 'unresolved'].includes(cmd) });
   } catch (e) {
     console.error('[CONTRACT] DB error:', e.message);
     process.exit(1);
@@ -794,7 +862,15 @@ if (require.main === module) {
       console.log(`  Contratos en riesgo: ${report.contracts_at_risk}`);
       console.log(`  Severidad: ${report.severity}`);
       console.log(`  Protected: ${report.protected_contracts} | Verified: ${report.verified_contracts}`);
+      if (report.affected_files) console.log(`  Archivos alcanzados (transitivo): ${report.affected_files.length}`);
+      if (report.coverage && !report.complete) {
+        const u = report.coverage.unknown.map((x) => `${x.file} (${x.reason})`);
+        if (u.length) console.log(`  Sin cobertura: ${u.slice(0, 10).join(', ')}${u.length > 10 ? ` … +${u.length - 10}` : ''}`);
+        if (report.coverage.stale.length) console.log(`  Índice viejo: ${report.coverage.stale.slice(0, 10).join(', ')}`);
+        if (report.coverage.truncated) console.log(`  Recorrido cortado: ${report.coverage.truncated}`);
+      }
       console.log(`  → ${report.recommendation}\n`);
+      if (report.severity === 'CRITICAL') process.exitCode = 1;
       break;
     }
 
@@ -802,17 +878,12 @@ if (require.main === module) {
       const modifiedFiles = args;
       console.log('\n[CONTRACT] Corriendo Preservation Gate...');
       const result = runPreservationGate(db, projectRoot, `manual-${Date.now()}`, modifiedFiles);
-      if (result.passed) {
-        console.log(`\n  ✅ Preservation Gate PASSED`);
-        console.log(`  ${result.contracts_checked} contratos verificados`);
-        if (result.skipped_reason) console.log(`  (${result.skipped_reason})`);
-      } else {
-        console.log(`\n  ❌ Preservation Gate FAILED — ${result.violations.length} violation(s)\n`);
-        result.violations.forEach(v => {
-          console.log(`  [${v.severity}] ${v.contract_id}: ${v.message}`);
-        });
-      }
-      process.exit(result.passed ? 0 : 1);
+      console.log(`\n  Preservation Gate: ${result.status}${result.reason_code ? ' (' + result.reason_code + ')' : ''}`);
+      console.log(`  ${result.contracts_checked} contrato(s) revisados`);
+      if (result.skipped_reason) console.log(`  (${result.skipped_reason})`);
+      result.violations.forEach(v => console.log(`  [${v.severity}] ${v.contract_id}: ${v.message}`));
+      result.unverified.forEach(u => console.log(`  [UNVERIFIED] ${u.contract_id}: ${u.reason}`));
+      process.exit(result.blocking ? 1 : 0);
     }
 
     case 'promote': {
@@ -832,71 +903,105 @@ if (require.main === module) {
       const module = args[0];
       console.log(`\n[CONTRACT] Running preservation gate${module ? ` for ${module}` : ''}...`);
       const result = runPreservationGate(db, projectRoot, `verify-${Date.now()}`, []);
-      console.log(result.passed
-        ? `\n✅ All ${result.contracts_checked} contracts passing\n`
-        : `\n❌ ${result.violations.length} contracts broken:\n${result.violations.map(v => `  - ${v.contract_name}`).join('\n')}\n`
-      );
+      console.log(`\nPreservation: ${result.status}${result.reason_code ? ' (' + result.reason_code + ')' : ''} — ${result.contracts_checked} contrato(s)`);
+      result.violations.forEach(v => console.log(`  - roto: ${v.contract_name}`));
+      result.unverified.forEach(u => console.log(`  - sin evidencia: ${u.contract_id} (${u.reason})`));
       break;
     }
 
-    case 'migrate': {
-      migrateSchema(db);
-      console.log('✅ Schema migrated');
+    case 'unresolved': {
+      const rows = listUnresolved(db);
+      console.log(`\nContratos sin test individual mapeado (${rows.length}):`);
+      rows.forEach(r => console.log(`  [${r.status}] ${r.id} ${r.module}: ${r.name}`));
       break;
     }
 
     default:
-      console.log('Uso: node contract-guard.cjs [status | list [module] | blast <file> | gate [files...] | verify | promote | migrate]');
+      console.log('Uso: node contract-guard.cjs [status | list [module] | blast <file> | gate [files...] | verify | promote | unresolved | migrate [--dry-run]]');
   }
 }
 
 
 // ─── REGISTER PASSING TESTS (called by TDD Gate automatically) ───────────────
 
+/**
+ * Un contrato por test individual. La misma ejecución (execution_id) no suma
+ * dos veces; la promoción cuenta ejecuciones distintas válidas del mismo test.
+ * Sin el esquema v2 no escribe: devuelve UPGRADE_REQUIRED.
+ */
 function registerPassingTests(db, params) {
-  const { passed, total, area, command } = params || {};
-  if (!db || !passed || passed === 0) return;
+  const p = params || {};
+  const area = p.area || 'global';
+  const tests = Array.isArray(p.tests) ? p.tests : [];
+  const salida = { status: 'SKIP', reason_code: null, created: 0, updated: 0, duplicates: 0 };
+  if (!db) return Object.assign(salida, { status: 'ERROR', reason_code: 'NO_DB' });
+  if (!p.execution_id) return Object.assign(salida, { status: 'UNVERIFIED', reason_code: 'NO_EXECUTION_ID' });
+  const pasados = tests.filter((t) => t.status === 'pass');
+  if (!pasados.length) return Object.assign(salida, { reason_code: 'NO_INDIVIDUAL_TESTS' });
+  if (!esquemaPorTestListo(db)) return Object.assign(salida, { status: 'UPGRADE_REQUIRED', reason_code: 'CONTRACT_SCHEMA_V2' });
 
-  try {
-    // Use same schema as migrateSchema — verification_count not pass_count
-    migrateSchema(db);
+  const { testId } = require('./test-results.cjs');
+  const runnerId = p.runner_id || p.command || null;
+  const registrar = () => {
+    for (const t of pasados) {
+      const tid = testId(runnerId, t);
+      const id = area.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 6) + '-T' + tid;
+      const ins = db.prepare(`
+        INSERT OR IGNORE INTO contract_executions (contract_id, execution_id, subject_hash, status)
+        VALUES (?, ?, ?, 'pass')
+      `).run(id, p.execution_id, p.subject_hash || null);
+      if (ins && ins.changes === 0) { salida.duplicates++; continue; }
 
-    const contractId = `contract_${area || 'global'}_${Date.now()}`;
-    const existing = db.prepare(
-      "SELECT id, verification_count, consecutive_passes, failure_count, status FROM verified_contracts WHERE module = ? AND status != 'invalidated' LIMIT 1"
-    ).get(area || 'global');
-
-    if (existing) {
-      const newCount  = (existing.verification_count || 0) + 1;
-      const newConsec = (existing.consecutive_passes || 0) + 1;
-      const failures  = existing.failure_count || 0;
-      // Promover por pases CONSECUTIVOS (no por el total acumulado, que nunca decrece).
-      // 'protected' solo si además no acumula fallos.
-      let newStatus = 'candidate';
-      if (newConsec >= 7 && failures === 0) newStatus = 'protected';
-      else if (newConsec >= 3) newStatus = 'verified';
-      db.prepare(`
-        UPDATE verified_contracts SET
-          verification_count = ?,
-          consecutive_passes = ?,
-          status = ?,
-          last_verified = datetime('now'),
-          updated_at = datetime('now')
-        WHERE id = ?
-      `).run(newCount, newConsec, newStatus, existing.id);
-    } else {
-      db.prepare(`
-        INSERT OR IGNORE INTO verified_contracts
-          (id, name, test_file, module, status, verification_count, consecutive_passes, last_verified)
-        VALUES (?, ?, ?, ?, 'candidate', 1, 1, datetime('now'))
-      `).run(contractId, `${area || 'global'} tests (${passed}/${total})`, command || 'npm test', area || 'global');
+      const existing = db.prepare('SELECT * FROM verified_contracts WHERE id = ?').get(id);
+      if (existing) {
+        const total = (existing.verification_count || 0) + 1;
+        const consec = (existing.consecutive_passes || 0) + 1;
+        db.prepare(`
+          UPDATE verified_contracts SET
+            verification_count = ?, consecutive_passes = ?,
+            test_id = ?, runner_id = ?, runner_command = ?, mapping_status = 'RESOLVED',
+            last_execution_id = ?, last_verified = datetime('now'), updated_at = datetime('now')
+          WHERE id = ?
+        `).run(total, consec, tid, runnerId, p.command || null, p.execution_id, id);
+        autoPromote(db, id, consec, total, existing.failure_count || 0);
+        salida.updated++;
+      } else {
+        db.prepare(`
+          INSERT INTO verified_contracts
+            (id, module, name, description, test_file, test_name, test_id, runner_id, runner_command,
+             mapping_status, last_execution_id, verification_count, consecutive_passes, status, last_verified)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED', ?, 1, 1, 'candidate', datetime('now'))
+        `).run(id, area, t.test_name, 'Test individual: ' + t.test_name, t.test_file || null, t.test_name,
+          tid, runnerId, p.command || null, p.execution_id);
+        salida.created++;
+      }
     }
-  } catch(e) { /* silent */ }
+  };
+  if (typeof db.transaction === 'function') {
+    db.transaction(registrar)();
+  } else {
+    db.exec('BEGIN');
+    try { registrar(); db.exec('COMMIT'); }
+    catch (e) { try { db.exec('ROLLBACK'); } catch { /* el error original manda */ } throw e; }
+  }
+  salida.status = 'PASS';
+  return salida;
+}
+
+function schemaDisponible(db) {
+  try {
+    return !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='verified_contracts'").get();
+  } catch { return false; }
 }
 
 module.exports = {
   registerPassingTests,
   migrateSchema,
+  migrateSchemaV2,
+  schemaDisponible,
+  esquemaPorTestListo,
+  listUnresolved,
+  runTestsResult,
   ingestFromCycle,
   runPreservationGate,
   getBlastRadiusReport,

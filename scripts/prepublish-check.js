@@ -47,6 +47,10 @@ if (!/memoria\.db/.test(npmignore)) {
   errors.push('.npmignore no excluye .agentic/memoria.db — riesgo de publicar datos del proyecto.');
 }
 
+// 5. Versión única: framework.json, servidor MCP y derivados sin deriva
+const deriva = require('./sync-version.cjs').check(ROOT);
+for (const p of deriva.problemas) errors.push('Deriva de versión/documentos: ' + p + ' (corre: node scripts/sync-version.cjs)');
+
 if (errors.length) {
   console.error('\n⛔ prepublish-check FALLÓ — publicación bloqueada:\n');
   errors.forEach(e => console.error('   • ' + e));

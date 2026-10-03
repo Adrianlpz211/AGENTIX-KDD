@@ -63,6 +63,10 @@ function openDB(projectRoot) {
       updated_at     TEXT DEFAULT (datetime('now'))
     )`);
   } catch {}
+  try {
+    const cols = db.prepare('PRAGMA table_info(file_fingerprints)').all().map(c => c.name);
+    if (cols.length && !cols.includes('body_hash')) db.exec('ALTER TABLE file_fingerprints ADD COLUMN body_hash TEXT');
+  } catch {}
   return db;
 }
 
@@ -102,6 +106,95 @@ function structuralSignature(content, filePath) {
   return sha256([...imports, ...symbols].join('\n'));
 }
 
+const LLAVES = /\.(js|jsx|mjs|cjs|ts|tsx|java|cs|go|php|c|h|cc|cpp|hpp|rs|kt|swift|scala|dart)$/i;
+const ALMOHADILLA = /\.(py|rb|sh|bash|r)$/i;
+
+/**
+ * Huella del CUERPO: la secuencia de tokens sin comentarios ni espacios.
+ * Literales, operadores, condiciones y llamadas cuentan; formato y
+ * comentarios no. En Python/Ruby la indentación de cada línea es un token
+ * (allí cambia el significado).
+ * → { ok:true, hash } | { ok:false, reason: 'UNSUPPORTED'|'PARSE_FAILED' }
+ *
+ * Que dos versiones tengan la misma huella dice que el texto del programa es
+ * el mismo; no certifica comportamiento ni seguridad.
+ */
+function bodyFingerprint(content, filePath) {
+  const f = String(filePath || '');
+  const llaves = LLAVES.test(f);
+  const hash = ALMOHADILLA.test(f);
+  if (!llaves && !hash) return { ok: false, reason: 'UNSUPPORTED' };
+  const s = String(content);
+  const tokens = [];
+  const pila = [];
+  const pares = { ')': '(', ']': '[', '}': '{' };
+  let i = 0;
+  let inicioLinea = true;
+  let previo = '';
+  const n = s.length;
+  while (i < n) {
+    const c = s[i];
+    const d = s[i + 1];
+    if (c === '\n') { inicioLinea = true; i++; continue; }
+    if (inicioLinea && hash) {
+      let j = i;
+      while (j < n && (s[j] === ' ' || s[j] === '\t')) j++;
+      if (j < n && s[j] !== '\n' && s[j] !== '\r' && s[j] !== '#') tokens.push('\u0001' + s.slice(i, j).replace(/\t/g, '    ').length);
+      inicioLinea = false;
+      i = j;
+      continue;
+    }
+    inicioLinea = false;
+    if (/\s/.test(c)) { i++; continue; }
+    if (hash && c === '#') { while (i < n && s[i] !== '\n') i++; continue; }
+    if (llaves && c === '/' && d === '/') { while (i < n && s[i] !== '\n') i++; continue; }
+    if (llaves && c === '/' && d === '*') {
+      const fin = s.indexOf('*/', i + 2);
+      if (fin === -1) return { ok: false, reason: 'PARSE_FAILED' };
+      i = fin + 2; continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      const triple = hash && s.slice(i, i + 3) === c.repeat(3);
+      const cierre = triple ? c.repeat(3) : c;
+      let j = i + cierre.length;
+      for (;;) {
+        if (j >= n) return { ok: false, reason: 'PARSE_FAILED' };
+        if (s[j] === '\\') { j += 2; continue; }
+        if (!triple && c !== '`' && s[j] === '\n') return { ok: false, reason: 'PARSE_FAILED' };
+        if (s.startsWith(cierre, j)) break;
+        j++;
+      }
+      tokens.push(s.slice(i, j + cierre.length));
+      i = j + cierre.length; previo = 'str'; continue;
+    }
+    if (llaves && c === '/' && (previo === '' || /^[(,=:[!&|?{};+\-*%<>~^]$/.test(previo) || previo === 'return')) {
+      let j = i + 1;
+      let clase = false;
+      for (;;) {
+        if (j >= n || s[j] === '\n') return { ok: false, reason: 'PARSE_FAILED' };
+        if (s[j] === '\\') { j += 2; continue; }
+        if (s[j] === '[') clase = true;
+        else if (s[j] === ']') clase = false;
+        else if (s[j] === '/' && !clase) break;
+        j++;
+      }
+      j++;
+      while (j < n && /[a-z]/i.test(s[j])) j++;
+      tokens.push(s.slice(i, j));
+      i = j; previo = 're'; continue;
+    }
+    const palabra = s.slice(i).match(/^[\w$]+/);
+    if (palabra) { tokens.push(palabra[0]); previo = palabra[0]; i += palabra[0].length; continue; }
+    if ('([{'.includes(c)) pila.push(c);
+    if (')]}'.includes(c)) {
+      if (pila.pop() !== pares[c]) return { ok: false, reason: 'PARSE_FAILED' };
+    }
+    tokens.push(c); previo = c; i++;
+  }
+  if (pila.length) return { ok: false, reason: 'PARSE_FAILED' };
+  return { ok: true, hash: sha256(tokens.join('\u0000')) };
+}
+
 /**
  * Fingerprint completo de un archivo tal como está AHORA en disco.
  * → { file, contentHash, structuralSig, supported, missing }
@@ -121,11 +214,14 @@ function fingerprintFile(filePath, projectRoot) {
 
   const contentHash = sha256(content);
   const sig = structuralSignature(content, fullPath);
+  const body = bodyFingerprint(content, fullPath);
 
   return {
     file: relPath,
     contentHash,
     structuralSig: sig,
+    bodyHash: body.ok ? body.hash : null,
+    bodyReason: body.ok ? null : body.reason,
     supported: sig !== null,
     missing: false,
   };
@@ -141,11 +237,12 @@ function snapshotFiles(files, projectRoot, db) {
 
   let saved = 0, skipped = 0;
   const upsert = safe(() => db.prepare(`
-    INSERT INTO file_fingerprints (file, content_hash, structural_sig, supported, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO file_fingerprints (file, content_hash, structural_sig, body_hash, supported, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(file) DO UPDATE SET
       content_hash = excluded.content_hash,
       structural_sig = excluded.structural_sig,
+      body_hash = excluded.body_hash,
       supported = excluded.supported,
       updated_at = excluded.updated_at
   `));
@@ -154,7 +251,7 @@ function snapshotFiles(files, projectRoot, db) {
   for (const f of files) {
     const fp = fingerprintFile(f, projectRoot);
     if (fp.missing) { skipped++; continue; }
-    const ok = safe(() => { upsert.run(fp.file, fp.contentHash, fp.structuralSig, fp.supported ? 1 : 0); return true; });
+    const ok = safe(() => { upsert.run(fp.file, fp.contentHash, fp.structuralSig, fp.bodyHash, fp.supported ? 1 : 0); return true; });
     if (ok) saved++; else skipped++;
   }
 
@@ -204,10 +301,21 @@ function classifyFile(filePath, projectRoot, db) {
 
   // Contenido cambió — ¿la estructura también?
   if (current.supported && stored.supported && stored.structural_sig) {
-    if (current.structuralSig === stored.structural_sig) {
-      return { file: current.file, level: 'COSMETIC', reason: 'content changed but structure (symbols/imports/signatures) identical' };
+    if (current.structuralSig !== stored.structural_sig) {
+      return { file: current.file, level: 'STRUCTURAL', reason: 'structural signature changed' };
     }
-    return { file: current.file, level: 'STRUCTURAL', reason: 'structural signature changed' };
+    /* Firma pública igual: lo que decide es el cuerpo. Sin huella del cuerpo
+       (no se pudo leer o baseline viejo) no hay certeza → UNKNOWN. */
+    if (!current.bodyHash) {
+      return { file: current.file, level: 'UNKNOWN', reason: 'body not analyzable (' + (current.bodyReason || 'PARSE_FAILED') + ')' };
+    }
+    if (!stored.body_hash) {
+      return { file: current.file, level: 'UNKNOWN', reason: 'baseline without body fingerprint — re-snapshot' };
+    }
+    if (current.bodyHash === stored.body_hash) {
+      return { file: current.file, level: 'COSMETIC', reason: 'only comments/formatting changed' };
+    }
+    return { file: current.file, level: 'SEMANTIC', reason: 'same public signature, body changed (literals/conditions/calls)' };
   }
 
   // Sin soporte de extractor → conservador
@@ -244,7 +352,8 @@ function allCosmetic(files, projectRoot) {
  *     filesToReanalyze, reason }
  */
 function classifyUpdate(classifications, totalFilesInGraph, newDirs = 0) {
-  const structural = classifications.filter(c => c.level === 'STRUCTURAL' || c.level === 'UNKNOWN');
+  /* SEMANTIC también reanaliza: las llamadas del cuerpo son aristas del grafo. */
+  const structural = classifications.filter(c => c.level === 'STRUCTURAL' || c.level === 'UNKNOWN' || c.level === 'SEMANTIC');
   const cosmetic = classifications.filter(c => c.level === 'COSMETIC');
 
   if (structural.length === 0) {
@@ -303,7 +412,7 @@ if (require.main === module) {
     case 'classify': {
       if (!args.length) { console.log('Uso: change-classifier.cjs classify <archivo...>'); break; }
       const results = args.map(f => classifyFile(f, projectRoot));
-      const icon = { NONE: '⚪', COSMETIC: '🟡', STRUCTURAL: '🔴', UNKNOWN: '❓' };
+      const icon = { NONE: '⚪', COSMETIC: '🟡', SEMANTIC: '🟠', STRUCTURAL: '🔴', UNKNOWN: '❓' };
       console.log('');
       results.forEach(r => console.log(`  ${icon[r.level] || '?'} ${r.level.padEnd(10)} ${r.file}  — ${r.reason}`));
       const decision = classifyUpdate(results, safe(() => {
@@ -332,4 +441,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { fingerprintFile, classifyFile, allCosmetic, classifyUpdate, snapshotFiles, snapshotAll, structuralSignature };
+module.exports = { fingerprintFile, classifyFile, allCosmetic, classifyUpdate, snapshotFiles, snapshotAll, structuralSignature, bodyFingerprint };

@@ -50,7 +50,16 @@ function getOrCreateInstanceId() {
   return id;
 }
 
-const INSTANCE_ID = process.env.AGENTIC_INSTANCE_ID || getOrCreateInstanceId();
+/* Dos identidades distintas:
+   PROJECT_ID  la carpeta (persistente, la misma para todos los agentes de ella)
+   OWNER_ID    quién tiene el lock: una sesión. Los hijos que hereden
+               AKDD_OWNER_ID son el mismo dueño; otra sesión no lo es.
+   Sin AKDD_OWNER_ID se usa el actor (AKDD_ACTOR), igual que la medición de
+   tiempo: dos agentes en la misma carpeta deben declarar actores distintos. */
+const PROJECT_ID = getOrCreateInstanceId();
+const OWNER_ID = process.env.AKDD_OWNER_ID || process.env.AGENTIC_INSTANCE_ID
+  || `${PROJECT_ID}:${(process.env.AKDD_ACTOR || 'default').replace(/[^\w.-]/g, '_')}`;
+const INSTANCE_ID = OWNER_ID;
 
 // ── DB setup ─────────────────────────────────────────────────────────────────
 
@@ -75,6 +84,13 @@ function openDB() {
   // WAL mode: permite lecturas concurrentes mientras se escribe
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000'); // esperar hasta 5s si la BD está ocupada
+  /* Siempre BEGIN IMMEDIATE: con BEGIN diferido dos procesos leen "libre" a la
+     vez y los dos creen tener el lease. */
+  db.transaction = (fn) => (...args) => {
+    db.exec('BEGIN IMMEDIATE');
+    try { const r = fn(...args); db.exec('COMMIT'); return r; }
+    catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  };
   return db;
 }
 
@@ -120,6 +136,14 @@ function ensureSchema(db) {
       timeout_at   TEXT NOT NULL
     )
   `);
+  /* v2 de locks: vencimiento en epoch ms y token de fencing. Las filas viejas
+     sin expires_ms se leen desde expires_at (ISO o datetime de SQLite). */
+  for (const t of ['module_locks', 'file_locks', 'schema_lock']) {
+    const cols = db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name);
+    if (!cols.includes('expires_ms')) db.exec(`ALTER TABLE ${t} ADD COLUMN expires_ms INTEGER`);
+    if (t !== 'file_locks' && !cols.includes('fencing')) db.exec(`ALTER TABLE ${t} ADD COLUMN fencing INTEGER`);
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS lock_fencing (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)`);
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_ml_inst ON module_locks(instance_id)"); } catch {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_fl_path ON file_locks(file_path)"); } catch {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_fl_module ON file_locks(module_name)"); } catch {}
@@ -127,8 +151,18 @@ function ensureSchema(db) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const ahora = () => (process.env.AKDD_LOCK_NOW_MS ? Number(process.env.AKDD_LOCK_NOW_MS) : Date.now());
+
 function expiresAt(minutes) {
-  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+  return new Date(ahora() + minutes * 60 * 1000).toISOString();
+}
+
+/** Milisegundos de vencimiento de una fila, del formato que sea. */
+const VENCE_SQL = "COALESCE(expires_ms, CAST(strftime('%s', expires_at) AS INTEGER) * 1000)";
+
+function siguienteFencing(db) {
+  db.prepare('INSERT INTO lock_fencing (id, value) VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET value = value + 1').run();
+  return Number(db.prepare('SELECT value FROM lock_fencing WHERE id = 1').get().value);
 }
 
 function waitTimeoutAt(seconds) {
@@ -154,11 +188,14 @@ function normalizePaths(files) {
   return [...new Set(files.map(normalizePath))];
 }
 
+/* Antes se comparaba texto ISO ("…T…Z") contra datetime('now') ("… …"): la T
+   ordena después del espacio y un lock nunca vencía el mismo día. */
 function purgeExpired(db) {
-  db.prepare("DELETE FROM module_locks WHERE expires_at < datetime('now')").run();
-  db.prepare("DELETE FROM file_locks WHERE expires_at < datetime('now')").run();
-  db.prepare("DELETE FROM schema_lock WHERE expires_at < datetime('now')").run();
-  db.prepare("DELETE FROM lock_waiters WHERE timeout_at < datetime('now')").run();
+  const n = ahora();
+  db.prepare(`DELETE FROM module_locks WHERE ${VENCE_SQL} < ?`).run(n);
+  db.prepare(`DELETE FROM file_locks WHERE ${VENCE_SQL} < ?`).run(n);
+  db.prepare(`DELETE FROM schema_lock WHERE ${VENCE_SQL} < ?`).run(n);
+  db.prepare("DELETE FROM lock_waiters WHERE CAST(strftime('%s', timeout_at) AS INTEGER) * 1000 < ?").run(n);
 }
 
 // ── Deadlock detection ────────────────────────────────────────────────────────
@@ -236,33 +273,38 @@ function acquireModuleLock(db, moduleName, files = [], purpose = '') {
       return { success: false, reason: 'File conflicts', conflicts: fileConflicts };
     }
 
-    // 3. Adquirir lock de módulo
+    // 3. Adquirir lock de módulo. Mismo dueño conserva su fencing; uno nuevo
+    //    recibe uno mayor, y el anterior ya no puede confirmar nada.
     const exp = expiresAt(LOCK_TTL_MINUTES);
+    const expMs = Date.parse(exp);
+    const fencing = existingModule && existingModule.instance_id === INSTANCE_ID && existingModule.fencing
+      ? Number(existingModule.fencing) : siguienteFencing(db);
     db.prepare(`
-      INSERT INTO module_locks (module_name, instance_id, files, acquired_at, expires_at, purpose, pid)
-      VALUES (?, ?, ?, datetime('now'), ?, ?, ?)
+      INSERT INTO module_locks (module_name, instance_id, files, acquired_at, expires_at, expires_ms, fencing, purpose, pid)
+      VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
       ON CONFLICT(module_name) DO UPDATE SET
         instance_id=excluded.instance_id, files=excluded.files,
-        acquired_at=excluded.acquired_at, expires_at=excluded.expires_at,
-        purpose=excluded.purpose, pid=excluded.pid
-    `).run(moduleName, INSTANCE_ID, JSON.stringify(normalFiles), exp, purpose, process.pid);
+        acquired_at=excluded.acquired_at, expires_at=excluded.expires_at, expires_ms=excluded.expires_ms,
+        fencing=excluded.fencing, purpose=excluded.purpose, pid=excluded.pid
+    `).run(moduleName, INSTANCE_ID, JSON.stringify(normalFiles), exp, expMs, fencing, purpose, process.pid);
 
     // 4. Adquirir locks de archivos
     for (const file of normalFiles) {
       db.prepare(`
-        INSERT INTO file_locks (file_path, module_name, instance_id, acquired_at, expires_at)
-        VALUES (?, ?, ?, datetime('now'), ?)
+        INSERT INTO file_locks (file_path, module_name, instance_id, acquired_at, expires_at, expires_ms)
+        VALUES (?, ?, ?, datetime('now'), ?, ?)
         ON CONFLICT(file_path) DO UPDATE SET
           module_name=excluded.module_name, instance_id=excluded.instance_id,
-          acquired_at=excluded.acquired_at, expires_at=excluded.expires_at
-      `).run(file, moduleName, INSTANCE_ID, exp);
+          acquired_at=excluded.acquired_at, expires_at=excluded.expires_at, expires_ms=excluded.expires_ms
+      `).run(file, moduleName, INSTANCE_ID, exp, expMs);
     }
 
     // 5. Remover de waiters si estaba esperando
     db.prepare("DELETE FROM lock_waiters WHERE module_name = ? AND instance_id = ?")
       .run(moduleName, INSTANCE_ID);
 
-    return { success: true, instance_id: INSTANCE_ID, module: moduleName, files: normalFiles, expires_at: exp };
+    return { success: true, instance_id: INSTANCE_ID, owner_id: INSTANCE_ID, project_id: PROJECT_ID,
+      module: moduleName, files: normalFiles, expires_at: exp, fencing };
   });
 
   return acquire();
@@ -270,13 +312,16 @@ function acquireModuleLock(db, moduleName, files = [], purpose = '') {
 
 // ── Release module lock ───────────────────────────────────────────────────────
 
-function releaseModuleLock(db, moduleName) {
+function releaseModuleLock(db, moduleName, fencing) {
   let lockSnapshot = null;
   const release = db.transaction(() => {
     const lock = db.prepare(
       "SELECT * FROM module_locks WHERE module_name = ? AND instance_id = ?"
     ).get(moduleName, INSTANCE_ID);
     if (!lock) return { success: false, reason: `No lock owned by this instance for [${moduleName}]` };
+    if (fencing != null && Number(lock.fencing) !== Number(fencing)) {
+      return { success: false, reason: 'STALE_FENCING', current: lock.fencing };
+    }
     lockSnapshot = lock;
 
     db.prepare("DELETE FROM module_locks WHERE module_name = ? AND instance_id = ?")
@@ -352,14 +397,15 @@ function acquireSchemaLock(db, purpose = 'migration') {
       return { success: false, reason: `Schema locked by ${existing.instance_id} for ${existing.purpose}`, expires_at: existing.expires_at };
     }
     const exp = expiresAt(SCHEMA_TTL_MINUTES);
+    const fencing = siguienteFencing(db);
     db.prepare(`
-      INSERT INTO schema_lock (id, instance_id, acquired_at, expires_at, purpose, pid)
-      VALUES (1, ?, datetime('now'), ?, ?, ?)
+      INSERT INTO schema_lock (id, instance_id, acquired_at, expires_at, expires_ms, fencing, purpose, pid)
+      VALUES (1, ?, datetime('now'), ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET instance_id=excluded.instance_id,
-        acquired_at=excluded.acquired_at, expires_at=excluded.expires_at,
-        purpose=excluded.purpose, pid=excluded.pid
-    `).run(INSTANCE_ID, exp, purpose, process.pid);
-    return { success: true, instance_id: INSTANCE_ID, purpose, expires_at: exp };
+        acquired_at=excluded.acquired_at, expires_at=excluded.expires_at, expires_ms=excluded.expires_ms,
+        fencing=excluded.fencing, purpose=excluded.purpose, pid=excluded.pid
+    `).run(INSTANCE_ID, exp, Date.parse(exp), fencing, purpose, process.pid);
+    return { success: true, instance_id: INSTANCE_ID, purpose, expires_at: exp, fencing };
   });
   return acquire();
 }
@@ -418,13 +464,36 @@ function waitForLock(db, moduleName, timeoutSeconds = 300) {
 
 // ── Renew lock ────────────────────────────────────────────────────────────────
 
-function renewLock(db, moduleName) {
+/* Renovar un lock ya vencido no lo resucita: otro pudo tomarlo, o lo hará. */
+function renewLock(db, moduleName, fencing) {
   const exp = expiresAt(LOCK_TTL_MINUTES);
-  const r1 = db.prepare("UPDATE module_locks SET expires_at=? WHERE module_name=? AND instance_id=?")
-    .run(exp, moduleName, INSTANCE_ID);
-  db.prepare("UPDATE file_locks SET expires_at=? WHERE module_name=? AND instance_id=?")
-    .run(exp, moduleName, INSTANCE_ID);
-  return { success: r1.changes > 0, renewed_until: exp };
+  const expMs = Date.parse(exp);
+  return db.transaction(() => {
+    const lock = db.prepare('SELECT * FROM module_locks WHERE module_name=? AND instance_id=?').get(moduleName, INSTANCE_ID);
+    if (!lock) return { success: false, reason: 'NOT_OWNER' };
+    const vence = lock.expires_ms != null ? Number(lock.expires_ms) : Date.parse(String(lock.expires_at).replace(' ', 'T') + (String(lock.expires_at).includes('Z') ? '' : 'Z'));
+    if (vence < ahora()) return { success: false, reason: 'EXPIRED' };
+    if (fencing != null && Number(lock.fencing) !== Number(fencing)) return { success: false, reason: 'STALE_FENCING' };
+    db.prepare('UPDATE module_locks SET expires_at=?, expires_ms=? WHERE module_name=? AND instance_id=?')
+      .run(exp, expMs, moduleName, INSTANCE_ID);
+    db.prepare('UPDATE file_locks SET expires_at=?, expires_ms=? WHERE module_name=? AND instance_id=?')
+      .run(exp, expMs, moduleName, INSTANCE_ID);
+    return { success: true, renewed_until: exp, fencing: lock.fencing };
+  })();
+}
+
+/**
+ * Antes de confirmar un cambio: ¿este dueño, con este fencing, sigue teniendo
+ * el lease vigente? Un dueño vencido o desplazado no confirma.
+ */
+function confirmar(db, moduleName, fencing) {
+  const lock = db.prepare('SELECT * FROM module_locks WHERE module_name=?').get(moduleName);
+  if (!lock) return { ok: false, reason: 'NO_LOCK' };
+  if (lock.instance_id !== INSTANCE_ID) return { ok: false, reason: 'NOT_OWNER' };
+  if (Number(lock.fencing) !== Number(fencing)) return { ok: false, reason: 'STALE_FENCING' };
+  const vence = lock.expires_ms != null ? Number(lock.expires_ms) : Date.parse(lock.expires_at);
+  if (!(vence >= ahora())) return { ok: false, reason: 'EXPIRED' };
+  return { ok: true, fencing: Number(lock.fencing) };
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -509,6 +578,7 @@ if (require.main === module) {
         console.log(`✅ Lock acquired: [${mod}]`);
         if (files.length) console.log(`   Files: ${result.files.join(', ')}`);
         console.log(`   Expires: ${result.expires_at}`);
+        console.log(`   Owner: ${result.owner_id} · fencing: ${result.fencing}`);
       } else {
         console.error(`🔴 DENIED: ${result.reason}`);
         if (result.deadlock) console.error(`   💀 DEADLOCK: ${result.deadlock_cycle}`);
@@ -520,7 +590,7 @@ if (require.main === module) {
     case 'release': {
       const mod = opts.module || opts.m;
       if (!mod) { console.error('--module required'); process.exit(1); }
-      const r = releaseModuleLock(db, mod);
+      const r = releaseModuleLock(db, mod, opts.fencing);
       if (r.success) console.log(`✅ Released: [${mod}]`);
       else { console.error(`🔴 ${r.reason}`); process.exit(1); }
       break;
@@ -557,9 +627,17 @@ if (require.main === module) {
     case 'renew': {
       const mod = opts.module || opts.m;
       if (!mod) { console.error('--module required'); process.exit(1); }
-      const r = renewLock(db, mod);
+      const r = renewLock(db, mod, opts.fencing);
       if (r.success) console.log(`✅ Renewed [${mod}] until ${r.renewed_until}`);
-      else { console.error('🔴 No lock to renew'); process.exit(1); }
+      else { console.error(`🔴 No se renovó: ${r.reason}`); process.exit(1); }
+      break;
+    }
+    case 'confirm': {
+      const mod = opts.module || opts.m;
+      if (!mod || opts.fencing == null) { console.error('--module y --fencing requeridos'); process.exit(1); }
+      const r = confirmar(db, mod, opts.fencing);
+      if (r.ok) console.log(`✅ Lease vigente [${mod}] · fencing ${r.fencing}`);
+      else { console.error(`🔴 ${r.reason}`); process.exit(1); }
       break;
     }
     case 'wait': {
@@ -582,7 +660,7 @@ if (require.main === module) {
 module.exports = {
   acquireModuleLock, releaseModuleLock, releaseAll,
   acquireSchemaLock, releaseSchemaLock,
-  checkFiles, renewLock, waitForLock,
+  checkFiles, renewLock, waitForLock, confirmar,
   getStatus, detectDeadlock, normalizePath,
-  INSTANCE_ID,
+  INSTANCE_ID, OWNER_ID, PROJECT_ID,
 };

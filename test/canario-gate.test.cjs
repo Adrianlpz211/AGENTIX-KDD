@@ -90,9 +90,12 @@ test('post-cycle lo invoca de verdad', () => {
     'debe leer el veredicto que el gate realmente devuelve, no uno inventado');
 });
 
-test('el pre-commit también lo corre', () => {
+test('el commit también lo corre (commit-msg, con el mensaje de ESE commit)', () => {
   const hook = fs.readFileSync(
-    path.join(RAIZ, '.agentic', 'grafo', 'git-hooks', 'pre-commit'), 'utf8');
-  assert.match(hook, /canario-gate\.cjs/,
+    path.join(RAIZ, '.agentic', 'grafo', 'git-hooks', 'commit-msg'), 'utf8');
+  assert.match(hook, /RUNNER="\$ROOT\/\.agentic\/grafo\/hook-runner\.cjs"[\s\S]*exec node "\$RUNNER" commit-msg "\$@"/,
     'el commit es el momento en que el arreglo entra al repo: ahí tiene que mirar');
+  const runner = fs.readFileSync(path.join(RAIZ, '.agentic', 'grafo', 'hook-runner.cjs'), 'utf8');
+  assert.match(runner, /canario-gate\.cjs/);
+  assert.match(runner, /veredicto === 'STOP'/, 'el STOP del canario bloquea el commit');
 });

@@ -3,7 +3,7 @@
 const fs   = require('fs-extra');
 const path = require('path');
 const os   = require('os');
-const { execSync } = require('child_process');
+const { herramienta } = require('./run-safe');
 const chalk = require('chalk');
 
 /**
@@ -52,7 +52,8 @@ async function mcpSetup(projectPath, opts = {}) {
 
     let cursorConfig = {};
     if (fs.existsSync(cursorMcpFile)) {
-      try { cursorConfig = JSON.parse(fs.readFileSync(cursorMcpFile, 'utf8')); } catch {}
+      cursorConfig = JSON.parse(fs.readFileSync(cursorMcpFile, 'utf8'));
+      if (!cursorConfig || typeof cursorConfig !== 'object' || Array.isArray(cursorConfig)) throw new Error('Configuración MCP inválida: se conserva sin sobrescribir');
     }
     if (!cursorConfig.mcpServers) cursorConfig.mcpServers = {};
 
@@ -75,19 +76,14 @@ async function mcpSetup(projectPath, opts = {}) {
   if (claudeCliAvailable) {
     try {
       // claude mcp add agentic-kdd -- node "/ruta/exacta/mcp-server.cjs"
-      execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
-        stdio: 'pipe',
-        cwd: projectPath,
-      });
+      herramienta('claude', ['mcp', 'add', '--env', 'PROJECT_ROOT=' + path.resolve(projectPath), 'agentic-kdd', '--', 'node', serverPath], { cwd: projectPath });
       results.claude_code = true;
       console.log(chalk.green('  ✓ Claude Code        →  registrado via "claude mcp add"'));
     } catch (e) {
       // Puede fallar si ya existe — intentar actualizar
       try {
-        execSync(`claude mcp remove agentic-kdd`, { stdio: 'pipe', cwd: projectPath });
-        execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
-          stdio: 'pipe', cwd: projectPath,
-        });
+        herramienta('claude', ['mcp', 'remove', 'agentic-kdd'], { cwd: projectPath });
+        herramienta('claude', ['mcp', 'add', '--env', 'PROJECT_ROOT=' + path.resolve(projectPath), 'agentic-kdd', '--', 'node', serverPath], { cwd: projectPath });
         results.claude_code = true;
         console.log(chalk.green('  ✓ Claude Code        →  actualizado'));
       } catch {
@@ -106,7 +102,8 @@ async function mcpSetup(projectPath, opts = {}) {
         fs.ensureDirSync(path.dirname(globalCursorConfig));
         let globalConfig = {};
         if (fs.existsSync(globalCursorConfig)) {
-          try { globalConfig = JSON.parse(fs.readFileSync(globalCursorConfig, 'utf8')); } catch {}
+          globalConfig = JSON.parse(fs.readFileSync(globalCursorConfig, 'utf8'));
+          if (!globalConfig || typeof globalConfig !== 'object' || Array.isArray(globalConfig)) throw new Error('Configuración MCP global inválida: se conserva');
         }
         if (!globalConfig.mcpServers) globalConfig.mcpServers = {};
         globalConfig.mcpServers['agentic-kdd'] = { command: 'node', args: [serverPath] };
@@ -175,7 +172,7 @@ async function mcpSetup(projectPath, opts = {}) {
 
 function isCLIAvailable(cmd) {
   try {
-    execSync(`${cmd} --version`, { stdio: 'pipe', timeout: 5000 });
+    herramienta(cmd, ['--version'], { timeout: 5000 });
     return true;
   } catch { return false; }
 }
@@ -244,7 +241,7 @@ function mcpStatus(projectPath) {
   const claudeAvailable = isCLIAvailable('claude');
   if (claudeAvailable) {
     try {
-      const mcpList = execSync('claude mcp list', { stdio: 'pipe' }).toString();
+      const mcpList = herramienta('claude', ['mcp', 'list']).toString();
       const hasAgentic = mcpList.includes('agentic-kdd');
       console.log(hasAgentic
         ? chalk.green('  ✓ Claude Code        registrado')

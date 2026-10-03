@@ -453,7 +453,7 @@ function detectOpportunities(db, projectRoot, cicloId, context = {}) {
        ya entraron por A o por B; no admiten a nadie. */
     const recentCycles = db.prepare(`
       SELECT id, tarea, area, modules_touched FROM ciclos
-      WHERE estado = 'COMPLETADO' AND tarea IS NOT NULL
+      WHERE estado IN ('COMPLETADO', 'COMPLETADO_VERIFICADO') AND tarea IS NOT NULL
       ORDER BY fecha_inicio DESC LIMIT 5
     `).all();
 

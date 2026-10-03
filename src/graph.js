@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs-extra');
 const chalk = require('chalk');
-const { execSync } = require('child_process');
+const { nodo } = require('./run-safe');
 
 async function graph() {
   const projectPath = process.cwd();
@@ -29,7 +29,7 @@ async function graph() {
   // Sincronizar primero
   try {
     process.stdout.write(chalk.gray('  Sincronizando memoria... '));
-    execSync(`node "${grafo}" sync`, { stdio: ['pipe', 'pipe', 'pipe'], cwd: projectPath });
+    nodo(grafo, ['sync'], { cwd: projectPath });
     console.log(chalk.green('✓'));
   } catch (e) {
     console.log(chalk.yellow('⚠ ' + e.message.slice(0, 100)));
@@ -38,7 +38,7 @@ async function graph() {
   // Stats
   if (fs.existsSync(dbPath)) {
     try {
-      const output = execSync(`node "${grafo}" stats`, { stdio: ['pipe', 'pipe', 'pipe'], cwd: projectPath }).toString();
+      const output = nodo(grafo, ['stats'], { cwd: projectPath }).toString();
       console.log(output);
     } catch (e) {
       console.log(chalk.red('  Error stats: ' + e.stderr?.toString().slice(0, 200)));
@@ -49,10 +49,11 @@ async function graph() {
 
   // Métricas si hay ciclos
   try {
-    const m = JSON.parse(execSync(`node "${grafo}" metricas`, { stdio: 'pipe', cwd: projectPath }).toString());
+    const m = JSON.parse(nodo(grafo, ['metricas'], { cwd: projectPath }).toString());
     if (m.total > 0) {
       console.log(chalk.bold('  Métricas del agente:'));
-      console.log(`  Goal Attainment: ${chalk.green(m.goal_attainment+'%')} | Autonomy: ${chalk.cyan(m.autonomy_ratio+'%')} | Handoff: ${chalk.green(m.handoff_integrity+'%')}`);
+      const pct = (v) => (v == null ? '—' : v + '%');
+      console.log(`  Goal Attainment: ${chalk.green(pct(m.goal_attainment))} | Autonomy: ${chalk.cyan(pct(m.autonomy_ratio))} | Handoff: ${chalk.green(pct(m.handoff_integrity))}`);
       console.log(`  Patrones aplicados: ${m.patrones_aplicados} | Errores evitados: ${m.errores_evitados}\n`);
     }
   } catch(e) {}

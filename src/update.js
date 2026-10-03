@@ -2,188 +2,180 @@
 
 const fs = require('fs-extra');
 const path = require('path');
-const { execSync } = require('child_process');
 const chalk = require('chalk');
 const ora = require('ora');
-const { extractTarGz } = require('./tar-extract');
+const os = require('os');
+const { nodo, herramienta } = require('./run-safe');
+const txm = require('./update-tx');
 
 const GITHUB_REPO = 'Adrianlpz211/AGENTIX-KDD';
-const TEMP_DIR = path.join(require('os').tmpdir(), 'agentic-kdd-update');
+const REPO_URL = `https://github.com/${GITHUB_REPO}`;
 
-async function update() {
-  const projectPath = process.cwd();
+/**
+ * Actualiza el framework del proyecto como una transacción (src/update-tx.js).
+ *
+ *   ref        rama, tag o SHA; se resuelve a un commit concreto y se descarga
+ *              ESE commit (por defecto 'main', pero lo aplicado queda fijado)
+ *   archivo    .tar.gz local en vez de descargar (sin red, o una release propia)
+ *   sha256     si se da, el archivo debe coincidir o no se toca nada
+ *   migrate    migrar el esquema de memoria.db (nunca automático)
+ *   deps       reconstruir/instalar dependencias nativas (nunca automático)
+ *   salir      false = devolver el resultado en vez de process.exit (pruebas)
+ */
+async function update(opts = {}) {
+  const projectPath = opts.projectPath || process.cwd();
+  const salir = opts.salir !== false;
+  const fin = (code, r) => { if (salir && code) process.exit(code); return r; };
 
   console.log('\n' + chalk.bold.blue('  Agentic KDD') + chalk.gray(' — updating...\n'));
 
   if (!fs.existsSync(path.join(projectPath, '.agentic', 'config.md'))) {
     console.log(chalk.yellow('  Agentic KDD is not installed in this project.'));
     console.log(chalk.gray('  Run akdd init to install it.\n'));
-    process.exit(1);
+    return fin(1, { ok: false, reason: 'NOT_INSTALLED' });
   }
 
-  // ── PASO 0: Guardar estado del usuario ANTES de tocar nada ───────────────
+  const recuperados = txm.recuperarPendientes(projectPath);
+  for (const r of recuperados) {
+    console.log(chalk.yellow(`  ↺ Un update anterior quedó a medias (${r.id}): revertidos ${r.revertidos} archivo(s).`));
+  }
+
   const configPath = path.join(projectPath, '.agentic', 'config.md');
   const userState  = preserveUserState(projectPath, configPath);
+  const spinner = ora({ text: 'Preparing update...', color: 'blue' }).start();
 
-  const spinner = ora({ text: 'Downloading latest version from GitHub...', color: 'blue' }).start();
-
+  let staging = null;
+  let descarga = null;
+  let journal = null;
   try {
-    const tmpFile = path.join(require('os').tmpdir(), 'agentic-kdd-update.tar.gz');
+    // ── 1. Origen fijado e íntegro ─────────────────────────────────────────
+    let archivo = opts.archivo;
+    let commit = null;
+    if (!archivo && !opts.ref) {
+      const bundled = txm.prepararBundle(opts.bundleRoot || path.join(__dirname, '..'));
+      staging = bundled.staging;
+      archivo = null;
+    }
+    if (!staging && !archivo) {
+      const ref = opts.ref || 'main';
+      spinner.text = `Resolving ${ref}...`;
+      commit = txm.resolverRef(REPO_URL, ref);
+      descarga = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-download-'));
+      archivo = path.join(descarga, `${commit}.tar.gz`);
+      spinner.text = `Downloading ${commit.slice(0, 12)}...`;
+      herramienta('curl', ['-sfL', `${REPO_URL}/archive/${commit}.tar.gz`, '-o', archivo]);
+    }
+    const digest = staging ? txm.sha256(JSON.stringify(require('./managed-manifest').archivos(staging).map(rel => [rel, txm.hashArchivo(path.join(staging, rel))]))) : txm.hashArchivo(archivo);
+    if (opts.sha256 && opts.sha256.toLowerCase() !== digest) {
+      throw codigo('INTEGRIDAD', `sha256 del archivo ${digest} ≠ esperado ${opts.sha256}`);
+    }
 
-    execSync(
-      `curl -sL "https://github.com/${GITHUB_REPO}/archive/refs/heads/main.tar.gz" -o "${tmpFile}"`,
-      { stdio: 'pipe' }
-    );
+    // ── 2. Staging confinado y validado ANTES de tocar el proyecto ─────────
+    spinner.text = 'Checking the downloaded framework...';
+    if (!staging) staging = txm.prepararStaging(archivo);
+    const valido = txm.validarStaging(staging);
+    if (!valido.ok) throw codigo('STAGING_INVALIDO', 'la versión descargada no es válida:\n    ' + valido.problemas.slice(0, 10).join('\n    '));
 
-    fs.ensureDirSync(TEMP_DIR);
-    extractTarGz(tmpFile, TEMP_DIR);
-    fs.removeSync(tmpFile);
+    const proteccion = guardiaProtegidos(projectPath, staging);
+    if (!proteccion.ok) throw codigo('PROTEGIDOS', proteccion.message);
+    const filtro = (rel) => proteccion.filtro(null, path.join(projectPath, rel));
 
+    // ── 3. Aplicar dentro del journal ──────────────────────────────────────
     spinner.text = 'Updating system files (keeping your memory intact)...';
-
-    // ── 1. Agentes ──────────────────────────────────────────────────────────
-    const agentsSrc = path.join(TEMP_DIR, '.agentic', 'agentes');
-    const agentsDest = path.join(projectPath, '.agentic', 'agentes');
-    if (fs.existsSync(agentsSrc)) {
-      fs.copySync(agentsSrc, agentsDest, { overwrite: true });
-    }
-
-    // ── 2. Grafo ────────────────────────────────────────────────────────────
-    const grafoSrc  = path.join(TEMP_DIR, '.agentic', 'grafo');
-    const grafoDest = path.join(projectPath, '.agentic', 'grafo');
-    if (fs.existsSync(grafoSrc)) {
-      fs.copySync(grafoSrc, grafoDest, { overwrite: true });
-    }
-
-    // ── 3. Dashboard ────────────────────────────────────────────────────────
-    const dashSrc = path.join(TEMP_DIR, 'dashboard.cjs');
-    const dashDest = path.join(projectPath, 'dashboard.cjs');
-    if (fs.existsSync(dashSrc)) {
-      fs.copySync(dashSrc, dashDest, { overwrite: true });
-    }
-
-    // ── 4. Audit ────────────────────────────────────────────────────────────
-    const auditSrc  = path.join(TEMP_DIR, '.audit');
-    const auditDest = path.join(projectPath, '.audit');
-    if (fs.existsSync(auditSrc)) {
-      fs.copySync(auditSrc, auditDest, { overwrite: true });
-    }
-
-    // ── 5. CLAUDE.md + cursor rules ─────────────────────────────────────────
-    // CLAUDE.md se regenera ENTERO desde la plantilla. Lo del usuario NO vive
-    // aquí: vive en .agentic/INSTRUCCIONES-PROYECTO.md, un archivo que Agentix
-    // solo LEE. Así `update` no puede destruirlo — no porque se acuerde de
-    // preservarlo, sino porque nunca lo escribe.
-    //
-    // Antes (hasta v3.18) este bucle copiaba CLAUDE.md con overwrite:true sin
-    // preservar nada, mientras el propio archivo invitaba al usuario a pegar
-    // sus instrucciones al final. La prueba de que mordió: el encabezado
-    // «INSTRUCCIONES DEL PROYECTO» acabó duplicado en la plantilla del repo.
     const userInstrPath = path.join(projectPath, '.agentic', 'INSTRUCCIONES-PROYECTO.md');
-    const migrado = migrarInstruccionesUsuario(projectPath, userInstrPath);
+    journal = txm.abrirJournal(projectPath, { ref: opts.ref || null, origin: opts.archivo ? 'archive' : opts.ref ? 'github' : 'installed-package', commit, sha256: digest, version: valido.version });
+    txm.respaldar(journal, projectPath, barra(path.relative(projectPath, configPath)), 'config');
+    txm.respaldar(journal, projectPath, '.agentic/INSTRUCCIONES-PROYECTO.md', 'instrucciones');
+    migrarInstruccionesUsuario(projectPath, userInstrPath);
 
-    for (const file of ['CLAUDE.md', '_LOCKS.md']) {
-      const src  = path.join(TEMP_DIR, file);
-      const dest = path.join(projectPath, file);
-      if (fs.existsSync(src)) fs.copySync(src, dest, { overwrite: true });
+    const res = txm.aplicar(projectPath, staging, journal, { filtro, fallarTras: opts.fallarTras });
+
+    // CLAUDE.md llega como plantilla; lo del usuario vive en
+    // .agentic/INSTRUCCIONES-PROYECTO.md (que Agentix solo lee) y se vuelve a
+    // pegar debajo del marcador.
+    if (fs.existsSync(userInstrPath) && res.escritos.includes('CLAUDE.md')) {
+      const propio = fs.readFileSync(userInstrPath, 'utf8').trim();
+      if (propio) fs.appendFileSync(path.join(projectPath, 'CLAUDE.md'), '\n' + propio + '\n');
     }
-
-    // Volver a pegar lo del usuario debajo del marcador
-    if (fs.existsSync(userInstrPath)) {
-      const claudePath = path.join(projectPath, 'CLAUDE.md');
-      if (fs.existsSync(claudePath)) {
-        const propio = fs.readFileSync(userInstrPath, 'utf8').trim();
-        if (propio) {
-          fs.appendFileSync(claudePath, '\n' + propio + '\n');
-        }
-      }
-    }
-
-    const cursorSrc = path.join(TEMP_DIR, '.cursor');
-    const cursorDest = path.join(projectPath, '.cursor');
-    if (fs.existsSync(cursorSrc)) fs.copySync(cursorSrc, cursorDest, { overwrite: true });
-
-    const cursorrulesSrc = path.join(TEMP_DIR, '.cursorrules');
-    const cursorrulesDest = path.join(projectPath, '.cursorrules');
-    if (fs.existsSync(cursorrulesSrc)) fs.copySync(cursorrulesSrc, cursorrulesDest, { overwrite: true });
-
-    // ── Limpiar temp ────────────────────────────────────────────────────────
-    fs.removeSync(TEMP_DIR);
-
-    // ── PASO 1: Restaurar estado del usuario en config.md ──────────────────
-    // Garantiza que CONFIGURADO, nombre, stack y test command nunca se pierden
     restoreUserState(configPath, userState);
 
-    // ── PASO 2: Migrar schema de memoria.db ────────────────────────────────
-    spinner.text = 'Migrating knowledge graph schema...';
-    try {
-      execSync(`node "${path.join(grafoDest, 'grafo.cjs')}" migrate`, {
-        stdio: 'pipe', cwd: projectPath, timeout: 15000
-      });
-    } catch(e) { /* schema migration is best-effort */ }
+    txm.respaldar(journal, projectPath, '.agentic/_update/owned.json', 'registro');
+    txm.registrarOwned(projectPath, res.hashes, { version: valido.version, commit, sha256: digest }, ['CLAUDE.md']);
+    txm.cerrarJournal(journal, { resumen: {
+      escritos: res.escritos.length, sinCambios: res.sinCambios.length,
+      personalizados: res.personalizados, protegidos: res.protegidos,
+      obsoletosBorrados: res.obsoletosBorrados, obsoletosConservados: res.obsoletosConservados,
+    } });
+    txm.podar(projectPath);
 
-    // ── PASO 3: Reconstruir better-sqlite3 si es necesario ─────────────────
-    spinner.text = 'Checking dependencies...';
-    try {
-      execSync('npm rebuild better-sqlite3', { stdio: 'pipe', cwd: projectPath });
-    } catch(e) {}
+    // ── 4. Fuera de la transacción: hooks (no pisa hooks ajenos) ───────────
+    const grafoDest = path.join(projectPath, '.agentic', 'grafo');
+    try { nodo(path.join(grafoDest, 'install-hooks.cjs'), ['--quiet'], { cwd: projectPath, timeout: 15000 }); }
+    catch { /* hooks: el estado se ve con akdd health */ }
 
-    // ── PASO 3b: Instalar playwright-core si falta (Browser Gate) ─────────
-    // Proyectos con Agentix de antes del Browser Gate no lo tienen — se
-    // instala en el update, no bloquea si falla (el gate ya avisa solo).
-    try {
-      require.resolve('playwright-core', { paths: [projectPath] });
-    } catch (e) {
-      try {
-        execSync('npm install playwright-core --save-dev', { stdio: 'pipe', cwd: projectPath });
-      } catch (e2) { /* Browser Gate queda sin usar hasta instalar a mano */ }
+    const pasos = [];
+    if (opts.migrate) {
+      spinner.text = 'Migrating knowledge graph schema...';
+      try { nodo(path.join(grafoDest, 'grafo.cjs'), ['migrate'], { cwd: projectPath, timeout: 60000 }); pasos.push('esquema migrado'); }
+      catch (e) { pasos.push('migración FALLÓ: ' + e.message); }
+    }
+    if (opts.deps) {
+      spinner.text = 'Rebuilding native dependencies...';
+      try { herramienta('npm', ['rebuild', 'better-sqlite3'], { cwd: projectPath }); pasos.push('better-sqlite3 reconstruido'); }
+      catch (e) { pasos.push('npm rebuild FALLÓ: ' + e.message); }
     }
 
-    // ── PASO 4: Auto-sync para que el dashboard lea los datos actualizados ──
-    spinner.text = 'Syncing knowledge graph...';
-    try {
-      execSync(`node "${path.join(grafoDest, 'grafo.cjs')}" sync`, {
-        stdio: 'pipe', cwd: projectPath, timeout: 30000
-      });
-    } catch(e) { /* sync is best-effort */ }
-
-    // ── PASO 5: Instalar git hooks (registro automático de contratos) ──────
-    try {
-      execSync(`node "${path.join(grafoDest, 'install-hooks.cjs')}" --quiet`, {
-        stdio: 'pipe', cwd: projectPath, timeout: 15000
-      });
-    } catch(e) { /* hook best-effort */ }
-
-    spinner.succeed(chalk.green('Updated successfully!'));
-
-    console.log('\n' + chalk.bold('  What was updated:'));
-    console.log(chalk.gray('  ✓ Agent instructions (.agentic/agentes/)'));
-    console.log(chalk.gray('  ✓ Knowledge graph engine (.agentic/grafo/)'));
-    console.log(chalk.gray('  ✓ Dashboard (dashboard.cjs)'));
-    console.log(chalk.gray('  ✓ QA department (.audit/)'));
-    console.log(chalk.gray('  ✓ CLAUDE.md + Cursor rules'));
-
-    console.log('\n' + chalk.bold('  What was kept intact:'));
-    console.log(chalk.gray('  ✓ Your project memory (.agentic/memoria/)'));
-    console.log(chalk.gray('  ✓ Your project config (.agentic/config.md)'));
-    console.log(chalk.gray('  ✓ Your knowledge base (.agentic/conocimiento/)'));
-    console.log(chalk.gray('  ✓ Your PLAN.md'));
-    console.log(chalk.gray('  ✓ Your knowledge graph data (memoria.db)'));
-    console.log(chalk.gray('  ✓ Your CONFIGURADO state and project settings\n'));
-
-    if (userState.configured) {
-      console.log(chalk.green('  ✓ Project state verified: CONFIGURADO\n'));
+    spinner.succeed(chalk.green(`Updated to ${valido.version || 'unknown'}${commit ? ' @ ' + commit.slice(0, 12) : ''}`));
+    console.log(chalk.gray(`  ${res.escritos.length} archivo(s) actualizados, ${res.sinCambios.length} sin cambios · sha256 ${digest.slice(0, 16)}…`));
+    if (res.protegidos.length) console.log(chalk.yellow(`  🔒 No se actualizaron (están en .agentic/protected_files): ${res.protegidos.join(', ')}`));
+    if (res.personalizados.length) {
+      console.log(chalk.yellow(`  ✋ Personalizados, se dejaron como estaban (${res.personalizados.length}): ${res.personalizados.join(', ')}`));
+      console.log(chalk.gray(`     La versión nueva de cada uno quedó en ${barra(path.relative(projectPath, path.join(journal.dir, 'personalizados')))}/`));
     }
+    if (res.obsoletosBorrados.length) console.log(chalk.gray(`  − Retirados (ya no son del framework): ${res.obsoletosBorrados.join(', ')}`));
+    if (res.obsoletosConservados.length) console.log(chalk.yellow(`  ! Ya no son del framework pero tienen cambios tuyos, se conservan: ${res.obsoletosConservados.join(', ')}`));
+    for (const p of pasos) console.log(chalk.gray('  · ' + p));
+    if (!opts.migrate) console.log(chalk.gray('  · Esquema de memoria.db sin migrar — cuando quieras: akdd update --migrate (o node .agentic/grafo/grafo.cjs migrate)'));
+    console.log(chalk.gray('  · Tu memoria, config.md, conocimiento, PLAN.md y memoria.db no se tocaron.'));
+    console.log(chalk.gray(`  · Para volver atrás: akdd update --rollback\n`));
 
+    const failedSteps = pasos.filter(p => p.includes('FALLÓ'));
+    return fin(failedSteps.length ? 1 : 0, { ok: !failedSteps.length, reason: failedSteps.length ? 'POST_UPDATE_FAILED' : undefined, failedSteps, version: valido.version, commit, sha256: digest, journal: journal.archivo, ...res });
   } catch (err) {
-    // Si algo falla, restaurar estado igual
-    try { restoreUserState(configPath, userState); } catch(e) {}
-    spinner.fail(chalk.red('Update failed'));
-    console.error(chalk.red('\n  Error: ' + err.message));
-    console.log(chalk.gray('  Check your internet connection and try again.\n'));
-    process.exit(1);
+    let revertidos = 0;
+    if (journal) {
+      try { revertidos = txm.revertir(projectPath, journal.archivo).revertidos; } catch { /* se reintenta en la próxima corrida */ }
+    }
+    spinner.fail(chalk.red('Update failed' + (journal ? ` — revertido (${revertidos} archivo(s))` : ' — no se tocó nada')));
+    console.error(chalk.red('\n  Error: ' + err.message + '\n'));
+    return fin(1, { ok: false, reason: err.code || 'ERROR', message: err.message, revertidos });
+  } finally {
+    if (staging) fs.rmSync(staging, { recursive: true, force: true });
+    if (descarga) fs.rmSync(descarga, { recursive: true, force: true });
   }
 }
+
+/** Revierte la última transacción aplicada (sus backups siguen en disco). */
+function rollback(opts = {}) {
+  const projectPath = opts.projectPath || process.cwd();
+  const base = path.join(txm.dirUpdate(projectPath), 'tx');
+  let ids = [];
+  try { ids = fs.readdirSync(base).sort(); } catch { /* sin transacciones */ }
+  for (const id of ids.reverse()) {
+    const f = path.join(base, id, 'journal.json');
+    let d = null;
+    try { d = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { continue; }
+    if (d.estado !== 'aplicado') continue;
+    const r = txm.revertir(projectPath, f);
+    console.log(chalk.green(`  ↺ Revertida la actualización ${id}: ${r.revertidos} archivo(s) restaurados.`));
+    return { ok: true, id, ...r };
+  }
+  console.log(chalk.yellow('  No hay ninguna actualización aplicada que revertir.'));
+  return { ok: false, reason: 'SIN_TRANSACCION' };
+}
+
+function codigo(code, msg) { const e = new Error(msg); e.code = code; return e; }
+const barra = (p) => String(p).split(path.sep).join('/');
 
 // ── preserveUserState ────────────────────────────────────────────────────────
 // Lee el estado actual del usuario antes del update para restaurarlo después
@@ -295,7 +287,37 @@ function restoreUserState(configPath, state) {
   } catch(e) { /* best-effort */ }
 }
 
-module.exports = { update };
+/**
+ * Lo que el proyecto declaró en .agentic/protected_files no lo pisa una
+ * actualización. Manifiesto inválido = no se copia nada. Si hay manifiesto
+ * pero no hay con qué leerlo, tampoco: no verificado no es permitido.
+ */
+function guardiaProtegidos(projectPath, fuente) {
+  const candidatos = [fuente, projectPath, path.join(__dirname, '..')]
+    .filter(Boolean)
+    .map((base) => path.resolve(base, '.agentic', 'grafo', 'protected-files.cjs'));
+  const modPath = candidatos.find((p) => fs.existsSync(p));
+  const hayManifiesto = fs.existsSync(path.join(projectPath, '.agentic', 'protected_files'));
+  if (!modPath) {
+    if (hayManifiesto) return { ok: false, message: 'Hay .agentic/protected_files pero no se pudo cargar el verificador — update detenido' };
+    return { ok: true, omitidos: [], filtro: () => true };
+  }
+  const pf = require(modPath);
+  const m = pf.cargar(projectPath);
+  if (!m.ok) return { ok: false, message: `.agentic/protected_files inválido (${m.message}${m.line ? ', línea ' + m.line : ''}) — update detenido, nada se copió` };
+  const omitidos = [];
+  const filtro = (_src, dest) => {
+    const rel = path.relative(projectPath, dest);
+    if (!rel || rel.startsWith('..')) return true;
+    const r = pf.verificar(projectPath, [rel], { accion: 'update' });
+    if (r.status === 'PASS') return true;
+    omitidos.push(rel.replace(/\\/g, '/'));
+    return false;
+  };
+  return { ok: true, omitidos, filtro };
+}
+
+module.exports = { update, rollback, guardiaProtegidos };
 
 
 // ── migrarInstruccionesUsuario ───────────────────────────────────────────────

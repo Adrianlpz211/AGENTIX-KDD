@@ -17,9 +17,12 @@
 
 'use strict';
 
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 const fs   = require('fs');
 const path = require('path');
+const { createGateResult } = require('./gate-result.cjs');
+const { extractTestResults } = require('./test-results.cjs');
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
@@ -159,51 +162,146 @@ function runTypecheck(command, projectRoot) {
  * @returns {{ allPassed: boolean, total: number, passed: number, failed: number,
  *             failures: string[], output: string, error: string|null }}
  */
-function runTests(command, projectRoot, testFile = null) {
-  const fullCmd = testFile ? `${command} -- ${testFile}` : command;
+/* Letras y dígitos de cualquier idioma, espacios y separadores de ruta. Nada
+   que el shell interprete; un argumento que empiece por "-" sería una opción. */
+const ARG_SEGURO = /^[\p{L}\p{N}_./\\:@+][\p{L}\p{N}_ ./\\:@+-]*$/u;
 
-  let output = '';
-  let errorOutput = '';
-  let exitCode = 0;
+function subjectHash(projectRoot) {
+  const h = crypto.createHash('sha256');
+  const git = (args) => {
+    const r = spawnSync('git', args, { cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 });
+    return r.status === 0 ? r.stdout : '';
+  };
+  const usable = spawnSync('git', ['rev-parse', '--git-dir'], { cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 }).status === 0;
+  /* Sin Git utilizable (no hay repo, o Git lo rechaza) la huella sale del contenido:
+     una constante dejaría el gate trabado y haría pasar evidencia vieja por nueva. */
+  if (!usable) return huellaContenido(projectRoot);
+  const head = git(['rev-parse', 'HEAD']);
+  h.update(head || 'sin-commits:' + path.resolve(projectRoot));
+  h.update(git(['diff', 'HEAD', '--binary']));
+  const others = git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+  for (const f of others) {
+    h.update(f + '\0');
+    try { h.update(fs.readFileSync(path.join(projectRoot, f))); } catch { h.update('ILEGIBLE:' + f); }
+    h.update('\0');
+  }
+  return h.digest('hex');
+}
 
+const FUERA_DE_HUELLA = /^(\.git|node_modules|_output|dist|build|coverage)$|^\.agentic[\\/](_|memoria|telemetria|snapshots|_cache|_executions|_pipeline|_effort)/;
+const ES_SUJETO = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|py|rb|go|java|kt|php|cs|rs|sql|json|lock|html?|css|scss|sass|less|svg)$/i;
+
+function huellaContenido(projectRoot) {
+  const h = crypto.createHash('sha256');
+  h.update('contenido:');
+  const recorrer = (dir) => {
+    let entradas = [];
+    try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    entradas.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entradas) {
+      const abs = path.join(dir, e.name);
+      const rel = path.relative(projectRoot, abs);
+      if (FUERA_DE_HUELLA.test(rel)) continue;
+      if (e.isDirectory()) recorrer(abs);
+      else if (e.isFile() && ES_SUJETO.test(e.name)) {
+        try { h.update(rel.split(path.sep).join('/') + '\0'); h.update(fs.readFileSync(abs)); h.update('\0'); }
+        catch { h.update('ILEGIBLE:' + rel.split(path.sep).join('/') + '\0'); }
+      }
+    }
+  };
+  recorrer(projectRoot);
+  return h.digest('hex');
+}
+
+/**
+ * El comando de tests viene de config.md o package.json y se corre con el
+ * shell del sistema: es el adaptador de runner. Un archivo de test no se
+ * interpola en esa línea si trae caracteres de shell.
+ */
+function runTests(command, projectRoot, testFile = null, meta = {}) {
+  const archivos = testFile == null ? [] : (Array.isArray(testFile) ? testFile : [testFile]);
+  if (archivos.some((f) => !ARG_SEGURO.test(String(f)))) {
+    return parseTestOutput('', null, {
+      spawnError: 'UNSAFE_TEST_ARG', command, projectRoot, subject_hash: meta.subject_hash,
+    });
+  }
+  const separador = /^(npm|pnpm|yarn)(\.cmd)?\s/.test(command.trim()) ? ' --' : '';
+  const fullCmd = archivos.length
+    ? `${command}${separador} ${archivos.map((f) => '"' + f + '"').join(' ')}`
+    : command;
+  const sourceBefore = require('./source-evidence.cjs').capture(projectRoot);
+  const startedAt = new Date().toISOString();
+  const timeout = parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 120000;
+
+  const isWin = process.platform === 'win32';
+  // Heredado de un `node --test` padre, el runner del proyecto le reporta al
+  // padre por un canal propio y no imprime su resumen: no habría qué medir.
+  const env = Object.assign({}, process.env);
+  delete env.NODE_TEST_CONTEXT;
+  let result;
   try {
-    // Windows: use cmd.exe, Unix: use sh
-    const isWin = process.platform === 'win32';
-    const shell = isWin ? 'cmd.exe' : 'sh';
-    const shellFlag = isWin ? '/c' : '-c';
-    const shellCmd = isWin ? fullCmd : fullCmd + ' 2>&1';
-
-    const result = spawnSync(
-      shell, [shellFlag, shellCmd],
-      // Plan 5 T8: configurable — suites reales pesadas superan los 120s
-      { cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 120000, stdio: 'pipe', encoding: 'utf8' }
-    );
-    output = (result.stdout || '') + (isWin ? (result.stderr || '') : '');
-    errorOutput = result.stderr || '';
-    exitCode = result.status ?? 1;
+    // En Windows la línea va tal cual a cmd.exe: sin verbatim, Node escapa las
+    // comillas internas y el runner recibe `"archivo"` con las comillas puestas.
+    result = isWin
+      ? spawnSync('cmd.exe', ['/d', '/s', '/c', `"${fullCmd}"`], {
+        cwd: projectRoot, timeout, stdio: 'pipe', encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, env,
+      })
+      : spawnSync('sh', ['-c', fullCmd], {
+        cwd: projectRoot, timeout, stdio: 'pipe', encoding: 'utf8', env,
+      });
   } catch (err) {
-    return {
-      allPassed: false, total: 0, passed: 0, failed: 1,
-      failures: [`ERROR ejecutando tests: ${err.message}`],
-      output: '', error: err.message
-    };
+    result = { error: err, status: null, signal: null, stdout: '', stderr: '' };
   }
 
-  return parseTestOutput(output + errorOutput, exitCode);
+  const timedOut = !!(result.error && result.error.code === 'ETIMEDOUT');
+  const parsed = parseTestOutput((result.stdout || '') + (result.stderr || ''), result.status, {
+    command,
+    projectRoot,
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    timedOut,
+    signal: timedOut ? null : result.signal,
+    spawnError: !timedOut && result.error ? (result.error.code || result.error.message) : null,
+    subject_hash: meta.subject_hash || subjectHash(projectRoot),
+    cycle_id: meta.cycle_id,
+    execution_id: meta.execution_id,
+    testFile: archivos.length === 1 ? archivos[0] : null,
+  });
+  const sourceAfter = require('./source-evidence.cjs').capture(projectRoot);
+  if (!sourceBefore.complete || sourceBefore.hash !== sourceAfter.hash) {
+    parsed.status='UNVERIFIED'; parsed.allPassed=false; parsed.reason_code='SOURCE_CHANGED_OR_INCOMPLETE';
+    parsed.gate.status='UNVERIFIED'; parsed.gate.reason_code=parsed.reason_code;
+  }
+  parsed.run_scope = archivos.length ? 'targeted' : 'suite';
+  Object.defineProperty(parsed,'source_evidence',{value:sourceBefore});
+  require('./escenarios.cjs').evidenciaDeCorrida(projectRoot,parsed,archivos.length?archivos:findTestFiles(projectRoot),{gate:parsed.gate.gate,cycle_id:meta.cycle_id,explicito:archivos.length>0});
+  return parsed;
+}
+
+function contarPytest(raw) {
+  const lineas = raw.split('\n').filter((l) => /\b\d+\s+(passed|failed|errors?)\b/.test(l) && /\bin\s+[\d.]+\s*s\b/.test(l));
+  if (!lineas.length) return null;
+  const linea = lineas[lineas.length - 1];
+  const n = (re) => { const m = linea.match(re); return m ? parseInt(m[1], 10) : 0; };
+  const passed = n(/(\d+)\s+passed/);
+  const failed = n(/(\d+)\s+failed/) + n(/(\d+)\s+errors?\b/);
+  return { passed, failed, total: passed + failed };
 }
 
 /**
  * Parsea el output de múltiples frameworks de testing.
  * Soporta: jest, vitest, mocha, jasmine, tap, pytest (output básico).
  */
-function parseTestOutput(raw, exitCode) {
+function parseTestOutput(raw, exitCode, meta = {}) {
   // Strip ANSI color codes — Vitest adds them and break regex matching
   raw = (raw || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
   const result = {
-    allPassed: exitCode === 0,
+    allPassed: false,
     total: 0, passed: 0, failed: 0,
-    failures: [], output: raw, error: null
+    failures: [], output: raw, error: null,
+    exitCode: exitCode === undefined ? null : exitCode,
+    runner: null,
   };
 
   // ── Jest / Vitest ────────────────────────────────────────────────────────
@@ -259,22 +357,30 @@ function parseTestOutput(raw, exitCode) {
   // --test (mismo runtime), reportaba 0/0/0 aunque los tests pasaran de
   // verdad. Se descubrió corrido contra el propio Coliseo (MediCore usa
   // `tsx --test`).
-  const nodeTestTotal = raw.match(/^[ℹi#]\s*tests\s+(\d+)/im);
-  const nodeTestPass  = raw.match(/^[ℹi#]\s*pass\s+(\d+)/im);
-  const nodeTestFail  = raw.match(/^[ℹi#]\s*fail\s+(\d+)/im);
+  // El resumen que vale es el último: un archivo que corre su propio runner
+  // (sin NODE_TEST_CONTEXT) imprime un resumen parcial antes que el final.
+  const ultimo = (re) => { const ms = [...raw.matchAll(re)]; return ms.length ? ms[ms.length - 1] : null; };
+  const nodeTestTotal = ultimo(/^[ℹi#]\s*tests\s+(\d+)/gim);
+  const nodeTestPass  = ultimo(/^[ℹi#]\s*pass\s+(\d+)/gim);
+  const nodeTestFail  = ultimo(/^[ℹi#]\s*fail\s+(\d+)/gim);
   if (nodeTestTotal && result.total === 0) {
     result.total  = parseInt(nodeTestTotal[1] || '0');
     result.passed = parseInt(nodeTestPass?.[1] || '0');
     result.failed = parseInt(nodeTestFail?.[1] || '0');
   }
 
-  // ── pytest (básico) ──────────────────────────────────────────────────────
-  // "5 passed, 2 failed in 1.23s"
-  const pytestSummary = raw.match(/(\d+)\s+passed(?:,\s*(\d+)\s+failed)?/i);
-  if (pytestSummary && result.total === 0) {
-    result.passed = parseInt(pytestSummary[1] || '0');
-    result.failed = parseInt(pytestSummary[2] || '0');
-    result.total  = result.passed + result.failed;
+  if (result.total > 0) result.runner = 'reconocido';
+
+  // ── pytest ───────────────────────────────────────────────────────────────
+  // "5 passed, 2 failed in 1.23s" y "1 failed, 2 passed in 0.1s": el orden no
+  // es fijo, cada contador se lee por separado en la línea de resumen.
+  const py = contarPytest(raw);
+  if (py) {
+    // pytest manda sobre los contadores genéricos que se cruzan con su texto
+    result.passed = py.passed;
+    result.failed = py.failed;
+    result.total = py.total;
+    result.runner = 'pytest';
   }
 
   // ── Extraer nombres de tests fallidos ────────────────────────────────────
@@ -296,26 +402,59 @@ function parseTestOutput(raw, exitCode) {
     }
   }
 
-  // ── Fallback: si exitCode !== 0 y no parseamos nada ─────────────────────
-  if (exitCode !== 0 && result.total === 0) {
-    result.allPassed = false;
-    result.failed = 1;
-    if (result.failures.length === 0) {
-      // Extraer la primera línea de error
-      const errorLine = raw.split('\n').find(l => /error|fail|cannot|unexpected/i.test(l));
-      if (errorLine) result.failures.push(errorLine.trim().substring(0, 120));
-      else result.failures.push('Error desconocido — revisar output completo');
-    }
-  }
+  const reconocido = result.total > 0 || result.passed > 0 || result.failed > 0;
 
-  // Si no se reconoció NINGÚN resultado de test, NO asumir PASS (gate de calidad):
-  // un exitCode 0 espurio (común con `cmd /c` en Windows) no debe dar verde con tests rotos.
-  if (result.passed === 0 && result.failed === 0 && result.total === 0) {
+  // Veredicto. El texto nunca convierte en PASS un proceso que salió mal.
+  let status;
+  let reason;
+  if (meta.spawnError) { status = 'ERROR'; reason = 'SPAWN_FAILED'; }
+  else if (meta.timedOut) { status = 'ERROR'; reason = 'TIMEOUT'; }
+  else if (meta.signal) { status = 'ERROR'; reason = 'SIGNAL_' + meta.signal; }
+  else if (exitCode === null || exitCode === undefined) { status = 'ERROR'; reason = 'NO_EXIT_CODE'; }
+  else if (result.failed > 0) { status = 'FAIL'; reason = 'TESTS_FAILED'; }
+  else if (exitCode !== 0) { status = 'FAIL'; reason = 'RUNNER_EXIT_NONZERO'; }
+  else if (!reconocido) { status = 'UNVERIFIED'; reason = 'UNKNOWN_OUTPUT'; }
+  else if (result.total === 0 || result.passed === 0) { status = 'UNVERIFIED'; reason = 'ZERO_TESTS'; }
+  else { status = 'PASS'; reason = null; }
+
+  if (status !== 'PASS' && result.failures.length === 0) {
+    const errorLine = raw.split('\n').find(l => /error|fail|cannot|unexpected/i.test(l));
+    result.failures.push(errorLine ? errorLine.trim().substring(0, 120) : reason);
+  }
+  if (status === 'FAIL' && result.failed === 0) result.failed = 1;
+  if (status === 'ERROR') result.error = reason;
+
+  result.status = status;
+  result.reason_code = reason;
+  result.allPassed = status === 'PASS';
+  result.tests = extractTestResults(raw, { testFile: meta.testFile || null });
+
+  const subject = meta.subject_hash || null;
+  result.gate = createGateResult({
+    gate: 'tdd',
+    status,
+    reason_code: reason,
+    scope: 'TASK',
+    cycle_id: meta.cycle_id,
+    execution_id: meta.execution_id || crypto.randomUUID(),
+    subject_hash: subject,
+    evidence: subject ? [{
+      kind: 'runner',
+      subject_hash: subject,
+      command: meta.command || null,
+      exit_code: result.exitCode,
+      total: result.total,
+      passed: result.passed,
+      failed: result.failed,
+      output_sha256: crypto.createHash('sha256').update(raw).digest('hex'),
+    }] : [],
+    started_at: meta.started_at,
+    finished_at: meta.finished_at,
+  });
+  if (status === 'PASS' && result.gate.status !== 'PASS') {
+    result.status = result.gate.status;
+    result.reason_code = result.gate.reason_code;
     result.allPassed = false;
-  } else {
-    // En Windows, "cd backend && pytest" puede retornar exitCode != 0 aunque los tests pasen.
-    // Si passed > 0 y failed === 0, es PASS.
-    result.allPassed = result.failed === 0 && (exitCode === 0 || result.passed > 0);
   }
   return result;
 }
@@ -473,159 +612,213 @@ function runSelfHealingLoop(opts) {
     };
   }
 
+  const maxIter = opts.maxIterations || MAX_HEALING_ITERATIONS;
+  const subject = opts.subjectHash || subjectHash(projectRoot);
+  const previo = loadState(projectRoot);
+  const mismoSujetoDeTrabajo = previo && previo.command === command && previo.area === area;
+  const history = mismoSujetoDeTrabajo && Array.isArray(previo.history) ? previo.history.slice() : [];
+  let iteration = 1;
+
+  const cerrar = (extra) => {
+    const r = Object.assign({
+      success: false, allPassed: false,
+      iterations: iteration, tests_found: testFiles,
+      tests_passing: 0, tests_failing: 0, failing_tests: [], regressions: [],
+      command, area, history, subject_hash: subject,
+    }, extra);
+    _printTDDReport(r);
+    return r;
+  };
+
+  if (mismoSujetoDeTrabajo) {
+    if (previo.blocked) {
+      return cerrar({
+        status: 'BLOCKED', reason_code: previo.reason_code, iterations: previo.iteration,
+        failing_tests: previo.failures || [],
+        stop_reason: 'Bloqueado tras ' + previo.iteration + ' intentos. Revisión humana y `tdd-gate.cjs clear`.',
+      });
+    }
+    if (previo.subject_hash === subject) {
+      return cerrar({
+        status: 'NEEDS_REPAIR', reason_code: 'NO_REPAIR_SINCE_LAST_FAIL', iterations: previo.iteration,
+        failing_tests: previo.failures || [],
+        stop_reason: 'El código no cambió desde el último fallo: reparar antes de reintentar.',
+      });
+    }
+    iteration = previo.iteration + 1;
+  }
+
   console.log(`\n[TDD-GATE] Comando: ${command}`);
   console.log(`[TDD-GATE] Tests encontrados: ${testFiles.length}`);
   console.log(`[TDD-GATE] Área: ${area}`);
-  console.log(`[TDD-GATE] Max iteraciones: ${MAX_HEALING_ITERATIONS}\n`);
+  console.log(`[TDD-GATE] Intento ${iteration}/${maxIter}\n`);
 
-  let iteration = 0;
-  let lastResult = null;
-  const history = [];
+  const result = runTests(command, projectRoot, null, { subject_hash: subject, cycle_id: opts.cycleId });
 
-  // ── LOOP ──────────────────────────────────────────────────────────────────
-  while (iteration < MAX_HEALING_ITERATIONS) {
-    iteration++;
-    console.log(`[TDD-GATE] ── Iteración ${iteration}/${MAX_HEALING_ITERATIONS} ──`);
-
-    const result = runTests(command, projectRoot);
-    lastResult = result;
-    history.push({ iteration, ...result });
-
-    console.log(`[TDD-GATE] Resultado: ${result.allPassed ? '✅ PASS' : '❌ FAIL'}`);
-    console.log(`[TDD-GATE] Total: ${result.total} | Pasando: ${result.passed} | Fallando: ${result.failed}`);
-
-    // v3.15.2 (Grieta R10): "los tests pasan" no es lo mismo que "el proyecto
-    // compila" cuando el runner (tsx/esbuild) no verifica tipos. Si hay un
-    // script typecheck, correrlo aquí — antes de declarar PASS y registrar
-    // contratos — cierra ese hueco sin inventar un gate nuevo que el agente
-    // pueda olvidar correr aparte.
-    if (result.allPassed) {
-      const tcCmd = detectTypecheckCommand(projectRoot);
-      if (tcCmd) {
-        const tc = runTypecheck(tcCmd, projectRoot);
-        console.log(`[TDD-GATE] Typecheck (${tcCmd}): ${tc.passed ? '✅ PASS' : '❌ FAIL'}`);
-        if (!tc.passed) {
-          result.allPassed = false;
-          result.failed = (result.failed || 0) + 1;
-          result.failures = [...(result.failures || []), `TYPECHECK: ${tc.output.slice(0, 500)}`];
-          history[history.length - 1] = { iteration, ...result };
-        }
+  // v3.15.2 (Grieta R10): "los tests pasan" no es lo mismo que "el proyecto
+  // compila" cuando el runner (tsx/esbuild) no verifica tipos.
+  if (result.allPassed) {
+    const tcCmd = detectTypecheckCommand(projectRoot);
+    if (tcCmd) {
+      const tc = runTypecheck(tcCmd, projectRoot);
+      console.log(`[TDD-GATE] Typecheck (${tcCmd}): ${tc.passed ? '✅ PASS' : '❌ FAIL'}`);
+      if (!tc.passed) {
+        result.allPassed = false;
+        result.status = 'FAIL';
+        result.reason_code = 'TYPECHECK_FAILED';
+        result.failed = (result.failed || 0) + 1;
+        result.failures = [...(result.failures || []), `TYPECHECK: ${tc.output.slice(0, 500)}`];
+        result.gate = createGateResult(Object.assign({}, result.gate, { status: 'FAIL', reason_code: 'TYPECHECK_FAILED' }));
       }
     }
-
-    if (result.allPassed) {
-      console.log(`\n[TDD-GATE] ✅ PASS en iteración ${iteration}`);
-
-      // Auto-register passing tests as contract candidates
-      try {
-        const contractGuardPath = require('path').join(__dirname, 'contract-guard.cjs');
-        const cg = require(contractGuardPath);
-        const dbPath = require('path').join(projectRoot || process.cwd(), '.agentic/memoria.db');
-        const DB = openProjectDB(dbPath, projectRoot);
-        if (DB && cg && typeof cg.registerPassingTests === 'function') {
-          cg.registerPassingTests(DB, { passed: result.passed, total: result.total, area: area || 'global', command });
-          console.log(`[TDD-GATE] 📋 Contracts: ${result.passed} tests → candidates`);
-        }
-
-        // Auto-register protected behavior snapshot
-        try {
-          const rgPath = require('path').join(__dirname, 'regression-guard.cjs');
-          if (require('fs').existsSync(rgPath)) {
-            const rg = require(rgPath);
-            const DB2 = openProjectDB(dbPath, projectRoot);
-            if (DB2) {
-              const behavior = rg.registerBehavior(DB2, {
-                module:      area || 'global',
-                files:       scope,
-                testFiles:   testFiles,
-                projectRoot: projectRoot || process.cwd(),
-              });
-              if (behavior) {
-                console.log(`[TDD-GATE] 🛡️  Behavior: [${behavior.module}] ${behavior.confidence} (cycle ${behavior.pass_count})`);
-              }
-              DB2.close();
-            }
-          }
-        } catch(e) { /* regression guard optional */ }
-
-        if (DB) DB.close();
-      } catch(e) { /* contract guard optional */ }
-
-      break;
-    }
-
-    if (iteration < MAX_HEALING_ITERATIONS) {
-      console.log(`[TDD-GATE] Fallando tests: ${result.failures.slice(0, 5).join(', ')}`);
-      console.log(`[TDD-GATE] 🔄 Señal de healing enviada al agente para iteración ${iteration + 1}`);
-      console.log(`[TDD-GATE] Diagnóstico necesario: revisar error → aplicar fix → re-ejecutar\n`);
-
-      // Guardar estado para que el agente sepa en qué iteración está
-      saveState(projectRoot, {
-        iteration,
-        lastResult: result,
-        area,
-        command,
-        testFiles,
-        timestamp: new Date().toISOString(),
-      });
-    }
   }
 
-  // ── SUITE COMPLETA (verificar regresiones) ────────────────────────────────
-  let regressions = [];
-  if (lastResult?.allPassed) {
-    console.log('\n[TDD-GATE] Verificando suite completa para detectar regresiones...');
-    const suiteResult = runTests(command, projectRoot);
-    if (!suiteResult.allPassed) {
-      regressions = suiteResult.failures;
-      console.log(`[TDD-GATE] ⚠️ Regresiones detectadas: ${regressions.join(', ')}`);
-    } else {
-      console.log('[TDD-GATE] ✅ Suite completa: sin regresiones');
-    }
-  }
+  const firma = crypto.createHash('sha256').update([...(result.failures || [])].sort().join('\n')).digest('hex');
+  history.push({ iteration, status: result.status, reason_code: result.reason_code, subject_hash: subject, failure_signature: firma });
 
-  const finalResult = {
-    success: lastResult?.allPassed && regressions.length === 0,
-    allPassed: lastResult?.allPassed ?? false,
+  console.log(`[TDD-GATE] Resultado: ${result.status}${result.reason_code ? ' (' + result.reason_code + ')' : ''}`);
+  console.log(`[TDD-GATE] Total: ${result.total} | Pasando: ${result.passed} | Fallando: ${result.failed}`);
+
+  const base = {
     iterations: iteration,
-    tests_found: testFiles,
-    tests_passing: lastResult?.passed ?? 0,
-    tests_failing: lastResult?.failed ?? 0,
-    failing_tests: lastResult?.failures ?? [],
-    regressions,
-    command,
-    area,
-    history,
+    tests_passing: result.passed,
+    tests_failing: result.failed,
+    failing_tests: result.failures,
+    gate: result.gate,
   };
 
-  if (!finalResult.success) {
-    finalResult.stop_reason = lastResult?.allPassed
-      ? `Regresiones introducidas: ${regressions.join(', ')}`
-      : `Tests fallando después de ${iteration} iteraciones. Requiere intervención humana.`;
+  if (result.allPassed) {
+    const registro = registrarContratosDelResultado(projectRoot, area, command, scope, testFiles, result);
+    clearState(projectRoot);
+    return cerrar(Object.assign(base, {
+      success: true, allPassed: true, status: 'PASS', contracts: registro,
+      preservation: registro.preservacion || null,
+    }));
   }
 
-  // Limpiar estado si terminamos
-  clearState(projectRoot);
+  base.preservation = verificarPreservacion(projectRoot, scope, testFiles, result);
 
-  // Imprimir reporte
-  _printTDDReport(finalResult);
+  const mismoFallo = mismoSujetoDeTrabajo && previo.failure_signature === firma;
+  const repetidos = mismoFallo ? (previo.same_failure_count || 1) + 1 : 1;
+  let status = 'NEEDS_REPAIR';
+  let reason = result.reason_code;
+  let blocked = false;
+  if (result.status === 'ERROR' || result.status === 'UNVERIFIED') {
+    status = result.status;
+  }
+  if (repetidos >= 2 && iteration > 1) { status = 'BLOCKED'; reason = 'SAME_FAILURE_AFTER_REPAIR'; blocked = true; }
+  else if (iteration >= maxIter) { status = 'BLOCKED'; reason = 'MAX_ITERATIONS'; blocked = true; }
 
-  return finalResult;
+  saveState(projectRoot, {
+    iteration, area, command, testFiles,
+    subject_hash: subject,
+    failure_signature: firma,
+    same_failure_count: repetidos,
+    failures: result.failures,
+    failed: result.failed,
+    status, reason_code: reason, blocked,
+    history,
+    timestamp: new Date().toISOString(),
+  });
+
+  return cerrar(Object.assign(base, {
+    status, reason_code: reason,
+    stop_reason: blocked
+      ? `Bloqueado (${reason}) en el intento ${iteration}. Requiere intervención humana.`
+      : `${result.status} (${result.reason_code}). Reparar el código y volver a correr: el reintento exige un cambio.`,
+  }));
+}
+
+/** Corrida fallida: los escenarios protegidos que fallaron quedan violados. */
+function verificarPreservacion(projectRoot, scope, testFiles, result) {
+  const root = projectRoot || process.cwd();
+  const dbPath = path.join(root, '.agentic/memoria.db');
+  if (!fs.existsSync(dbPath)) return { status: 'UNVERIFIED', reason_code: 'SIN_MEMORIA' };
+  let DB = null;
+  try {
+    const rg = require(path.join(__dirname, 'regression-guard.cjs'));
+    const esc = require(path.join(__dirname, 'escenarios.cjs'));
+    DB = openProjectDB(dbPath, projectRoot);
+    if (!DB) return { status: 'UNVERIFIED', reason_code: 'DB_NO_DISPONIBLE' };
+    const tested = esc.evidenciaDeCorrida(root, result, testFiles);
+    const verdict = rg.verifyAfterTDD(DB, tested, scope, root);
+    const id = crypto.randomUUID(), source = result.source_evidence || require('./source-evidence.cjs').capture(root);
+    const status = verdict.status === 'NO_APLICA' ? 'NO_APLICA' : verdict.status;
+    esc.guardarArtefacto(root, { execution_id: id, gate: 'preservation', subject_hash: tested.subject_hash,
+      cycle_id: tested.cycle_id, provenance: 'gate-check', comprobador: 'regression-guard:selection-and-verify',
+      status, runner_status: status, assertions: status === 'NO_APLICA' ? 1 : verdict.verified || 0,
+      runner_hash: require('./evidence-cache.cjs').huellaRunner(root), source_files: source.files, source_manifest_hash: source.hash,
+      expected: [], executed: [], escenarios: {}, runner_execution_id: tested.execution_id });
+    return { ...verdict, execution_id: id, subject_hash: tested.subject_hash, policy_id: esc.POLICY_ID };
+  } catch (e) {
+    return { status: 'ERROR', reason_code: e.message };
+  } finally {
+    if (DB) try { DB.close(); } catch { /* ya cerrada */ }
+  }
+}
+
+function registrarContratosDelResultado(projectRoot, area, command, scope, testFiles, result) {
+  const salida = { contracts: null, behavior: null };
+  const dbPath = path.join(projectRoot || process.cwd(), '.agentic/memoria.db');
+  if (!fs.existsSync(dbPath)) return salida;
+  try {
+    const cg = require(path.join(__dirname, 'contract-guard.cjs'));
+    const DB = openProjectDB(dbPath, projectRoot);
+    if (DB && typeof cg.registerPassingTests === 'function') {
+      salida.contracts = cg.registerPassingTests(DB, {
+        area: area || 'global',
+        command,
+        runner_id: command,
+        execution_id: result.gate && result.gate.execution_id,
+        subject_hash: result.gate && result.gate.subject_hash,
+        tests: result.tests || [],
+        passed: result.passed,
+        total: result.total,
+      });
+      const c = salida.contracts || {};
+      console.log(`[TDD-GATE] 📋 Contracts: ${c.status || '—'} · ${c.updated || 0} actualizados · ${c.created || 0} nuevos`);
+    }
+    if (DB) DB.close();
+  } catch (e) { salida.contracts = { status: 'ERROR', reason_code: e.message }; }
+
+  try {
+    const rgPath = path.join(__dirname, 'regression-guard.cjs');
+    if (fs.existsSync(rgPath)) {
+      const rg = require(rgPath);
+      const esc = require(path.join(__dirname, 'escenarios.cjs'));
+      const root = projectRoot || process.cwd();
+      const DB2 = openProjectDB(dbPath, projectRoot);
+      if (DB2) {
+        const evidencia = esc.evidenciaDeCorrida(root, result, testFiles);
+        salida.evidencia = evidencia;
+        salida.preservacion = rg.verifyAfterTDD(DB2, evidencia, scope, root);
+        salida.behavior = rg.registerBehavior(DB2, {
+          module: area || 'global', files: scope, testFiles, evidencia, projectRoot: root,
+        });
+        if (salida.behavior) {
+          const n = (salida.behavior.escenarios || []).length;
+          const ok = (salida.behavior.escenarios || []).filter((e) => e.acreditado).length;
+          console.log(`[TDD-GATE] 🛡️  Escenarios [${salida.behavior.module}]: ${n} registrados · ${ok} verificados en esta corrida`);
+        }
+        console.log(`[TDD-GATE] 🛡️  Preservación: ${salida.preservacion.status}${salida.preservacion.reason_code ? ' (' + salida.preservacion.reason_code + ')' : ''}`);
+        DB2.close();
+      }
+    }
+  } catch (e) { /* regression guard opcional */ }
+  return salida;
 }
 
 function _printTDDReport(r) {
   console.log('\n═══════════════════════════════════════════════════');
   console.log('  🧪 TDD-GATE REPORTE FINAL');
   console.log('═══════════════════════════════════════════════════');
-  console.log(`  Resultado:         ${r.success ? '✅ PASS' : '🛑 STOP'}`);
+  console.log(`  Resultado:         ${r.success ? '✅ PASS' : '🛑 ' + (r.status || 'STOP')}${r.reason_code ? ' (' + r.reason_code + ')' : ''}`);
   console.log(`  Tests encontrados: ${r.tests_found.length}`);
   console.log(`  Pasando:           ${r.tests_passing}`);
   console.log(`  Fallando:          ${r.tests_failing}`);
-  console.log(`  Iteraciones:       ${r.iterations} (max ${MAX_HEALING_ITERATIONS})`);
-  console.log(`  Regresiones:       ${r.regressions.length === 0 ? '0 ✓' : r.regressions.join(', ')}`);
+  console.log(`  Intento:           ${r.iterations} (max ${MAX_HEALING_ITERATIONS})`);
   if (!r.success && r.stop_reason) {
-    console.log(`\n  ⛔ STOP: ${r.stop_reason}`);
-    console.log('  Acción requerida: diagnóstico e intervención humana.');
+    console.log(`\n  ⛔ ${r.stop_reason}`);
   }
   console.log('═══════════════════════════════════════════════════\n');
 }
@@ -660,9 +853,21 @@ if (require.main === module) {
       // del proyecto): .agentic/, .claude/, .git/, node_modules/, dist/build.
       scope = filtrarScope(scope);
       const result = runSelfHealingLoop({ projectRoot, area, scope });
+      try {
+        fs.writeFileSync(path.join(projectRoot, '.agentic', '_tdd_ultimo.json'), JSON.stringify({
+          area, success: !!result.success, status: result.status || null, reason_code: result.reason_code || null,
+          passed: result.tests_passing || 0, failed: result.tests_failing || 0,
+          subject_hash: result.subject_hash || null,
+          execution_id: result.gate ? result.gate.execution_id : null,
+          contracts: result.contracts && result.contracts.contracts ? result.contracts.contracts : null,
+          finished_at: new Date().toISOString(),
+        }, null, 2));
+      } catch { /* el veredicto ya salió por el código de salida */ }
       // El fallo era invisible: run devolvía reason sin imprimirla y el exit 1
       // parecía un crash mudo. Ahora la razón siempre se ve.
-      if (!result.success && result.reason) console.log(`[TDD-GATE] ❌ ${result.reason}`);
+      if (!result.success && (result.reason || result.stop_reason)) {
+        console.log(`[TDD-GATE] ❌ ${result.reason || result.stop_reason}`);
+      }
       process.exit(result.success ? 0 : 1);
       break;
     }
@@ -700,4 +905,7 @@ module.exports = {
   runTests,
   parseTestOutput,
   findTestFiles,
+  subjectHash,
+  loadState,
+  clearState,
   detectTestCommand, filtrarScope, ES_CODIGO_FUENTE};
