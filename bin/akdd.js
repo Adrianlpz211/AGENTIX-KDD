@@ -23,9 +23,15 @@ const HELP = `
 
   Setup:
     akdd init              Install Agentic KDD in the current project
-    akdd update            Update the engine from the INSTALLED package (memory, config and code untouched)
+    akdd update            Update the engine from the INSTALLED package. One command: backs up, migrates the
+                           schema (compatible, additive) and VERIFIES that your memory was preserved.
+                           Exit 0 only when the result is verifiable.
                            [--ref=<branch|tag|sha>] [--from=<file.tar.gz>] [--sha256=<hex>]
-                           [--migrate] [--deps] · akdd update --rollback
+                           [--check] plan only, changes nothing · [--json] structured output
+                           [--no-migrate] skip the schema (result is never reported as complete)
+                           [--migrate] kept for compatibility (migrating is already the default)
+                           [--ack-recovery=<id>] after resolving a RECOVERY_REQUIRED by hand
+                           [--deps] · akdd update --rollback  (reverts framework FILES; memory is kept)
     akdd onboard           Analyze existing project + pre-populate memory
     akdd analyze           Cross-artifact consistency check
     akdd locks             Lock Manager status
@@ -197,8 +203,8 @@ switch (command) {
   case 'init':    init(); break;
   case 'update': {
     const flag = (n) => { const a = args.find((x) => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
-    if (args.includes('--rollback')) require('../src/update').rollback();
-    else update({ ref: flag('ref'), archivo: flag('from'), sha256: flag('sha256'), migrate: args.includes('--migrate'), deps: args.includes('--deps') });
+    if (args.includes('--rollback')) require('../src/update').rollback({ json: args.includes('--json'), salir: true });
+    else update({ ref: flag('ref'), archivo: flag('from'), sha256: flag('sha256'), migrate: args.includes('--migrate'), noMigrate: args.includes('--no-migrate'), check: args.includes('--check'), json: args.includes('--json'), ackRecovery: flag('ack-recovery'), deps: args.includes('--deps') });
     break;
   }
   case 'onboard': onboard(); break;

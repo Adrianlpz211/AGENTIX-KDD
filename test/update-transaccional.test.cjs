@@ -16,6 +16,7 @@ const RAIZ = path.join(__dirname, '..');
 const { update, rollback } = require('../src/update.js');
 const txm = require('../src/update-tx.js');
 const { createTarGz } = require('../src/tar-extract.js');
+const real = require('./helpers/db-real.cjs');
 
 const md5 = (f) => crypto.createHash('md5').update(fs.readFileSync(f)).digest('hex');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -48,7 +49,6 @@ function proyecto() {
   const root = tmp('akdd-proj-');
   escribir(root, '.agentic/config.md', '# Config\n\nCONFIGURADO: SI\nNombre: clinica\n');
   escribir(root, '.agentic/memoria/patrones.md', '# Patrones del usuario\n');
-  escribir(root, '.agentic/memoria.db', 'datos del proyecto');
   escribir(root, 'src/app.js', 'console.log(1);\n');
   return root;
 }
@@ -180,25 +180,27 @@ test('H25: personalizado intacto; obsoleto solo se borra si nadie lo tocó', asy
   assert.match(fs.readFileSync(path.join(root, '.agentic/grafo/grafo.cjs'), 'utf8'), /v2\.0\.0/);
 });
 
-test('H25: integridad, sin migración automática, y rollback a mano', async () => {
+test('H25: integridad y rollback a mano; la memoria se conserva por contenido', async () => {
   const root = proyecto();
   const fw1 = framework('1.0.0');
   const malo = await correr(root, { archivo: fw1, sha256: '0'.repeat(64) });
   assert.strictEqual(malo.reason, 'INTEGRIDAD');
   assert.ok(!fs.existsSync(path.join(root, '.agentic/grafo')), 'sha256 distinto: nada se copió');
 
-  const db = md5(path.join(root, '.agentic/memoria.db'));
-  const r1 = await correr(root, { archivo: fw1, sha256: txm.hashArchivo(fw1) });
-  assert.ok(r1.ok);
-  assert.ok(!fs.existsSync(path.join(root, 'MIGRADO')), 'sin --migrate no se migra');
-  assert.strictEqual(md5(path.join(root, '.agentic/memoria.db')), db);
+  const dbPath = real.crearBase(path.join(root, '.agentic/memoria.db'));
+  const antes = real.inventario(dbPath);
+  const r1 = await correr(root, { archivo: fw1, sha256: txm.hashArchivo(fw1), __sinFuncional: true }); // el motor de juguete no sabe buscar ni hablar MCP
+  assert.ok(r1.ok, JSON.stringify(r1.errors));
+  assert.ok(!fs.existsSync(path.join(root, 'MIGRADO')), 'el esquema no se migra ejecutando grafo.cjs migrate: lo hace el catálogo');
+  assert.strictEqual(real.conservada(antes, dbPath).status, 'PASS', 'la memoria original se conserva por contenido');
+  assert.ok(r1.backup && fs.existsSync(r1.backup.path), 'hay un respaldo verificado de la base');
 
-  const r2 = await correr(root, { archivo: framework('2.0.0'), migrate: true });
-  assert.ok(r2.ok);
-  assert.ok(fs.existsSync(path.join(root, 'MIGRADO')), 'con --migrate sí');
+  const r2 = await correr(root, { archivo: framework('2.0.0'), migrate: true, __sinFuncional: true });
+  assert.ok(r2.ok, JSON.stringify(r2.errors));
+  assert.strictEqual(real.conservada(antes, dbPath).status, 'PASS');
 
   const rb = await silencio(() => rollback({ projectPath: root }));
-  assert.ok(rb.ok);
+  assert.ok(rb.ok, JSON.stringify(rb.errors || rb));
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(root, '.agentic/grafo/framework.json'), 'utf8')).version, '1.0.0');
   assert.match(fs.readFileSync(path.join(root, '.agentic/memoria/patrones.md'), 'utf8'), /del usuario/);
 });

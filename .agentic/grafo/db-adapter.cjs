@@ -133,6 +133,9 @@ function envolver(nativo, opciones) {
       readOnly: state.readOnly,
       multiProcess: nativo.type !== 'sqljs',
       asyncBusyWait: false,
+      iterate: nativo.type !== 'sqljs',
+      bigints: nativo.type !== 'sqljs',
+      backup: nativo.type !== 'sqljs',
     },
     exec: proteger(execNativo, undefined),
     run: proteger((sql, ...params) => {
@@ -208,6 +211,32 @@ function envolver(nativo, opciones) {
         },
       };
     },
+    /**
+     * Lectura en streaming, sin cargar la tabla en memoria. Con
+     * { bigints: true } los INTEGER llegan como BigInt (sin perder los de 64 bits).
+     */
+    iterate(sql, params, opts) {
+      if (nativo.sqlJs) throw errorCodigo('UNSUPPORTED', 'sql.js no ofrece lectura en streaming');
+      const valores = aplanar(params === undefined ? [] : [params]);
+      const stmt = nativo.db.prepare(sql);
+      if (opts && opts.bigints) {
+        if (typeof stmt.safeIntegers === 'function') stmt.safeIntegers(true);
+        else if (typeof stmt.setReadBigInts === 'function') stmt.setReadBigInts(true);
+        else throw errorCodigo('UNSUPPORTED', 'este driver no lee INTEGER de 64 bits sin pérdida');
+      }
+      return valores.length ? stmt.iterate(...valores) : stmt.iterate();
+    },
+    /**
+     * Respaldo SQLite coherente, incluidos los commits que aún viven en -wal.
+     * VACUUM INTO genera un archivo nuevo; no copia la base en caliente.
+     */
+    backupTo(destino) {
+      if (nativo.sqlJs) throw errorCodigo('UNSUPPORTED', 'sql.js no ofrece un respaldo coherente');
+      if (fs.existsSync(destino)) throw errorCodigo('BACKUP_EXISTE', 'el respaldo ya existe: ' + destino);
+      fs.mkdirSync(path.dirname(destino), { recursive: true });
+      nativo.db.exec("VACUUM INTO '" + String(destino).split(path.sep).join('/').replace(/'/g, "''") + "'");
+      return destino;
+    },
     pragma(statement) {
       if (state.readOnly && /=/.test(String(statement))) {
         throw errorCodigo('READ_ONLY', 'READ_ONLY');
@@ -261,6 +290,11 @@ function open(dbPath, opciones) {
   const readOnly = !!opts.readOnly;
   if (readOnly && !fs.existsSync(dbPath)) {
     throw errorCodigo('NOT_INITIALIZED', 'NOT_INITIALIZED: ' + dbPath);
+  }
+  if (!readOnly && !opts.updateOwner) {
+    // Un update en curso tiene la exclusión de escritores: nadie más escribe.
+    try { require('./update-guard.cjs').assertWritable(dbPath); }
+    catch (e) { if (e && e.code === 'UPDATE_IN_PROGRESS') throw e; /* guard ausente en un motor viejo: no hay exclusión que respetar */ }
   }
   const padre = path.dirname(dbPath);
   if (!readOnly && !fs.existsSync(padre)) fs.mkdirSync(padre, { recursive: true });
@@ -345,7 +379,97 @@ function migrate(dbPath, opciones) {
   return { status: 'APPLIED', version, backupPath, applied: true, detalle };
 }
 
+/**
+ * Comprueba de verdad (en una base temporal) lo que un driver sabe hacer.
+ * Un update solo se apoya en un driver que supera TODAS las pruebas requeridas:
+ * lectura sin modificación, transacciones, bloqueo, respaldo coherente con WAL,
+ * BLOB, INTEGER de 64 bits, compatibilidad multiproceso y cierre de la conexión.
+ */
+function probeCapabilities(driver) {
+  const os = require('os');
+  const nombre = driver === 'node:sqlite' ? 'node-sqlite' : driver;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-caps-'));
+  const f = path.join(dir, 'probe.db');
+  const resultado = { driver, ok: false, checks: {}, failed: [] };
+  const check = (clave, fn) => {
+    try { fn(); resultado.checks[clave] = true; }
+    catch (e) { resultado.checks[clave] = false; resultado.failed.push(clave + ': ' + (e && e.message)); }
+  };
+  let escritor = null;
+  try {
+    try { escritor = open(f, { drivers: [nombre], updateOwner: true, busyTimeout: 300 }); }
+    catch (e) { resultado.failed.push('disponible: ' + (e && e.message)); return resultado; }
+    check('driver', () => { if (escritor.type !== nombre) throw new Error('abrió ' + escritor.type); });
+    escritor.exec('PRAGMA journal_mode = WAL');
+    escritor.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER, b BLOB, s TEXT)');
+    check('bigint', () => {
+      escritor.run('INSERT INTO t (id, n, b, s) VALUES (1, ?, ?, ?)', [9223372036854775807n, Buffer.from([0, 1, 2, 255]), 'ñá']);
+      const filas = [...escritor.iterate('SELECT n, b, s FROM t', undefined, { bigints: true })];
+      if (typeof filas[0].n !== 'bigint' || filas[0].n !== 9223372036854775807n) throw new Error('perdió precisión: ' + String(filas[0].n));
+    });
+    check('blob', () => {
+      const fila = escritor.get('SELECT b FROM t WHERE id = 1');
+      const b = Buffer.from(fila.b);
+      if (b.length !== 4 || b[3] !== 255 || b[0] !== 0) throw new Error('BLOB alterado');
+    });
+    check('transacciones', () => {
+      try { escritor.transaction(() => { escritor.run('INSERT INTO t (id, n) VALUES (2, 2)'); throw new Error('forzado'); })(); } catch { /* esperado */ }
+      if (escritor.get('SELECT count(*) AS n FROM t').n !== 1) throw new Error('el ROLLBACK no deshizo la inserción');
+    });
+    check('backup_con_wal', () => {
+      escritor.run('INSERT INTO t (id, n) VALUES (3, 3)'); // commit que puede vivir solo en el -wal
+      const copia = path.join(dir, 'copia.db');
+      escritor.backupTo(copia);
+      const lector = open(copia, { readOnly: true, drivers: [nombre] });
+      try { if (lector.get('SELECT count(*) AS n FROM t').n !== 2) throw new Error('el respaldo no incluye el commit en WAL'); }
+      finally { lector.close(); }
+    });
+    check('readonly', () => {
+      const lector = open(f, { readOnly: true, drivers: [nombre] });
+      try {
+        let rechazo = false;
+        try { lector.exec('INSERT INTO t (id) VALUES (99)'); } catch { rechazo = true; }
+        if (!rechazo) throw new Error('un lector aceptó escribir');
+      } finally { lector.close(); }
+    });
+    check('bloqueo', () => {
+      const otro = open(f, { drivers: [nombre], updateOwner: true, busyTimeout: 200 });
+      try {
+        escritor.exec('BEGIN IMMEDIATE');
+        let ocupado = false;
+        try { otro.exec('BEGIN IMMEDIATE'); otro.exec('ROLLBACK'); } catch { ocupado = true; }
+        escritor.exec('ROLLBACK');
+        if (!ocupado) throw new Error('dos escritores a la vez: el bloqueo no se respetó');
+      } finally { otro.close(); }
+    });
+    check('multiproceso', () => {
+      if (!escritor.capabilities.multiProcess) throw new Error('el driver reexporta el archivo completo desde memoria');
+    });
+  } finally {
+    try { if (escritor) escritor.close(); } catch { /* ya cerrada */ }
+    check('cierre', () => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (fs.existsSync(dir)) throw new Error('el archivo sigue tomado tras cerrar');
+    });
+  }
+  resultado.ok = resultado.failed.length === 0;
+  return resultado;
+}
+
+/** Primer driver nativo que supera el sondeo; null si ninguno (el update se detiene antes de escribir). */
+function selectDriverForUpdate(candidatos) {
+  const intentos = [];
+  for (const c of candidatos || ['better-sqlite3', 'node:sqlite']) {
+    const r = probeCapabilities(c);
+    intentos.push(r);
+    if (r.ok) return { driver: c === 'node:sqlite' ? 'node-sqlite' : c, intentos };
+  }
+  return { driver: null, intentos };
+}
+
 module.exports = {
+  probeCapabilities,
+  selectDriverForUpdate,
   open,
   openReadOnly,
   openWrite,

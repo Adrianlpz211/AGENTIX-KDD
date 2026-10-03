@@ -32,11 +32,18 @@ function dirUpdate(projectPath) { return path.join(projectPath, '.agentic', '_up
 function ownedPath(projectPath) { return path.join(dirUpdate(projectPath), 'owned.json'); }
 
 function leerJSON(f, def) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return def; } }
+/**
+ * Escritura atómica Y durable: archivo temporal → fsync → rename → fsync del
+ * directorio (donde el sistema operativo lo permite; Windows no deja abrir un
+ * directorio y ahí se confía en el flush del rename).
+ */
 function escribirJSON(f, v) {
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const tmp = f + '.tmp-' + process.pid;
-  fs.writeFileSync(tmp, JSON.stringify(v, null, 2));
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeSync(fd, JSON.stringify(v, null, 2)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, f);
+  try { const dfd = fs.openSync(path.dirname(f), 'r'); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch { /* Windows: sin fsync de directorio */ }
 }
 
 // ── Staging ─────────────────────────────────────────────────────────────────
@@ -165,9 +172,26 @@ function abrirJournal(projectPath, meta) {
   const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex');
   const dir = path.join(dirUpdate(projectPath), 'tx', id);
   fs.mkdirSync(path.join(dir, 'backup'), { recursive: true });
-  const j = { id, dir, archivo: path.join(dir, 'journal.json'), datos: { estado: 'aplicando', inicio: new Date().toISOString(), ...meta, entradas: [] } };
+  const j = { id, dir, archivo: path.join(dir, 'journal.json'), datos: { estado: 'aplicando', fase: 'PREPARADO', historial: [], inicio: new Date().toISOString(), ...meta, entradas: [] } };
   escribirJSON(j.archivo, j.datos);
   return j;
+}
+
+/**
+ * Máquina de estados persistente (PREPARADO → RESPALDO_VERIFICADO → APLICANDO →
+ * VALIDANDO → CONFIRMADO | REVERTIDO | RECUPERACION_REQUERIDA | BLOQUEADO).
+ * Se anota ANTES de cada paso qué se hará y cómo recuperarlo; el resultado se
+ * anota al terminar. Tras una interrupción el journal dice dónde quedó.
+ */
+function marcarFase(j, fase, intent, recovery) {
+  j.datos.fase = fase;
+  j.datos.historial.push({ fase, at: new Date().toISOString(), intent: intent || null, recovery: recovery || null, hecho: false });
+  escribirJSON(j.archivo, j.datos);
+}
+function pasoHecho(j, extra) {
+  const h = j.datos.historial[j.datos.historial.length - 1];
+  if (h) { h.hecho = true; h.fin = new Date().toISOString(); if (extra) Object.assign(h, extra); }
+  escribirJSON(j.archivo, j.datos);
 }
 
 /** Anota y respalda ANTES de tocar el archivo: el journal siempre va por delante. */
@@ -184,13 +208,24 @@ function respaldar(j, projectPath, rel, accion) {
   escribirJSON(j.archivo, j.datos);
 }
 
+/**
+ * Revierte los archivos del journal. Si alguien editó un archivo DESPUÉS de que
+ * el update lo escribió (su hash ya no es el que registró el journal) no se
+ * sobrescribe a ciegas: se deja como está y se informa como conflicto.
+ */
 function revertir(projectPath, journalFile) {
   const datos = leerJSON(journalFile, null);
-  if (!datos) return { ok: false, revertidos: 0 };
+  if (!datos) return { ok: false, revertidos: 0, conflictos: [] };
   const dir = path.dirname(journalFile);
   let n = 0;
+  const conflictos = [];
   for (const e of [...datos.entradas].reverse()) {
     const abs = path.join(projectPath, e.rel);
+    const hay = fs.existsSync(abs);
+    if (hay && e.despues && hashArchivo(abs) !== e.despues) {
+      conflictos.push({ file: e.rel, motivo: 'se editó después de que el update lo escribiera: no se sobrescribe' });
+      continue;
+    }
     if (e.existia) {
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.copyFileSync(path.join(dir, 'backup', e.rel), abs);
@@ -199,14 +234,16 @@ function revertir(projectPath, journalFile) {
     }
     n++;
   }
-  datos.estado = 'revertido';
+  datos.estado = conflictos.length ? 'recuperacion_requerida' : 'revertido';
+  datos.fase = conflictos.length ? 'RECUPERACION_REQUERIDA' : 'REVERTIDO';
   datos.fin = new Date().toISOString();
+  if (conflictos.length) datos.conflictos_de_reversion = conflictos;
   escribirJSON(journalFile, datos);
-  return { ok: true, revertidos: n };
+  return { ok: conflictos.length === 0, revertidos: n, conflictos };
 }
 
 function cerrarJournal(j, extra) {
-  Object.assign(j.datos, extra, { estado: 'aplicado', fin: new Date().toISOString() });
+  Object.assign(j.datos, extra, { estado: 'aplicado', fase: 'CONFIRMADO', fin: new Date().toISOString() });
   escribirJSON(j.archivo, j.datos);
 }
 
@@ -219,7 +256,7 @@ function recuperarPendientes(projectPath) {
   for (const id of ids) {
     const f = path.join(base, id, 'journal.json');
     const d = leerJSON(f, null);
-    if (d && d.estado === 'aplicando') recuperados.push({ id, ...revertir(projectPath, f) });
+    if (d && d.estado === 'aplicando') recuperados.push({ id, fase_al_morir: d.fase || null, ...revertir(projectPath, f) });
   }
   return recuperados;
 }
@@ -241,46 +278,94 @@ function podar(projectPath, conservar = 3) {
 // ── Aplicar ─────────────────────────────────────────────────────────────────
 
 /**
- * Copia los archivos managed del staging al proyecto dentro del journal.
+ * Copia los archivos administrados del staging al proyecto dentro del journal.
  *
  *   filtro(rel)    false = protegido, no se toca
+ *   plan           entradas de update-classify.clasificar(): decide por archivo
+ *                  (CREAR/ESCRIBIR/CONSERVAR_Y_APARTAR/OMITIR/NINGUNA). Sin plan
+ *                  se usa owned.json como antes (compatibilidad).
  *   fallarTras     solo pruebas: lanza después de N escrituras
+ *
+ * Justo antes de reemplazar un archivo se REVALIDA su hash contra el que se vio
+ * al planear: si alguien lo editó entretanto, no se pisa; se conserva y se
+ * guarda la versión nueva aparte.
  */
 function aplicar(projectPath, staging, j, opts = {}) {
   const owned = leerJSON(ownedPath(projectPath), { archivos: {} });
   const previos = owned.archivos || {};
   const nuevos = manifest.archivos(staging);
   const enNueva = new Set(nuevos);
-  const resultado = { escritos: [], sinCambios: [], personalizados: [], protegidos: [], obsoletosBorrados: [], obsoletosConservados: [] };
+  const resultado = { escritos: [], sinCambios: [], personalizados: [], protegidos: [], obsoletosBorrados: [], obsoletosConservados: [], editadosDurante: [] };
   const hashes = {};
   let escrituras = 0;
   const pendientes = path.join(j.dir, 'personalizados');
+  const plan = opts.plan ? new Map(opts.plan.map((e) => [e.rel, e])) : null;
+
+  const apartar = (rel, src) => {
+    const copia = path.join(pendientes, rel);
+    fs.mkdirSync(path.dirname(copia), { recursive: true });
+    fs.copyFileSync(src, copia);
+  };
+  const escribir = (rel, src, dest, nuevoHash) => {
+    respaldar(j, projectPath, rel, 'escribir');
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    const ent = j.datos.entradas.find((x) => x.rel === rel);
+    if (ent) { ent.despues = nuevoHash; escribirJSON(j.archivo, j.datos); }
+    hashes[rel] = nuevoHash;
+    resultado.escritos.push(rel);
+    escrituras++;
+    if (opts.fallarTras && escrituras >= opts.fallarTras) throw codigo('FALLO_INYECTADO', `fallo inyectado tras ${escrituras} escrituras`);
+  };
 
   for (const rel of nuevos) {
     const src = path.join(staging, rel);
     const dest = path.join(projectPath, rel);
     const nuevoHash = hashArchivo(src);
+    const e = plan ? plan.get(rel) : null;
+
     if (opts.filtro && !opts.filtro(rel)) { resultado.protegidos.push(rel); continue; }
+
+    if (e) {
+      if (e.accion === 'OMITIR') { resultado.protegidos.push(rel); continue; }
+      if (e.accion === 'NINGUNA') { hashes[rel] = fs.existsSync(dest) ? hashArchivo(dest) : nuevoHash; resultado.sinCambios.push(rel); continue; }
+      if (e.accion === 'CONSERVAR_Y_APARTAR') {
+        apartar(rel, src);
+        hashes[rel] = fs.existsSync(dest) ? hashArchivo(dest) : (previos[rel] || null);
+        if (hashes[rel] === null) delete hashes[rel];
+        resultado.personalizados.push(rel);
+        continue;
+      }
+      // CREAR / ESCRIBIR: revalidar contra lo visto al planear
+      if (fs.existsSync(dest)) {
+        const ahora = hashArchivo(dest);
+        if (e.hash_actual && ahora !== e.hash_actual) {
+          apartar(rel, src);
+          hashes[rel] = ahora;
+          resultado.personalizados.push(rel);
+          resultado.editadosDurante.push(rel);
+          continue;
+        }
+      } else if (e.accion === 'ESCRIBIR') {
+        // existía al planear y ya no: alguien lo borró; se recrea (era del framework)
+      }
+      escribir(rel, src, dest, nuevoHash);
+      continue;
+    }
+
+    // Sin plan: comportamiento anterior (owned.json)
     if (fs.existsSync(dest)) {
       const actual = hashArchivo(dest);
       if (actual === nuevoHash) { hashes[rel] = actual; resultado.sinCambios.push(rel); continue; }
       if (previos[rel] && previos[rel] !== actual) {
         /* Lo instaló Agentix y alguien lo cambió: es del usuario ahora. */
-        const copia = path.join(pendientes, rel);
-        fs.mkdirSync(path.dirname(copia), { recursive: true });
-        fs.copyFileSync(src, copia);
+        apartar(rel, src);
         hashes[rel] = previos[rel];
         resultado.personalizados.push(rel);
         continue;
       }
     }
-    respaldar(j, projectPath, rel, 'escribir');
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
-    hashes[rel] = nuevoHash;
-    resultado.escritos.push(rel);
-    escrituras++;
-    if (opts.fallarTras && escrituras >= opts.fallarTras) throw codigo('FALLO_INYECTADO', `fallo inyectado tras ${escrituras} escrituras`);
+    escribir(rel, src, dest, nuevoHash);
   }
 
   for (const rel of Object.keys(previos)) {
@@ -315,6 +400,6 @@ function codigo(code, msg) { const e = new Error(msg); e.code = code; return e; 
 
 module.exports = {
   prepararBundle, prepararStaging, validarStaging, revisarTar, revisarArbol, entradaHostil, rutaTrasStrip,
-  resolverRef, abrirJournal, respaldar, revertir, cerrarJournal, recuperarPendientes, podar,
+  resolverRef, abrirJournal, marcarFase, pasoHecho, respaldar, revertir, cerrarJournal, recuperarPendientes, podar,
   aplicar, registrarOwned, ownedPath, dirUpdate, hashArchivo, sha256,
 };

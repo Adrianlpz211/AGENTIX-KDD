@@ -35,6 +35,7 @@ const { execFileSync, execSync } = require('child_process');
 
 const RAIZ = path.join(__dirname, '..');
 const md5 = (f) => crypto.createHash('md5').update(fs.readFileSync(f)).digest('hex');
+const real = require('./helpers/db-real.cjs');
 
 /* Texto del usuario, con encabezados markdown propios: exactamente lo que una
    versión anterior de la migración se comió al cortar por "líneas que empiezan
@@ -67,8 +68,7 @@ function proyectoConDatos() {
     '# Patrones\n\n- Los combos se cierran al scrollear (confianza ALTA)\n');
   fs.writeFileSync(path.join(root, '.agentic', 'memoria', 'trabajo.md'),
     '# Trabajo\n\nTarea activa: cierre de compras\n');
-  fs.writeFileSync(path.join(root, '.agentic', 'memoria.db'),
-    'no es una base de verdad, pero si un archivo que no se debe tocar');
+  real.crearBase(path.join(root, '.agentic', 'memoria.db'), { nodos: 12 });
 
   /* CLAUDE.md tal como queda en un proyecto: la plantilla del framework y,
      detrás del marcador, lo que escribió el usuario. */
@@ -131,7 +131,7 @@ test('akdd update actualiza el framework sin destruir el proyecto', { timeout: 3
   const preload = preloadSinRed(path.dirname(tar), tar);
 
   const antes = {
-    db: md5(path.join(root, '.agentic', 'memoria.db')),
+    db: real.inventario(path.join(root, '.agentic', 'memoria.db')),
     patrones: md5(path.join(root, '.agentic', 'memoria', 'patrones.md')),
     codigo: md5(path.join(root, 'src', 'app.js')),
   };
@@ -151,8 +151,9 @@ test('akdd update actualiza el framework sin destruir el proyecto', { timeout: 3
 
   /* ── mitad 1: lo del usuario sobrevive ─────────────────────────────────── */
 
-  assert.equal(md5(path.join(root, '.agentic', 'memoria.db')), antes.db,
-    'memoria.db NO se puede tocar: es el trabajo acumulado del proyecto');
+  /* La base puede cambiar de bytes (se migra de forma aditiva): lo que no puede cambiar es su CONTENIDO. */
+  const cmp = real.conservada(antes.db, path.join(root, '.agentic', 'memoria.db'));
+  assert.equal(cmp.status, 'PASS', 'memoria.db: el contenido original debe conservarse: ' + JSON.stringify(cmp.problems));
   assert.equal(md5(path.join(root, '.agentic', 'memoria', 'patrones.md')), antes.patrones,
     'la memoria del usuario no se actualiza, se respeta');
   assert.equal(md5(path.join(root, 'src', 'app.js')), antes.codigo,

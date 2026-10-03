@@ -79,3 +79,7 @@ test/
 # Estado de máquina en un .agentic anidado (03/10/2026: el guardia de hooks
 # sembró src/.agentic/ y el release check lo atrapó en el tarball)
 **/.agentic/_*
+
+# Respaldos de la memoria de quien publica: jamás en el paquete
+.agentic/memoria.db.bak-*
+.agentic/_update/

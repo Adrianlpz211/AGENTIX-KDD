@@ -1,0 +1,4284 @@
+{
+ "catalog_version": 1,
+ "generated_from": {
+  "engines": [
+   "3.19.0",
+   "3.20.0"
+  ],
+  "note": "esquemas reales de los paquetes publicados + DDL de funciones perezosas del código fuente"
+ },
+ "derived_tables": [
+  "ast_symbols",
+  "ast_edges",
+  "ast_index_runs",
+  "file_fingerprints"
+ ],
+ "tables": {
+  "ast_edges": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS ast_edges (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      from_file    TEXT NOT NULL,\n      to_file      TEXT,\n      from_symbol  TEXT,\n      to_symbol    TEXT,\n      kind         TEXT NOT NULL,\n      weight       REAL DEFAULT 1.0,\n      pagerank_src REAL DEFAULT 0.0,\n      last_indexed TEXT DEFAULT (datetime('now'))\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "from_file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "to_file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "from_symbol",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "to_symbol",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "weight",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "pagerank_src",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_indexed",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_ast_edge_from",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ast_edge_from ON ast_edges(from_file)"
+    },
+    {
+     "name": "idx_ast_edge_kind",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ast_edge_kind ON ast_edges(kind)"
+    },
+    {
+     "name": "idx_ast_edge_to",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ast_edge_to ON ast_edges(to_file)"
+    }
+   ]
+  },
+  "ast_index_runs": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS ast_index_runs (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      ran_at TEXT DEFAULT (datetime('now')),\n      changed_files TEXT\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ran_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "changed_files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": []
+  },
+  "ast_symbols": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS ast_symbols (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      file         TEXT NOT NULL,\n      language     TEXT NOT NULL,\n      symbol_name  TEXT NOT NULL,\n      kind         TEXT NOT NULL,\n      line_start   INTEGER DEFAULT 0,\n      line_end     INTEGER DEFAULT 0,\n      exported     INTEGER DEFAULT 0,\n      signature    TEXT,\n      pagerank     REAL DEFAULT 0.0,\n      last_indexed TEXT DEFAULT (datetime('now')),\n      content_hash TEXT\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "language",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "symbol_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "kind",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "line_start",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "line_end",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "exported",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "signature",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "pagerank",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_indexed",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "content_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_ast_sym_file",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ast_sym_file ON ast_symbols(file)"
+    },
+    {
+     "name": "idx_ast_sym_kind",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ast_sym_kind ON ast_symbols(kind)"
+    },
+    {
+     "name": "idx_ast_sym_uniq",
+     "since": "3.19.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_ast_sym_uniq ON ast_symbols(file, symbol_name, kind)"
+    }
+   ]
+  },
+  "cicd_reports": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS cicd_reports (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  episodio_id TEXT,\n  plataforma TEXT DEFAULT 'github',\n  workflow TEXT,\n  rama TEXT,\n  commit_hash TEXT,\n  actor TEXT,\n  repo TEXT,\n  run_id TEXT,\n  run_url TEXT,\n  tests_pasando INTEGER DEFAULT 0,\n  tests_fallando INTEGER DEFAULT 0,\n  archivos_tocados TEXT DEFAULT '[]',\n  errores_tests TEXT DEFAULT '[]',\n  es_exito INTEGER DEFAULT 0,\n  fecha TEXT DEFAULT (datetime('now'))\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "episodio_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "plataforma",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'github'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "workflow",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "rama",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "commit_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "actor",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "repo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "run_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "run_url",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tests_pasando",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tests_fallando",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "archivos_tocados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "errores_tests",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "es_exito",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_cicd_exito",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_cicd_exito ON cicd_reports(es_exito)"
+    },
+    {
+     "name": "idx_cicd_fecha",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_cicd_fecha ON cicd_reports(fecha)"
+    },
+    {
+     "name": "idx_cicd_rama",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_cicd_rama ON cicd_reports(rama)"
+    }
+   ]
+  },
+  "ciclos": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS ciclos (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  ciclo_id TEXT NOT NULL UNIQUE,\n  tarea TEXT NOT NULL,\n  tipo_tarea TEXT DEFAULT 'feature',\n  modulo TEXT DEFAULT 'global',\n  area TEXT DEFAULT 'global',\n  estado TEXT DEFAULT 'EN_PROGRESO',\n  context_guard TEXT DEFAULT 'OK',\n  fases_total INTEGER DEFAULT 0,\n  fases_completadas INTEGER DEFAULT 0,\n  patrones_aplicados TEXT DEFAULT '[]',\n  errores_evitados TEXT DEFAULT '[]',\n  decisiones_usadas TEXT DEFAULT '[]',\n  memory_trace TEXT DEFAULT '[]',\n  tests_generados INTEGER DEFAULT 0,\n  tests_pasando INTEGER DEFAULT 0,\n  review_blockers INTEGER DEFAULT 0,\n  review_required INTEGER DEFAULT 0,\n  stops_count INTEGER DEFAULT 0,\n  sync_grafo INTEGER DEFAULT 0,\n  duracion_ms INTEGER DEFAULT 0,\n  snapshot_inicio TEXT,\n  snapshot_fin TEXT,\n  fecha_inicio TEXT DEFAULT (datetime('now')),\n  fecha_fin TEXT\n, knowledge_loaded TEXT DEFAULT '[]', ast_indexed INTEGER DEFAULT 0, modules_touched TEXT, stack_detected TEXT, post_cycle_ran TEXT, duracion_origen TEXT)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tarea",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo_tarea",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'feature'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "modulo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "estado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'EN_PROGRESO'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "context_guard",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'OK'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fases_total",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fases_completadas",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "patrones_aplicados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "errores_evitados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "decisiones_usadas",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "memory_trace",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tests_generados",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tests_pasando",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "review_blockers",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "review_required",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "stops_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "sync_grafo",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "duracion_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "snapshot_inicio",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "snapshot_fin",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha_inicio",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "fecha_fin",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "knowledge_loaded",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "ast_indexed",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "modules_touched",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "stack_detected",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "post_cycle_ran",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "duracion_origen",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_ciclos_estado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ciclos_estado ON ciclos(estado)"
+    },
+    {
+     "name": "idx_ciclos_fecha",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ciclos_fecha ON ciclos(fecha_inicio)"
+    },
+    {
+     "name": "idx_ciclos_modulo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ciclos_modulo ON ciclos(modulo)"
+    },
+    {
+     "name": "idx_ciclos_unique",
+     "since": "3.19.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_ciclos_unique ON ciclos(ciclo_id)"
+    }
+   ]
+  },
+  "code_summaries": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS code_summaries (file TEXT NOT NULL, symbol TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL, lang TEXT DEFAULT 'es', structural_sig TEXT, content_hash TEXT, generated_at TEXT DEFAULT (datetime('now')), PRIMARY KEY (file, symbol))",
+   "columns": [
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "symbol",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": "''",
+     "since": "3.19.0"
+    },
+    {
+     "name": "summary",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "lang",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'es'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "structural_sig",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "content_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "generated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [],
+   "fuente": "code-summaries.cjs"
+  },
+  "contract_executions": {
+   "since": "3.20.0",
+   "create": "CREATE TABLE IF NOT EXISTS contract_executions (contract_id TEXT NOT NULL, execution_id TEXT NOT NULL, subject_hash TEXT, status TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')), PRIMARY KEY (contract_id, execution_id))",
+   "columns": [
+    {
+     "name": "contract_id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "execution_id",
+     "type": "TEXT",
+     "pk": 2,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "subject_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.20.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [],
+   "fuente": "contract-guard.cjs migrateSchemaV2"
+  },
+  "contract_violations": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS contract_violations (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      contract_id TEXT NOT NULL,\n      ciclo_id TEXT,\n      violation_type TEXT NOT NULL,\n      description TEXT,\n      recovered INTEGER DEFAULT 0,\n      recovery_ciclo TEXT,\n      created_at TEXT DEFAULT (datetime('now'))\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "contract_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "violation_type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "recovered",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "recovery_ciclo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": []
+  },
+  "creative_suggestions": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS creative_suggestions (\n      id TEXT PRIMARY KEY,\n      type TEXT NOT NULL,\n      title TEXT NOT NULL,\n      description TEXT,\n      file TEXT,\n      module TEXT,\n      area TEXT DEFAULT 'global',\n      risk_level TEXT DEFAULT 'LOW',\n      blast_radius INTEGER DEFAULT 0,\n      evidence TEXT,\n      auto_applicable INTEGER DEFAULT 0,\n      applied INTEGER DEFAULT 0,\n      dismissed INTEGER DEFAULT 0,\n      ciclo_id TEXT,\n      created_at TEXT DEFAULT (datetime('now')),\n      applied_at TEXT,\n      result TEXT\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "title",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "risk_level",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'LOW'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "blast_radius",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "evidence",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "auto_applicable",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "applied",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "dismissed",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "applied_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "result",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_suggestions_applied",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_suggestions_applied ON creative_suggestions(applied, dismissed)"
+    },
+    {
+     "name": "idx_suggestions_module",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_suggestions_module ON creative_suggestions(module)"
+    }
+   ]
+  },
+  "creative_wins": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS creative_wins (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      suggestion_id TEXT,\n      description TEXT NOT NULL,\n      type TEXT NOT NULL,\n      module TEXT,\n      file TEXT,\n      impact TEXT,\n      ciclo_id TEXT,\n      created_at TEXT DEFAULT (datetime('now'))\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "suggestion_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "impact",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": []
+  },
+  "entidades": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS entidades (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  nombre TEXT NOT NULL UNIQUE,\n  tipo TEXT NOT NULL,\n  descripcion TEXT,\n  area TEXT DEFAULT 'global',\n\n  propiedades TEXT DEFAULT '{}',\n  embedding TEXT,\n\n  modificaciones INTEGER DEFAULT 0,\n  errores_asociados INTEGER DEFAULT 0,\n  critica INTEGER DEFAULT 0,\n  fecha_creacion TEXT DEFAULT (datetime('now')),\n  fecha_update TEXT DEFAULT (datetime('now'))\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "nombre",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "descripcion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "propiedades",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'{}'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "embedding",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "modificaciones",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "errores_asociados",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "critica",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha_creacion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "fecha_update",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_entidades_area",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_entidades_area ON entidades(area)"
+    },
+    {
+     "name": "idx_entidades_tipo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_entidades_tipo ON entidades(tipo)"
+    }
+   ]
+  },
+  "episodios": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS episodios (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  episodio_id TEXT NOT NULL UNIQUE,\n\n  ciclo_id TEXT,\n  sesion_id TEXT,\n  tipo TEXT DEFAULT 'accion',\n\n  descripcion TEXT NOT NULL,\n  intento_num INTEGER DEFAULT 1,\n  contexto_antes TEXT,\n  accion_tomada TEXT,\n  resultado TEXT,\n  razon_resultado TEXT,\n  archivos_tocados TEXT DEFAULT '[]',\n\n  consolidado INTEGER DEFAULT 0,\n  nodo_generado_id INTEGER,\n\n  area TEXT DEFAULT 'global',\n  modulo TEXT DEFAULT 'global',\n  relevancia REAL DEFAULT 1.0,\n  fecha TEXT DEFAULT (datetime('now')), embedding TEXT,\n  FOREIGN KEY (nodo_generado_id) REFERENCES nodos(id)\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "episodio_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "sesion_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'accion'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "descripcion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "intento_num",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "contexto_antes",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "accion_tomada",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "resultado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "razon_resultado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "archivos_tocados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "consolidado",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "nodo_generado_id",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "modulo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "relevancia",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    },
+    {
+     "name": "embedding",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_episodios_area",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_area ON episodios(area)"
+    },
+    {
+     "name": "idx_episodios_ciclo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_ciclo ON episodios(ciclo_id)"
+    },
+    {
+     "name": "idx_episodios_consolidado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_consolidado ON episodios(consolidado)"
+    },
+    {
+     "name": "idx_episodios_fecha",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_fecha ON episodios(fecha)"
+    },
+    {
+     "name": "idx_episodios_sesion",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_sesion ON episodios(sesion_id)"
+    },
+    {
+     "name": "idx_episodios_tipo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_episodios_tipo ON episodios(tipo)"
+    }
+   ]
+  },
+  "fases": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS fases (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  ciclo_id TEXT NOT NULL,\n  fase_num INTEGER NOT NULL,\n  fase_nombre TEXT,\n  agente TEXT,\n  estado TEXT DEFAULT 'EN_PROGRESO',\n  memoria_leida TEXT DEFAULT '[]',\n  decision_tomada TEXT,\n  resultado TEXT,\n  intentos INTEGER DEFAULT 1,\n  duracion_ms INTEGER DEFAULT 0,\n  tokens_aprox INTEGER DEFAULT 0,\n  fecha_inicio TEXT DEFAULT (datetime('now')),\n  fecha_fin TEXT, harness_passed INTEGER DEFAULT 1, gate_result TEXT,\n  FOREIGN KEY (ciclo_id) REFERENCES ciclos(ciclo_id)\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fase_num",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fase_nombre",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "agente",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "estado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'EN_PROGRESO'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "memoria_leida",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "decision_tomada",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "resultado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "intentos",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "duracion_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tokens_aprox",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha_inicio",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "fecha_fin",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "harness_passed",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "gate_result",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_fases_agente",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_fases_agente ON fases(agente)"
+    },
+    {
+     "name": "idx_fases_ciclo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_fases_ciclo ON fases(ciclo_id)"
+    }
+   ]
+  },
+  "file_fingerprints": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS file_fingerprints (file TEXT PRIMARY KEY, content_hash TEXT NOT NULL, structural_sig TEXT, supported INTEGER DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')), body_hash TEXT)",
+   "columns": [
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "content_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "structural_sig",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "supported",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "body_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [],
+   "fuente": "change-classifier.cjs"
+  },
+  "file_locks": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS file_locks (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      file_path    TEXT NOT NULL UNIQUE,\n      module_name  TEXT NOT NULL,\n      instance_id  TEXT NOT NULL,\n      acquired_at  TEXT NOT NULL DEFAULT (datetime('now')),\n      expires_at   TEXT NOT NULL\n    , expires_ms INTEGER)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "file_path",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "instance_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "acquired_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "expires_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "expires_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_fl_module",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_fl_module ON file_locks(module_name)"
+    },
+    {
+     "name": "idx_fl_path",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_fl_path ON file_locks(file_path)"
+    }
+   ]
+  },
+  "gate_events": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS gate_events (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      ts          TEXT DEFAULT (datetime('now')),\n      gate        TEXT NOT NULL,\n      verdict     TEXT NOT NULL,\n      behavior_id TEXT,\n      file        TEXT,\n      detalle     TEXT DEFAULT '{}',\n      cycle_hint  TEXT\n    , source TEXT DEFAULT 'mechanical', cycle_id TEXT, event_id TEXT, incident_id TEXT)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ts",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "gate",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "verdict",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "behavior_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "detalle",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'{}'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "cycle_hint",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "source",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'mechanical'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "cycle_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "event_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "incident_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_ge_behavior",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ge_behavior ON gate_events(behavior_id)"
+    },
+    {
+     "name": "idx_ge_cycle",
+     "since": "3.20.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ge_cycle ON gate_events(cycle_id, verdict)"
+    },
+    {
+     "name": "idx_ge_event",
+     "since": "3.20.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_ge_event ON gate_events(event_id)"
+    },
+    {
+     "name": "idx_ge_gate",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ge_gate ON gate_events(gate, verdict)"
+    }
+   ]
+  },
+  "git_context_log": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS git_context_log (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  sesion_id TEXT NOT NULL,\n  rama TEXT,\n  commit_hash TEXT,\n  archivos_modificados TEXT DEFAULT '[]',\n  riesgos_detectados TEXT DEFAULT '[]',\n  predicciones TEXT DEFAULT '[]',\n  tiene_riesgos_altos INTEGER DEFAULT 0,\n  fecha TEXT DEFAULT (datetime('now'))\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "sesion_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "rama",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "commit_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "archivos_modificados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "riesgos_detectados",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "predicciones",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tiene_riesgos_altos",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_git_context_fecha",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_git_context_fecha ON git_context_log(fecha)"
+    },
+    {
+     "name": "idx_git_context_rama",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_git_context_rama ON git_context_log(rama)"
+    }
+   ]
+  },
+  "invariant_violations": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS invariant_violations (\n      id            TEXT PRIMARY KEY,\n      behavior_id   TEXT NOT NULL,\n      cycle         INTEGER DEFAULT 0,\n      changed_files TEXT DEFAULT '[]',\n      failed_tests  TEXT DEFAULT '[]',\n      description   TEXT,\n      fixed_at      TEXT,\n      created_at    TEXT DEFAULT (datetime('now')),\n      FOREIGN KEY (behavior_id) REFERENCES protected_behaviors(id)\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "behavior_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "cycle",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "changed_files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "failed_tests",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fixed_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_iv_behavior",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_iv_behavior ON invariant_violations(behavior_id)"
+    }
+   ]
+  },
+  "knowledge_docs": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS knowledge_docs (\n      id              INTEGER PRIMARY KEY AUTOINCREMENT,\n      doc_id          TEXT NOT NULL UNIQUE,\n      tipo            TEXT NOT NULL,\n      titulo          TEXT NOT NULL,\n      status          TEXT DEFAULT 'accepted',\n      fecha           TEXT,\n      decision_makers TEXT DEFAULT '[]',\n      afecta          TEXT DEFAULT '[]',\n      frontmatter     TEXT DEFAULT '{}',\n      contenido       TEXT,\n      context         TEXT,\n      decision        TEXT,\n      consequences    TEXT,\n      options         TEXT DEFAULT '[]',\n      file_path       TEXT,\n      last_indexed    TEXT DEFAULT (datetime('now')),\n      content_hash    TEXT\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "doc_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "titulo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'accepted'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "decision_makers",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "afecta",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "frontmatter",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'{}'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "contenido",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "context",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "decision",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "consequences",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "options",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "file_path",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_indexed",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "content_hash",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_kdocs_status",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_kdocs_status ON knowledge_docs(status)"
+    },
+    {
+     "name": "idx_kdocs_tipo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_kdocs_tipo ON knowledge_docs(tipo)"
+    }
+   ]
+  },
+  "lock_fencing": {
+   "since": "3.20.0",
+   "create": "CREATE TABLE IF NOT EXISTS lock_fencing (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "value",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": []
+  },
+  "lock_waiters": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS lock_waiters (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      module_name  TEXT NOT NULL,\n      instance_id  TEXT NOT NULL,\n      waiting_since TEXT NOT NULL DEFAULT (datetime('now')),\n      timeout_at   TEXT NOT NULL\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "instance_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "waiting_since",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "timeout_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": []
+  },
+  "metadata": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS metadata (clave TEXT PRIMARY KEY, valor TEXT)",
+   "columns": [
+    {
+     "name": "clave",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "valor",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [],
+   "fuente": "grafo.cjs"
+  },
+  "module_locks": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS module_locks (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      module_name  TEXT NOT NULL UNIQUE,\n      instance_id  TEXT NOT NULL,\n      files        TEXT NOT NULL DEFAULT '[]',\n      acquired_at  TEXT NOT NULL DEFAULT (datetime('now')),\n      expires_at   TEXT NOT NULL,\n      purpose      TEXT,\n      pid          INTEGER\n    , expires_ms INTEGER, fencing INTEGER)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "instance_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "acquired_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "expires_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "purpose",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "pid",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "expires_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "fencing",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_ml_inst",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_ml_inst ON module_locks(instance_id)"
+    }
+   ]
+  },
+  "module_registry": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS module_registry (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT NOT NULL UNIQUE,\n    status TEXT NOT NULL DEFAULT 'implemented',\n    description TEXT,\n    files TEXT DEFAULT '[]',\n    tests_passing INTEGER DEFAULT 0,\n    registered_at TEXT DEFAULT (datetime('now')),\n    updated_at TEXT DEFAULT (datetime('now'))\n  )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "'implemented'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "tests_passing",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "registered_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": []
+  },
+  "nodos": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS nodos (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  tipo TEXT NOT NULL,\n  titulo TEXT NOT NULL,\n  contenido TEXT,\n  area TEXT DEFAULT 'global',\n  confianza TEXT DEFAULT 'BAJA',\n  aplicado INTEGER DEFAULT 0,\n  util INTEGER DEFAULT 0,\n  estado TEXT DEFAULT 'ACTIVO',\n\n  ultimo_acceso TEXT DEFAULT (datetime('now')),\n  accesos_total INTEGER DEFAULT 0,\n  decay_score REAL DEFAULT 1.0,\n\n  embedding TEXT,\n  embedding_modelo TEXT,\n  ultima_validacion TEXT DEFAULT (datetime('now')),\n  fecha_creacion TEXT DEFAULT (datetime('now')),\n  fecha_update TEXT DEFAULT (datetime('now'))\n, archivos_aplica TEXT DEFAULT '[]', hash_contexto TEXT, validation_score REAL DEFAULT 1.0, vigencia_tipo TEXT DEFAULT 'VIGENTE', anclas TEXT DEFAULT '[]')",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "titulo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "contenido",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'global'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "confianza",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'BAJA'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "aplicado",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "util",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "estado",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'ACTIVO'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "ultimo_acceso",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "accesos_total",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "decay_score",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "embedding",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "embedding_modelo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ultima_validacion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "fecha_creacion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "fecha_update",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "archivos_aplica",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "hash_contexto",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "validation_score",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "vigencia_tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'VIGENTE'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "anclas",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_nodos_area_confianza",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_area_confianza ON nodos(area, confianza)"
+    },
+    {
+     "name": "idx_nodos_area_tipo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_area_tipo ON nodos(area, tipo)"
+    },
+    {
+     "name": "idx_nodos_area_tipo_estado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_area_tipo_estado ON nodos(area, tipo, estado)"
+    },
+    {
+     "name": "idx_nodos_confianza_aplicado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_confianza_aplicado ON nodos(confianza, aplicado)"
+    },
+    {
+     "name": "idx_nodos_decay",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_decay ON nodos(decay_score, confianza)"
+    },
+    {
+     "name": "idx_nodos_tipo_confianza",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_tipo_confianza ON nodos(tipo, confianza)"
+    },
+    {
+     "name": "idx_nodos_tipo_estado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_tipo_estado ON nodos(tipo, estado)"
+    },
+    {
+     "name": "idx_nodos_unique",
+     "since": "3.19.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_nodos_unique ON nodos(tipo, titulo)"
+    },
+    {
+     "name": "idx_nodos_vigencia",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_nodos_vigencia ON nodos(vigencia_tipo)"
+    }
+   ]
+  },
+  "prediction_log": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS prediction_log (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  tarea TEXT,\n  modulo TEXT,\n  archivos TEXT DEFAULT '[]',\n  nivel_predicho TEXT,\n  alertas TEXT DEFAULT '[]',\n  precondiciones TEXT DEFAULT '[]',\n  fue_correcto INTEGER,\n  ciclo_id TEXT,\n  fecha TEXT DEFAULT (datetime('now'))\n, hubo_problema INTEGER, evidencia TEXT, evaluado_en TEXT, prediccion_id TEXT)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tarea",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "modulo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "archivos",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "nivel_predicho",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "alertas",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "precondiciones",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fue_correcto",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    },
+    {
+     "name": "hubo_problema",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "evidencia",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "evaluado_en",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "prediccion_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_prediction_correcto",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_prediction_correcto ON prediction_log(fue_correcto)"
+    },
+    {
+     "name": "idx_prediction_fecha",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_prediction_fecha ON prediction_log(fecha)"
+    }
+   ]
+  },
+  "project_settings": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS project_settings (\n        key        TEXT PRIMARY KEY,\n        value      TEXT NOT NULL,\n        updated_at TEXT DEFAULT (datetime('now'))\n      )",
+   "columns": [
+    {
+     "name": "key",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "value",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": []
+  },
+  "protected_behaviors": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS protected_behaviors (\n      id                TEXT PRIMARY KEY,\n      module            TEXT NOT NULL,\n      description       TEXT NOT NULL,\n      critical_flows    TEXT DEFAULT '[]',\n      test_patterns     TEXT DEFAULT '[]',\n      related_files     TEXT DEFAULT '[]',\n      pass_count        INTEGER DEFAULT 1,\n      confidence        TEXT DEFAULT 'MEDIA',\n      status            TEXT DEFAULT 'active',\n      last_verified_at  TEXT DEFAULT (datetime('now')),\n      created_at        TEXT DEFAULT (datetime('now'))\n    , protected_symbols TEXT DEFAULT '[]', anclas_obsoletas TEXT DEFAULT '[]')",
+   "columns": [
+    {
+     "name": "id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "critical_flows",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "test_patterns",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "related_files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "pass_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "confidence",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'MEDIA'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'active'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_verified_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "protected_symbols",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "anclas_obsoletas",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_pb_module",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_pb_module ON protected_behaviors(module)"
+    },
+    {
+     "name": "idx_pb_status",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_pb_status ON protected_behaviors(status)"
+    }
+   ]
+  },
+  "reasoning_bank": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS reasoning_bank (\n    id            INTEGER PRIMARY KEY AUTOINCREMENT,\n    key           TEXT UNIQUE,\n    intent        TEXT NOT NULL,\n    area          TEXT,\n    strategy      TEXT NOT NULL,\n    signals       TEXT DEFAULT '{}',\n    success_count INTEGER DEFAULT 1,\n    fail_count    INTEGER DEFAULT 0,\n    confidence    TEXT DEFAULT 'EMERGING',\n    created_at    TEXT DEFAULT (datetime('now')),\n    updated_at    TEXT DEFAULT (datetime('now')),\n    last_used_at  TEXT\n  )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "key",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "intent",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "area",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "strategy",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "signals",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'{}'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "success_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fail_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "confidence",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'EMERGING'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "last_used_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_rb_area",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rb_area ON reasoning_bank(area)"
+    }
+   ]
+  },
+  "regression_snapshots": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS regression_snapshots (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      ciclo_id TEXT NOT NULL,\n      snapshot_type TEXT NOT NULL,\n      passing_tests TEXT DEFAULT '[]',\n      failing_tests TEXT DEFAULT '[]',\n      contract_ids TEXT DEFAULT '[]',\n      created_at TEXT DEFAULT (datetime('now'))\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "snapshot_type",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "passing_tests",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "failing_tests",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "contract_ids",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_snapshots_ciclo",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_snapshots_ciclo ON regression_snapshots(ciclo_id)"
+    }
+   ]
+  },
+  "relaciones": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS relaciones (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  desde_id INTEGER NOT NULL,\n  tipo TEXT NOT NULL,\n  hacia_id INTEGER NOT NULL,\n  peso REAL DEFAULT 1.0,\n  fecha TEXT DEFAULT (datetime('now')),\n  FOREIGN KEY (desde_id) REFERENCES nodos(id),\n  FOREIGN KEY (hacia_id) REFERENCES nodos(id)\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "desde_id",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "hacia_id",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "peso",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_rel_unique",
+     "since": "3.19.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_unique ON relaciones(desde_id, tipo, hacia_id)"
+    }
+   ]
+  },
+  "relaciones_semanticas": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS relaciones_semanticas (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  desde_entidad TEXT NOT NULL,\n  tipo TEXT NOT NULL,\n  hacia_entidad TEXT NOT NULL,\n  peso REAL DEFAULT 1.0,\n  descripcion TEXT,\n  fecha TEXT DEFAULT (datetime('now')), valid_at TEXT DEFAULT (datetime('now')), invalid_at TEXT, expired_at TEXT, episode_id TEXT, confidence REAL DEFAULT 1.0, source TEXT, context TEXT,\n  UNIQUE(desde_entidad, tipo, hacia_entidad)\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "desde_entidad",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "hacia_entidad",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "peso",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "descripcion",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    },
+    {
+     "name": "valid_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "invalid_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "expired_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "episode_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "confidence",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "source",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "context",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_rel_sem_invalid",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rel_sem_invalid ON relaciones_semanticas(invalid_at)"
+    },
+    {
+     "name": "idx_rel_sem_type",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rel_sem_type ON relaciones_semanticas(tipo)"
+    },
+    {
+     "name": "idx_rel_sem_unique",
+     "since": "3.19.0",
+     "unique": true,
+     "ddl": "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_sem_unique ON relaciones_semanticas(desde_entidad, tipo, hacia_entidad)"
+    },
+    {
+     "name": "idx_rel_sem_valid",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rel_sem_valid ON relaciones_semanticas(valid_at)"
+    },
+    {
+     "name": "idx_rel_semanticas_desde",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rel_semanticas_desde ON relaciones_semanticas(desde_entidad)"
+    },
+    {
+     "name": "idx_rel_semanticas_hacia",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_rel_semanticas_hacia ON relaciones_semanticas(hacia_entidad)"
+    }
+   ]
+  },
+  "schema_lock": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS schema_lock (\n      id           INTEGER PRIMARY KEY CHECK (id = 1),\n      instance_id  TEXT NOT NULL,\n      acquired_at  TEXT NOT NULL DEFAULT (datetime('now')),\n      expires_at   TEXT NOT NULL,\n      purpose      TEXT,\n      pid          INTEGER\n    , expires_ms INTEGER, fencing INTEGER)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "instance_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "acquired_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "expires_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "purpose",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "pid",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "expires_ms",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "fencing",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": []
+  },
+  "spec_registry": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS spec_registry (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    module_name TEXT NOT NULL UNIQUE,\n    spec_path TEXT NOT NULL,\n    generated_at TEXT DEFAULT (datetime('now')),\n    updated_at TEXT DEFAULT (datetime('now'))\n  )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "spec_path",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "generated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    }
+   ],
+   "indexes": []
+  },
+  "ui_layout_decisions": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS ui_layout_decisions (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      element_id TEXT NOT NULL,\n      property   TEXT NOT NULL,\n      value      TEXT NOT NULL,\n      reason     TEXT,\n      superseded INTEGER DEFAULT 0,\n      decided_at TEXT DEFAULT (datetime('now'))\n    , origen TEXT, archivo TEXT, scope TEXT, route TEXT, viewport TEXT, theme TEXT, project_id TEXT)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "element_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "property",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "value",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "reason",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "superseded",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "decided_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "origen",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "archivo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "scope",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "route",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "viewport",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "theme",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    },
+    {
+     "name": "project_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.20.0"
+    }
+   ],
+   "indexes": []
+  },
+  "verified_contracts": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS verified_contracts (\n      id TEXT PRIMARY KEY,\n      module TEXT NOT NULL,\n      name TEXT NOT NULL,\n      description TEXT,\n      test_file TEXT,\n      test_name TEXT,\n      source_files TEXT DEFAULT '[]',\n      inputs_signature TEXT,\n      outputs_signature TEXT,\n      verification_count INTEGER DEFAULT 0,\n      consecutive_passes INTEGER DEFAULT 0,\n      failure_count INTEGER DEFAULT 0,\n      last_verified TEXT,\n      last_failed TEXT,\n      created_at TEXT DEFAULT (datetime('now')),\n      updated_at TEXT DEFAULT (datetime('now')),\n      status TEXT DEFAULT 'candidate',\n      risk_level TEXT DEFAULT 'MEDIUM',\n      auto_generated INTEGER DEFAULT 1,\n      ciclo_created TEXT,\n      ciclo_last_verified TEXT,\n      notes TEXT\n    )",
+   "columns": [
+    {
+     "name": "id",
+     "type": "TEXT",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "module",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "description",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "test_file",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "test_name",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "source_files",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'[]'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "inputs_signature",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "outputs_signature",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "verification_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "consecutive_passes",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "failure_count",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_verified",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "last_failed",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "updated_at",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at",
+       "fecha"
+      ]
+     }
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'candidate'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "risk_level",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "'MEDIUM'",
+     "since": "3.19.0"
+    },
+    {
+     "name": "auto_generated",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1",
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_created",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "ciclo_last_verified",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "notes",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "test_id",
+     "type": "TEXT",
+     "dflt": null,
+     "pk": 0,
+     "since": "3.20.0",
+     "fuente": "contract-guard.cjs migrateSchemaV2"
+    },
+    {
+     "name": "runner_id",
+     "type": "TEXT",
+     "dflt": null,
+     "pk": 0,
+     "since": "3.20.0",
+     "fuente": "contract-guard.cjs migrateSchemaV2"
+    },
+    {
+     "name": "runner_command",
+     "type": "TEXT",
+     "dflt": null,
+     "pk": 0,
+     "since": "3.20.0",
+     "fuente": "contract-guard.cjs migrateSchemaV2"
+    },
+    {
+     "name": "mapping_status",
+     "type": "TEXT",
+     "dflt": "'RESOLVED'",
+     "pk": 0,
+     "since": "3.20.0",
+     "fuente": "contract-guard.cjs migrateSchemaV2"
+    },
+    {
+     "name": "last_execution_id",
+     "type": "TEXT",
+     "dflt": null,
+     "pk": 0,
+     "since": "3.20.0",
+     "fuente": "contract-guard.cjs migrateSchemaV2"
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_contracts_module",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_contracts_module ON verified_contracts(module)"
+    },
+    {
+     "name": "idx_contracts_status",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_contracts_status ON verified_contracts(status)"
+    }
+   ]
+  },
+  "working_memory": {
+   "since": "3.19.0",
+   "create": "CREATE TABLE IF NOT EXISTS working_memory (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  sesion_id TEXT NOT NULL,\n  tipo TEXT NOT NULL,\n  contenido TEXT NOT NULL,\n  relevancia REAL DEFAULT 1.0,\n  expirado INTEGER DEFAULT 0,\n  fecha TEXT DEFAULT (datetime('now'))\n)",
+   "columns": [
+    {
+     "name": "id",
+     "type": "INTEGER",
+     "pk": 1,
+     "notnull": 0,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "sesion_id",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "tipo",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "contenido",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 1,
+     "dflt": null,
+     "since": "3.19.0"
+    },
+    {
+     "name": "relevancia",
+     "type": "REAL",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "1.0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "expirado",
+     "type": "INTEGER",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "0",
+     "since": "3.19.0"
+    },
+    {
+     "name": "fecha",
+     "type": "TEXT",
+     "pk": 0,
+     "notnull": 0,
+     "dflt": "datetime('now')",
+     "since": "3.19.0",
+     "dynamicDefault": {
+      "expr": "datetime('now')",
+      "relleno": [
+       "fecha_update",
+       "fecha_creacion",
+       "created_at"
+      ]
+     }
+    }
+   ],
+   "indexes": [
+    {
+     "name": "idx_working_expirado",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_working_expirado ON working_memory(expirado)"
+    },
+    {
+     "name": "idx_working_sesion",
+     "since": "3.19.0",
+     "unique": false,
+     "ddl": "CREATE INDEX IF NOT EXISTS idx_working_sesion ON working_memory(sesion_id)"
+    }
+   ]
+  }
+ },
+ "triggers": []
+}
