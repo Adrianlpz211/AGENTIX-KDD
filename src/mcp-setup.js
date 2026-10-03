@@ -3,7 +3,7 @@
 const fs   = require('fs-extra');
 const path = require('path');
 const os   = require('os');
-const { execSync } = require('child_process');
+const { herramienta } = require('./run-safe');
 const chalk = require('chalk');
 
 /**
@@ -20,6 +20,7 @@ const chalk = require('chalk');
 
 async function mcpSetup(projectPath, opts = {}) {
   projectPath = projectPath || process.cwd();
+  if (opts.global) return mcpGlobal(opts);
 
   // ── Verificar que Agentic está instalado ───────────────────────────────────
   const serverFile = path.join(projectPath, '.agentic', 'grafo', 'mcp-server.cjs');
@@ -52,7 +53,8 @@ async function mcpSetup(projectPath, opts = {}) {
 
     let cursorConfig = {};
     if (fs.existsSync(cursorMcpFile)) {
-      try { cursorConfig = JSON.parse(fs.readFileSync(cursorMcpFile, 'utf8')); } catch {}
+      cursorConfig = JSON.parse(fs.readFileSync(cursorMcpFile, 'utf8'));
+      if (!cursorConfig || typeof cursorConfig !== 'object' || Array.isArray(cursorConfig)) throw new Error('Configuración MCP inválida: se conserva sin sobrescribir');
     }
     if (!cursorConfig.mcpServers) cursorConfig.mcpServers = {};
 
@@ -75,19 +77,14 @@ async function mcpSetup(projectPath, opts = {}) {
   if (claudeCliAvailable) {
     try {
       // claude mcp add agentic-kdd -- node "/ruta/exacta/mcp-server.cjs"
-      execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
-        stdio: 'pipe',
-        cwd: projectPath,
-      });
+      herramienta('claude', ['mcp', 'add', '--env', 'PROJECT_ROOT=' + path.resolve(projectPath), 'agentic-kdd', '--', 'node', serverPath], { cwd: projectPath });
       results.claude_code = true;
       console.log(chalk.green('  ✓ Claude Code        →  registrado via "claude mcp add"'));
     } catch (e) {
       // Puede fallar si ya existe — intentar actualizar
       try {
-        execSync(`claude mcp remove agentic-kdd`, { stdio: 'pipe', cwd: projectPath });
-        execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
-          stdio: 'pipe', cwd: projectPath,
-        });
+        herramienta('claude', ['mcp', 'remove', 'agentic-kdd'], { cwd: projectPath });
+        herramienta('claude', ['mcp', 'add', '--env', 'PROJECT_ROOT=' + path.resolve(projectPath), 'agentic-kdd', '--', 'node', serverPath], { cwd: projectPath });
         results.claude_code = true;
         console.log(chalk.green('  ✓ Claude Code        →  actualizado'));
       } catch {
@@ -96,27 +93,6 @@ async function mcpSetup(projectPath, opts = {}) {
     }
   } else {
     console.log(chalk.gray('  ~ Claude Code        →  CLI no detectado (config manual abajo)'));
-  }
-
-  // ══ PASO 3: Cursor global (opcional, solo si --global) ════════════════════
-  if (opts.global) {
-    const globalCursorConfig = getGlobalCursorConfigPath();
-    if (globalCursorConfig) {
-      try {
-        fs.ensureDirSync(path.dirname(globalCursorConfig));
-        let globalConfig = {};
-        if (fs.existsSync(globalCursorConfig)) {
-          try { globalConfig = JSON.parse(fs.readFileSync(globalCursorConfig, 'utf8')); } catch {}
-        }
-        if (!globalConfig.mcpServers) globalConfig.mcpServers = {};
-        globalConfig.mcpServers['agentic-kdd'] = { command: 'node', args: [serverPath] };
-        fs.writeFileSync(globalCursorConfig, JSON.stringify(globalConfig, null, 2));
-        results.cursor_global = true;
-        console.log(chalk.green(`  ✓ Cursor (global)    →  ${globalCursorConfig}`));
-      } catch (e) {
-        console.log(chalk.yellow(`  ⚠ Cursor (global)    →  ${e.message}`));
-      }
-    }
   }
 
   // ══ PASO 4: Imprimir configs manuales con ruta EXACTA ═════════════════════
@@ -175,26 +151,96 @@ async function mcpSetup(projectPath, opts = {}) {
 
 function isCLIAvailable(cmd) {
   try {
-    execSync(`${cmd} --version`, { stdio: 'pipe', timeout: 5000 });
+    herramienta(cmd, ['--version'], { timeout: 5000 });
     return true;
   } catch { return false; }
 }
 
-function getGlobalCursorConfigPath() {
-  const platform = os.platform();
-  const home     = os.homedir();
+/**
+ * Cursor lee la configuración MCP global de ~/.cursor/mcp.json en los tres
+ * sistemas. Hasta 3.19 se escribía en .../Cursor/User/globalStorage/mcp.json,
+ * que Cursor no lee: el modo global nunca llegó a funcionar.
+ */
+function getGlobalCursorConfigPath(home = os.homedir()) {
+  return path.join(home, '.cursor', 'mcp.json');
+}
 
-  if (platform === 'win32') {
-    // Windows: %APPDATA%\Cursor\User\globalStorage\mcp.json
-    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-    return path.join(appData, 'Cursor', 'User', 'globalStorage', 'mcp.json');
+const LAUNCHER_NAME = 'mcp-launcher.cjs';
+const launcherDestino = (home = os.homedir()) => path.join(home, '.agentix', LAUNCHER_NAME);
+
+/** Fusiona la entrada agentic-kdd en un mcp.json sin tocar lo demás; JSON inválido se conserva. */
+function fusionarMcpJson(archivo, entrada) {
+  let cfg = {};
+  if (fs.existsSync(archivo)) {
+    const txt = fs.readFileSync(archivo, 'utf8');
+    if (txt.trim()) {
+      try { cfg = JSON.parse(txt); } catch { return { ok: false, reason: 'INVALID_JSON' }; }
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return { ok: false, reason: 'INVALID_JSON' };
+    }
   }
-  if (platform === 'darwin') {
-    // macOS: ~/Library/Application Support/Cursor/User/globalStorage/mcp.json
-    return path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'mcp.json');
+  if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {};
+  const antes = JSON.stringify(cfg.mcpServers['agentic-kdd'] || null);
+  cfg.mcpServers['agentic-kdd'] = entrada;
+  if (antes === JSON.stringify(entrada)) return { ok: true, changed: false };
+  fs.ensureDirSync(path.dirname(archivo));
+  fs.writeFileSync(archivo, JSON.stringify(cfg, null, 2) + '\n');
+  return { ok: true, changed: true };
+}
+
+/**
+ * akdd mcp --global — una entrada para todos los proyectos.
+ * Copia el lanzador a ~/.agentix/ y registra ESE archivo en Cursor y en Claude
+ * Code (scope user). El lanzador arranca el servidor del proyecto abierto, con
+ * su propio motor y su propia memoria; fuera de un proyecto Agentix no consulta
+ * ninguna memoria. No escribe nada dentro del proyecto actual.
+ *
+ * opts.home y opts.claude existen para las pruebas (HOME aislado, sin CLI real).
+ */
+function mcpGlobal(opts = {}) {
+  const home = opts.home || os.homedir();
+  const log = opts.quiet ? () => {} : (m) => console.log(m);
+  const results = { launcher: null, cursor_global: false, claude_user: false, errores: [] };
+
+  const origen = path.join(__dirname, LAUNCHER_NAME);
+  const destino = launcherDestino(home);
+  fs.ensureDirSync(path.dirname(destino));
+  fs.copyFileSync(origen, destino);
+  results.launcher = destino;
+  log('\n' + chalk.bold.hex('#8b5cf6')('  Agentic KDD — MCP global'));
+  log(chalk.gray('  Lanzador: ' + destino));
+  log(chalk.gray('  Detecta el proyecto abierto y arranca SU servidor con SU memoria.\n'));
+
+  const cursorFile = getGlobalCursorConfigPath(home);
+  // ${workspaceFolder} lo interpola Cursor; si no lo hiciera, el lanzador lo
+  // ignora y busca el proyecto desde la carpeta de arranque.
+  const r = fusionarMcpJson(cursorFile, { command: 'node', args: [destino], env: { AGENTIX_PROJECT_ROOT: '${workspaceFolder}' } });
+  if (r.ok) {
+    results.cursor_global = true;
+    log(chalk.green('  ✓ Cursor (global)    →  ' + cursorFile + (r.changed ? '' : ' (ya estaba)')));
+  } else {
+    results.errores.push('cursor: ' + r.reason);
+    log(chalk.yellow('  ⚠ Cursor (global)    →  ' + cursorFile + ' no es JSON válido: se conserva sin tocar. Corrígelo y repite akdd mcp --global'));
   }
-  // Linux: ~/.config/Cursor/User/globalStorage/mcp.json
-  return path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'mcp.json');
+
+  const manual = 'claude mcp add --scope user agentic-kdd -- node "' + destino + '"';
+  if (opts.claude !== false && isCLIAvailable('claude')) {
+    try { herramienta('claude', ['mcp', 'remove', '--scope', 'user', 'agentic-kdd'], { timeout: 20000 }); } catch { /* no existía */ }
+    try {
+      herramienta('claude', ['mcp', 'add', '--scope', 'user', 'agentic-kdd', '--', 'node', destino], { timeout: 20000 });
+      results.claude_user = true;
+      log(chalk.green('  ✓ Claude Code        →  registrado en scope user (todos los proyectos)'));
+    } catch (e) {
+      results.errores.push('claude: ' + e.message);
+      log(chalk.yellow('  ⚠ Claude Code        →  ' + e.message));
+      log(chalk.white('    Manual: ' + manual));
+    }
+  } else if (opts.claude !== false) {
+    log(chalk.gray('  ~ Claude Code        →  CLI no detectado. Manual: ' + manual));
+  }
+
+  log(chalk.gray('\n  Recarga Cursor (Reload Window) y abre una sesión nueva de Claude Code para ver las herramientas.'));
+  log(chalk.gray('  Un proyecto con configuración propia (akdd mcp) usa la suya: la del proyecto manda.\n'));
+  return results;
 }
 
 /**
@@ -237,14 +283,20 @@ function mcpStatus(projectPath) {
     } catch {}
   }
   console.log(cursorGlobalOk
-    ? chalk.green('  ✓ Cursor (global)    configurado')
+    ? chalk.green('  ✓ Cursor (global)    ' + globalCursor)
     : chalk.gray('  ~ Cursor (global)    No configurado — opcional: akdd mcp --global'));
+  if (cursorGlobalOk) {
+    const lanzador = launcherDestino();
+    console.log(fs.existsSync(lanzador)
+      ? chalk.green('  ✓ Lanzador global    ' + lanzador)
+      : chalk.red('  ✗ Lanzador global    falta ' + lanzador + ' — ejecutar: akdd mcp --global'));
+  }
 
   // Claude Code
   const claudeAvailable = isCLIAvailable('claude');
   if (claudeAvailable) {
     try {
-      const mcpList = execSync('claude mcp list', { stdio: 'pipe' }).toString();
+      const mcpList = herramienta('claude', ['mcp', 'list']).toString();
       const hasAgentic = mcpList.includes('agentic-kdd');
       console.log(hasAgentic
         ? chalk.green('  ✓ Claude Code        registrado')
@@ -256,11 +308,11 @@ function mcpStatus(projectPath) {
     console.log(chalk.gray('  ~ Claude Code CLI    No instalado'));
   }
 
-  if (hasServer && !cursorProjectOk) {
-    console.log('\n' + chalk.bold('  → Ejecuta: akdd mcp\n'));
-  } else if (hasServer && cursorProjectOk) {
+  if (hasServer && !cursorProjectOk && !cursorGlobalOk) {
+    console.log('\n' + chalk.bold('  → Ejecuta: akdd mcp  (o akdd mcp --global para todos tus proyectos)\n'));
+  } else if (hasServer) {
     console.log('\n' + chalk.green('  Todo configurado. Recarga la ventana en Cursor si es necesario.\n'));
   }
 }
 
-module.exports = { mcpSetup, mcpStatus };
+module.exports = { mcpSetup, mcpStatus, mcpGlobal, fusionarMcpJson, getGlobalCursorConfigPath, launcherDestino };

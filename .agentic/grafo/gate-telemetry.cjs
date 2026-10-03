@@ -58,6 +58,20 @@ function ensureTelemetrySchema(db) {
   safe(() => db.exec(`ALTER TABLE gate_events ADD COLUMN source TEXT DEFAULT 'mechanical'`));
   // T4: anclas retiradas por obsolescencia (rastro, no borrado)
   safe(() => db.exec(`ALTER TABLE protected_behaviors ADD COLUMN anclas_obsoletas TEXT DEFAULT '[]'`));
+  // H09: cada evento pertenece a un ciclo y tiene identidad propia. Un reenvío
+  // con el mismo event_id no se anota dos veces.
+  safe(() => db.exec(`ALTER TABLE gate_events ADD COLUMN cycle_id TEXT`));
+  safe(() => db.exec(`ALTER TABLE gate_events ADD COLUMN event_id TEXT`));
+  safe(() => db.exec(`ALTER TABLE gate_events ADD COLUMN incident_id TEXT`));
+  safe(() => db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ge_event ON gate_events(event_id)`));
+  safe(() => db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_cycle ON gate_events(cycle_id, verdict)`));
+}
+
+function cicloEnCurso() {
+  return safe(() => {
+    const c = require(path.join(__dirname, 'ciclo-actual.cjs')).actual(process.cwd());
+    return c ? c.cycle_id : null;
+  }, null);
 }
 
 // ─── T1: LA LIBRETA ───────────────────────────────────────────────────────────
@@ -66,19 +80,51 @@ function recordGateEvent(db, ev) {
   try {
     if (!db || !ev || !ev.gate || !ev.verdict) return false;
     ensureTelemetrySchema(db);
-    db.prepare(`
-      INSERT INTO gate_events (gate, verdict, behavior_id, file, detalle, cycle_hint, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+    const eventId = ev.event_id ? String(ev.event_id) : require('crypto').randomUUID();
+    const r = db.prepare(`
+      INSERT OR IGNORE INTO gate_events
+        (gate, verdict, behavior_id, file, detalle, cycle_hint, source, cycle_id, event_id, incident_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       String(ev.gate), String(ev.verdict),
       ev.behavior_id ? String(ev.behavior_id) : null,
       ev.file ? String(ev.file) : null,
       JSON.stringify(ev.detalle || {}),
       ev.cycle_hint ? String(ev.cycle_hint) : null,
-      ev.source === 'protocol' ? 'protocol' : 'mechanical'
+      ev.source === 'protocol' ? 'protocol' : 'mechanical',
+      ev.cycle_id ? String(ev.cycle_id) : cicloEnCurso(),
+      eventId,
+      ev.incident_id ? String(ev.incident_id) : null
     );
-    return true;
+    const nuevo = !(r && r.changes === 0);
+    if (nuevo && String(ev.verdict) === 'STOP') {
+      safe(() => require(path.join(__dirname, 'telemetry.cjs')).recordStop(
+        (ev.detalle && (ev.detalle.reason || ev.detalle.motivo)) || ev.gate,
+        { gate: String(ev.gate), cycle_id: ev.cycle_id || cicloEnCurso(), event_id: eventId }
+      ));
+    }
+    return nuevo;
   } catch { return false; } // la telemetría JAMÁS tumba al que la llama
+}
+
+/**
+ * Cuántos frenos tuvo UN ciclo. Un incidente reanotado varias veces cuenta
+ * una vez; los eventos brutos van aparte. Sin ciclo o con la consulta caída
+ * no hay número: el estado lo dice, no un cero.
+ */
+function contarStopsDelCiclo(db, cycleId) {
+  if (!cycleId) return { status: 'NO_CYCLE', incidentes: null, eventos: null };
+  try {
+    const cols = db.prepare('PRAGMA table_info(gate_events)').all().map((c) => c.name);
+    if (!cols.includes('cycle_id')) return { status: 'NO_CYCLE_COLUMN', incidentes: null, eventos: null };
+    const fila = db.prepare(`
+      SELECT COUNT(DISTINCT COALESCE(incident_id, event_id, 'row-' || id)) incidentes, COUNT(*) eventos
+        FROM gate_events WHERE verdict = 'STOP' AND cycle_id = ?
+    `).get(String(cycleId));
+    return { status: 'OK', incidentes: fila ? fila.incidentes : 0, eventos: fila ? fila.eventos : 0 };
+  } catch (e) {
+    return { status: 'ERROR', incidentes: null, eventos: null, error: e.message };
+  }
 }
 
 function gateStats(db, opts = {}) {
@@ -413,6 +459,7 @@ if (require.main === module) {
 module.exports = {
   ensureTelemetrySchema,
   recordGateEvent,
+  contarStopsDelCiclo,
   gateStats,
   recoveryStats,
   detectAndRecordRecoveries,

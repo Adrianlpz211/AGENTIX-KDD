@@ -1,0 +1,1750 @@
+{
+  "execution_id": "bench-mur3gvsd-c10838",
+  "subject_hash": "d4a628790eae452c",
+  "node": "v24.21.0",
+  "plataforma": "win32",
+  "filas": [
+    {
+      "case_id": "B01",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "API cambia status/tipo/error",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar status HTTP",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar status HTTP lo detecta el escenario http"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B02",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "validación de frontera falla",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar tipos",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar tipos lo detecta el escenario tipos"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B03",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "autorización ausente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar permisos",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar permisos lo detecta el escenario permisos"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B04",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "tenant cruzado",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar tenant cruzado",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar tenant cruzado lo detecta el escenario permisos"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B05",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "redondeo/dinero",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar redondeo",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar redondeo lo detecta el escenario dinero"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B06",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "transacción parcial",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "efectos.test.cjs",
+          "patron": "P08: un lote con un efecto inválido",
+          "status": "PASS",
+          "titulos": [
+            "P08: un lote con un efecto inválido no escribe ninguno"
+          ]
+        },
+        {
+          "archivo": "update-transaccional.test.cjs",
+          "patron": "H25: fallo a mitad revierte",
+          "status": "PASS",
+          "titulos": [
+            "H25: fallo a mitad revierte el framework completo y la config"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B07",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "doble ejecución no idempotente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar duplicación",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar duplicación lo detecta el escenario idempotencia"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B08",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "carrera concurrente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: sembrar carrera",
+          "status": "PASS",
+          "titulos": [
+            "P07: sembrar carrera lo detecta el escenario concurrencia"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B09",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "dependencia transitiva cambia",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P04: cambiar un archivo importado",
+          "status": "PASS",
+          "titulos": [
+            "P04: cambiar un archivo importado alcanza al escenario que protege a quien lo importa"
+          ]
+        },
+        {
+          "archivo": "blast-radius.test.cjs",
+          "patron": "H29: A",
+          "status": "PASS",
+          "titulos": [
+            "H29: A ← B ← C incluye el contrato colgado de C"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B10",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "test eliminado o filtrado",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "politica-gates.test.cjs",
+          "patron": "P02: test-integrity",
+          "status": "PASS",
+          "titulos": [
+            "P02: test-integrity sin versión anterior no da PASS; título desaparecido es FAIL"
+          ]
+        },
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P01: si solo corri",
+          "status": "PASS",
+          "titulos": [
+            "P01: si solo corrió otro test, el escenario pedido no queda aprobado"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B11",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "exit no cero con texto passed",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P01: vac",
+          "status": "PASS",
+          "titulos": [
+            "P01: vacío, exit 1 con \"10 passed\", señal, timeout, sin runner y cero tests nunca son PASS"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-EXIT",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-EXIT: sembrado en tdd-gate.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B12",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "evidencia vacía, vieja o de otra fuente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P01: verifyAfterTDD",
+          "status": "PASS",
+          "titulos": [
+            "P01: verifyAfterTDD sin evidencia estructurada, o de otro sujeto, no toca last_verified_at"
+          ]
+        },
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "C08: TEAMS no acepta",
+          "status": "PASS",
+          "titulos": [
+            "C08: TEAMS no acepta los gates que manda el constructor; verifica el director"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-EVIDENCIA-AJENA",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-EVIDENCIA-AJENA: sembrado en teams-adapters.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B13",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "configuración o schema cambia",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "effort-router.test.cjs",
+          "patron": "02: cambio de import o de lock",
+          "status": "PASS",
+          "titulos": [
+            "02: cambio de import o de lock invalida la evidencia; dirigido no certifica suite"
+          ]
+        },
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P06: leer una base sin tablas",
+          "status": "PASS",
+          "titulos": [
+            "P06: leer una base sin tablas no crea nada y no se reporta como sana"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-CACHE-VIEJA",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-CACHE-VIEJA: sembrado en evidence-cache.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B14",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "runner o driver ausente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P01: vac",
+          "status": "PASS",
+          "titulos": [
+            "P01: vacío, exit 1 con \"10 passed\", señal, timeout, sin runner y cero tests nunca son PASS"
+          ]
+        },
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "C10: Node viejo",
+          "status": "PASS",
+          "titulos": [
+            "C10: Node viejo y falta de driver se diagnostican por separado; engines sin CI es propuesta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B15",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "protected_file tocado",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "zip-mejoras.test.cjs",
+          "patron": "03 guardia: edici",
+          "status": "PASS",
+          "titulos": [
+            "03 guardia: edición de protegido se deniega, secretos piden confirmación, fuera del proyecto pasa"
+          ]
+        },
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "P16: la guardia",
+          "status": "PASS",
+          "titulos": [
+            "P16: la guardia falla cerrada ante payload malformado, ruta ausente o MCP protegido"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B16",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "restore con efecto externo",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "efectos.test.cjs",
+          "patron": "P08: restore con efecto externo",
+          "status": "PASS",
+          "titulos": [
+            "P08: restore con efecto externo pendiente no declara el sistema restaurado"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B17",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "replay o promoción duplicada",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P05: un replay",
+          "status": "PASS",
+          "titulos": [
+            "P05: un replay de la misma ejecución no promueve; HIGH exige 5 ejecuciones en 2 sujetos"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-REPLAY",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-REPLAY: sembrado en regression-guard.cjs, la prueba negativa lo detecta"
+          ]
+        },
+        {
+          "archivo": "teams.test.cjs",
+          "patron": "mensaje duplicado o reordenado",
+          "status": "PASS",
+          "titulos": [
+            "mensaje duplicado o reordenado: una transición por revisión, sin doble apply"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B18",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "ruta con espacios o renombre",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P03: renombrar",
+          "status": "PASS",
+          "titulos": [
+            "P03: renombrar no pierde la protección; retirar sin decisión se rechaza"
+          ]
+        },
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "C09: instalar usa ruta",
+          "status": "PASS",
+          "titulos": [
+            "C09: instalar usa ruta absoluta entre comillas, incluye MCP, y el smoke real decide el estado"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": "rutas Unicode no tienen mutante propio"
+    },
+    {
+      "case_id": "B19",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "baseline antes de submit",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "teams-baseline-rollback.test.cjs",
+          "patron": "P18: el host escribe al recibir",
+          "status": "PASS",
+          "titulos": [
+            "P18: el host escribe al recibir; el BASELINE conserva lo de antes y el fallo reproducible revierte solo"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-RESTORE-HASH",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-RESTORE-HASH: sembrado en restore-manager.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "B20",
+      "lado": "backend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "fallo del propio gate",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P05: un escenario HIGH sin poder",
+          "status": "PASS",
+          "titulos": [
+            "P05: un escenario HIGH sin poder ejecutarse frena el build (fail-closed)"
+          ]
+        },
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-PAYLOAD",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-PAYLOAD: sembrado en host-guard.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F01",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "handler de botón ausente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F01",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F01: handler de botón ausente"
+          ]
+        },
+        {
+          "archivo": "politica-gates.test.cjs",
+          "patron": "P02: TDD verde con bot",
+          "status": "PASS",
+          "titulos": [
+            "P02: TDD verde con botón roto o sin navegador no cierra; solo PASS del mismo sujeto"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F02",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "submit no llega a la API",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P09/P10/P11/P12: navegador real",
+          "status": "PASS",
+          "titulos": [
+            "P09/P10/P11/P12: navegador real — candidato, aprobación, FAIL visual, flujo y accesibilidad"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F03",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "validación perdida",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F03",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F03: validación perdida (required)"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F04",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "respuesta o error mostrados incorrectos",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F04",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F04: un error del servidor mostrado como éxito"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F05",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "loading infinito",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F05",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F05: loading infinito"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F06",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "botón cubierto por overlay",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F06",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F06: botón cubierto por un overlay"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F07",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "select inutilizable",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F07",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F07: select inutilizable"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F08",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "modal no cierra",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F08",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F08: modal que no cierra"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F09",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "foco no retorna",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F09:",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F09: el foco no vuelve al cerrar el diálogo"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F10",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "teclado bloqueado (trampa)",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F10",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F10a: foco en un control invisible",
+            "BENCH-F10b: trampa de teclado"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F11",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "ruta o refresh rota",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F11",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F11: la ruta no sobrevive a recargar"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F12",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "permiso o rol incorrecto en UI",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F12",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F12: un rol sin permiso ve la acción de administrador"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F13",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "MEDIA",
+      "caso": "responsive fuera de pantalla",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F13",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F13: el botón queda fuera de la pantalla en móvil"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F14",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "token CSS compartido rompe otra pantalla",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "P15: texto local no abre",
+          "status": "PASS",
+          "titulos": [
+            "P15: texto local no abre auditoría global; token global amplía a sus consumidores"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F15",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "misma vista en otra ruta",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P09/P10/P11/P12: navegador real",
+          "status": "PASS",
+          "titulos": [
+            "P09/P10/P11/P12: navegador real — candidato, aprobación, FAIL visual, flujo y accesibilidad"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F16",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "MEDIA",
+      "caso": "assets o fuentes 404",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P09/P10/P11/P12: navegador real",
+          "status": "PASS",
+          "titulos": [
+            "P09/P10/P11/P12: navegador real — candidato, aprobación, FAIL visual, flujo y accesibilidad"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F17",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "captura nueva autoaceptada",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P10: capturar deja candidato",
+          "status": "PASS",
+          "titulos": [
+            "P10: capturar deja candidato y la referencia aprobada no cambia"
+          ]
+        },
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P09/P10/P11/P12: navegador real",
+          "status": "PASS",
+          "titulos": [
+            "P09/P10/P11/P12: navegador real — candidato, aprobación, FAIL visual, flujo y accesibilidad"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F18",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "cambio pequeño en región crítica",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P10: m",
+          "status": "PASS",
+          "titulos": [
+            "P10: máscaras con motivo, acotadas y fuera de zonas protegidas; regiones con su umbral"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F19",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "consola o promesa rechazada",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F19",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F19: promesa rechazada sin manejar no da PASS"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F20",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "MEDIA",
+      "caso": "traducción crítica o estado vacío",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F20",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F20: falta el texto del estado vacío"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F21",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "BAJA",
+      "caso": "reduced-motion ignorado",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F21",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F21: una animación sin fin ignora reduced-motion"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F22",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "MEDIA",
+      "caso": "tema o viewport distinto",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F22",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F22: otro viewport o tema no se compara contra la referencia de la base"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F23",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "caché o resumen viejo",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "recall-presupuesto.test.cjs",
+          "patron": "H32: cach",
+          "status": "PASS",
+          "titulos": [
+            "H32: caché por query que se invalida cuando cambia el grafo; dedup entre roles"
+          ]
+        },
+        {
+          "archivo": "preservacion-p14-c10.test.cjs",
+          "patron": "P14: la cach",
+          "status": "PASS",
+          "titulos": [
+            "P14: la caché de recall no mezcla proyectos"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F24",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "XSS en un dato",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-F24",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-F24: un dato con HTML se ejecuta (XSS)"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F25",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "cámara o diseño del grafo alterado",
+      "estado": "SIN_PRUEBA",
+      "detected": null,
+      "arreglo": "carpeta del dashboard (D01–D26): baseline del grafo antes de tocarlo"
+    },
+    {
+      "case_id": "F26",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "MEDIA",
+      "caso": "tour requiere comando externo",
+      "estado": "SIN_PRUEBA",
+      "detected": null,
+      "arreglo": "carpeta del dashboard: tour ejecutable desde la UI"
+    },
+    {
+      "case_id": "F27",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "prueba UI omitida (skip)",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P01: un archivo con solo tests omitidos",
+          "status": "PASS",
+          "titulos": [
+            "P01: un archivo con solo tests omitidos no aprueba"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F28",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "navegador ausente",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "politica-gates.test.cjs",
+          "patron": "P02: TDD verde con bot",
+          "status": "PASS",
+          "titulos": [
+            "P02: TDD verde con botón roto o sin navegador no cierra; solo PASS del mismo sujeto"
+          ]
+        },
+        {
+          "archivo": "browser-objetivo.test.cjs",
+          "patron": "H27: sin URL",
+          "status": "PASS",
+          "titulos": [
+            "H27: sin URL, sin identidad o con timeout no hay PASS"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "F29",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "ALTA",
+      "caso": "dato no disponible mostrado como 0 o 100%",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "costo-uso.test.cjs",
+          "patron": "H31: usage ausente es null",
+          "status": "PASS",
+          "titulos": [
+            "H31: usage ausente es null, no cero"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": "en el dashboard se cierra con D01–D26"
+    },
+    {
+      "case_id": "F30",
+      "lado": "frontend",
+      "tipo": "mutante",
+      "criticidad": "CRITICA",
+      "caso": "contrato front/back incompatible",
+      "estado": "DETECTADO",
+      "expected": "DETECTADO",
+      "detected": true,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: DTO p",
+          "status": "PASS",
+          "titulos": [
+            "P07: DTO público con snapshot versionado y consumidor"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S01",
+      "lado": "ambos",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "texto local",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "benchmark-front-mutantes.test.cjs",
+          "patron": "BENCH-SANO",
+          "status": "PASS",
+          "titulos": [
+            "BENCH-SANO: texto local cambiado pasa sin bloqueo"
+          ]
+        },
+        {
+          "archivo": "effort-router.test.cjs",
+          "patron": "02: texto localizado sigue LOW",
+          "status": "PASS",
+          "titulos": [
+            "02: texto localizado sigue LOW aunque exista spec activa"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S02",
+      "lado": "backend",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "refactor equivalente",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "contratos-backend.test.cjs",
+          "patron": "P07: un cambio interno equivalente",
+          "status": "PASS",
+          "titulos": [
+            "P07: un cambio interno equivalente pasa"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S03",
+      "lado": "ambos",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "cambio intencional aprobado",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "preservacion-escenarios.test.cjs",
+          "patron": "P05: un cambio intencional",
+          "status": "PASS",
+          "titulos": [
+            "P05: un cambio intencional exige delta, alcance, aprobador y pruebas preservadas"
+          ]
+        },
+        {
+          "archivo": "baseline-visual.test.cjs",
+          "patron": "P10: aprobar exige aprobador",
+          "status": "PASS",
+          "titulos": [
+            "P10: aprobar exige aprobador y motivo; base inicial no reemplaza una base"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S04",
+      "lado": "backend",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "dependencia no afectada",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "blast-radius.test.cjs",
+          "patron": "H29: una subcadena no inventa",
+          "status": "PASS",
+          "titulos": [
+            "H29: una subcadena no inventa contrato (auth.js no es oauth-helper)"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S05",
+      "lado": "ambos",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "documentación",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "canario-gate.test.cjs",
+          "patron": "un cambio que no toca",
+          "status": "PASS",
+          "titulos": [
+            "un cambio que no toca producción no molesta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    },
+    {
+      "case_id": "S06",
+      "lado": "ambos",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "escenario alternativo válido (copia sin mutar)",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "meta-gates.test.cjs",
+          "patron": "P20 GATE-",
+          "status": "PASS",
+          "titulos": [
+            "P20 GATE-EXIT: sembrado en tdd-gate.cjs, la prueba negativa lo detecta",
+            "P20 GATE-CACHE-VIEJA: sembrado en evidence-cache.cjs, la prueba negativa lo detecta",
+            "P20 GATE-REPLAY: sembrado en regression-guard.cjs, la prueba negativa lo detecta",
+            "P20 GATE-RESTORE-HASH: sembrado en restore-manager.cjs, la prueba negativa lo detecta",
+            "P20 GATE-PAYLOAD: sembrado en host-guard.cjs, la prueba negativa lo detecta",
+            "P20 GATE-EVIDENCIA-AJENA: sembrado en teams-adapters.cjs, la prueba negativa lo detecta"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": "la copia sana y la mutada comparten prueba: un FAIL aquí puede ser sobreviviente, se lee junto a B11–B20"
+    },
+    {
+      "case_id": "S07",
+      "lado": "frontend",
+      "tipo": "sano",
+      "criticidad": null,
+      "caso": "estilos fuera de región protegida",
+      "estado": "PASA",
+      "expected": "PASA",
+      "detected": null,
+      "gate": "prueba-negativa",
+      "pruebas": [
+        {
+          "archivo": "ui-layout-autocapture.test.cjs",
+          "patron": "un cambio nuevo NO molesta",
+          "status": "PASS",
+          "titulos": [
+            "un cambio nuevo NO molesta — es trabajo normal"
+          ]
+        }
+      ],
+      "subject_hash": "d4a628790eae452c",
+      "execution_id": "bench-mur3gvsd-c10838",
+      "limite": null
+    }
+  ],
+  "corridas": [
+    {
+      "archivo": "contratos-backend.test.cjs",
+      "exit": 0,
+      "ms": 12259,
+      "error": null
+    },
+    {
+      "archivo": "efectos.test.cjs",
+      "exit": 0,
+      "ms": 4879,
+      "error": null
+    },
+    {
+      "archivo": "update-transaccional.test.cjs",
+      "exit": 0,
+      "ms": 1032,
+      "error": null
+    },
+    {
+      "archivo": "preservacion-escenarios.test.cjs",
+      "exit": 0,
+      "ms": 819,
+      "error": null
+    },
+    {
+      "archivo": "blast-radius.test.cjs",
+      "exit": 0,
+      "ms": 193,
+      "error": null
+    },
+    {
+      "archivo": "politica-gates.test.cjs",
+      "exit": 0,
+      "ms": 399,
+      "error": null
+    },
+    {
+      "archivo": "meta-gates.test.cjs",
+      "exit": 0,
+      "ms": 11473,
+      "error": null
+    },
+    {
+      "archivo": "preservacion-p14-c10.test.cjs",
+      "exit": 0,
+      "ms": 1462,
+      "error": null
+    },
+    {
+      "archivo": "effort-router.test.cjs",
+      "exit": 0,
+      "ms": 241,
+      "error": null
+    },
+    {
+      "archivo": "zip-mejoras.test.cjs",
+      "exit": 0,
+      "ms": 180,
+      "error": null
+    },
+    {
+      "archivo": "teams.test.cjs",
+      "exit": 0,
+      "ms": 269,
+      "error": null
+    },
+    {
+      "archivo": "teams-baseline-rollback.test.cjs",
+      "exit": 0,
+      "ms": 6702,
+      "error": null
+    },
+    {
+      "archivo": "benchmark-front-mutantes.test.cjs",
+      "exit": 0,
+      "ms": 44759,
+      "error": null
+    },
+    {
+      "archivo": "baseline-visual.test.cjs",
+      "exit": 0,
+      "ms": 12186,
+      "error": null
+    },
+    {
+      "archivo": "recall-presupuesto.test.cjs",
+      "exit": 0,
+      "ms": 251,
+      "error": null
+    },
+    {
+      "archivo": "browser-objetivo.test.cjs",
+      "exit": 0,
+      "ms": 566,
+      "error": null
+    },
+    {
+      "archivo": "costo-uso.test.cjs",
+      "exit": 0,
+      "ms": 192,
+      "error": null
+    },
+    {
+      "archivo": "canario-gate.test.cjs",
+      "exit": 0,
+      "ms": 160,
+      "error": null
+    },
+    {
+      "archivo": "ui-layout-autocapture.test.cjs",
+      "exit": 0,
+      "ms": 200,
+      "error": null
+    }
+  ],
+  "metricas": {
+    "backend": {
+      "cobertura": {
+        "n": 20,
+        "d": 20,
+        "pct": 100,
+        "texto": "20/20"
+      },
+      "deteccion": {
+        "n": 20,
+        "d": 20,
+        "pct": 100,
+        "texto": "20/20"
+      },
+      "falsos_negativos": {
+        "n": 0,
+        "d": 20,
+        "pct": 0,
+        "texto": "0/20"
+      },
+      "falsa_alarma": {
+        "n": 0,
+        "d": 6,
+        "pct": 0,
+        "texto": "0/6"
+      },
+      "vigencia": {
+        "n": 20,
+        "d": 20,
+        "pct": 100,
+        "texto": "20/20"
+      },
+      "criticos_detectados": {
+        "n": 15,
+        "d": 15,
+        "pct": 100,
+        "texto": "15/15"
+      },
+      "sin_prueba": [],
+      "sobrevivientes": [],
+      "no_ejecutados": []
+    },
+    "frontend": {
+      "cobertura": {
+        "n": 28,
+        "d": 30,
+        "pct": 93.3,
+        "texto": "28/30"
+      },
+      "deteccion": {
+        "n": 28,
+        "d": 28,
+        "pct": 100,
+        "texto": "28/28"
+      },
+      "falsos_negativos": {
+        "n": 0,
+        "d": 28,
+        "pct": 0,
+        "texto": "0/28"
+      },
+      "falsa_alarma": {
+        "n": 0,
+        "d": 5,
+        "pct": 0,
+        "texto": "0/5"
+      },
+      "vigencia": {
+        "n": 28,
+        "d": 28,
+        "pct": 100,
+        "texto": "28/28"
+      },
+      "criticos_detectados": {
+        "n": 8,
+        "d": 8,
+        "pct": 100,
+        "texto": "8/8"
+      },
+      "sin_prueba": [
+        {
+          "id": "F25",
+          "caso": "cámara o diseño del grafo alterado",
+          "arreglo": "carpeta del dashboard (D01–D26): baseline del grafo antes de tocarlo"
+        },
+        {
+          "id": "F26",
+          "caso": "tour requiere comando externo",
+          "arreglo": "carpeta del dashboard: tour ejecutable desde la UI"
+        }
+      ],
+      "sobrevivientes": [],
+      "no_ejecutados": []
+    },
+    "enforcement": {
+      "n": 3,
+      "d": 8,
+      "pct": 37.5,
+      "texto": "3/8"
+    },
+    "nota": "Cada número va con su denominador y por separado; no hay promedio compuesto. 100% vale solo para este catálogo."
+  },
+  "enforcement": {
+    "estado": "DEGRADED",
+    "huecos": [
+      "edición por herramienta del agente",
+      "shell del agente",
+      "herramientas MCP",
+      "scripts lanzados por shell",
+      "edición manual fuera del agente"
+    ]
+  }
+}

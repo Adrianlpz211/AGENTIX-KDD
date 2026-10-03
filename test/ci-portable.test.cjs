@@ -54,6 +54,21 @@ test('el corredor propaga el código de salida', () => {
     'el fallo del runner tiene que llegar a npm, o el CI vuelve a ser un adorno');
 });
 
+test('el corredor acepta la ruta con carpeta que le pasa el TDD gate y dice lo que no corre', () => {
+  const { spawnSync } = require('child_process');
+  const env = Object.assign({}, process.env);
+  delete env.NODE_TEST_CONTEXT;
+  const correr = (...args) => spawnSync(process.execPath, [path.join(RAIZ, 'scripts', 'run-tests.cjs'), ...args], { cwd: RAIZ, env, encoding: 'utf8' });
+
+  const r = correr(path.join('test', 'costo-uso.test.cjs'), path.join('docs', 'benchmarks', 'x', 'billing.test.js'));
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /1 archivo\(s\) de test/);
+  assert.match(r.stdout, /No ejecutados \(1\)[\s\S]*billing\.test\.js/);
+
+  const solo = correr(path.join('docs', 'benchmarks', 'x', 'billing.test.js'));
+  assert.strictEqual(solo.status, 1, 'nada de la suite pedido = no hay verde');
+});
+
 test('el workflow instala dependencias y corre la suite', () => {
   const ci = fs.readFileSync(path.join(RAIZ, '.github', 'workflows', 'ci.yml'), 'utf8');
   assert.match(ci, /npm ci|npm install/,

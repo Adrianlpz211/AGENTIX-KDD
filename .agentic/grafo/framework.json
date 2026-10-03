@@ -1,0 +1,9 @@
+{
+  "name": "agentic-kdd",
+  "version": "3.20.0",
+  "schema": {
+    "gate_result": 1,
+    "telemetry": 2,
+    "pipeline_state": 1
+  }
+}

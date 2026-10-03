@@ -24,7 +24,29 @@
 
 const path = require('path');
 const fs   = require('fs');
-const { execSync } = require('child_process');
+
+// @huggingface/transformers es el sucesor de @xenova/transformers (misma API de
+// pipeline). La 2.x de @xenova arrastra protobufjs < 7.5.5 (ejecución de
+// código) y sharp < 0.35.4; su único "arreglo" de npm es bajar a 1.4.2. Se
+// acepta la vieja solo si es lo que hay instalado, y se avisa.
+const LIBRERIAS = [
+  { nombre: '@huggingface/transformers', opciones: { dtype: 'q8' }, vulnerable: false },
+  { nombre: '@xenova/transformers', opciones: { quantized: true }, vulnerable: true },
+];
+const INSTALAR = 'npm install --save-dev @huggingface/transformers@^4.3.0';
+
+function libreria() {
+  for (const l of LIBRERIAS) {
+    try { require.resolve(l.nombre); return l; } catch { /* siguiente */ }
+  }
+  return null;
+}
+
+function cargar() {
+  const l = libreria();
+  if (!l) return null;
+  return { ...l, mod: require(l.nombre) };
+}
 
 // ─── MODELOS ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +85,7 @@ function detectAvailableModel(projectRoot) {
   // 1. Verificar si jina está en cache local del proyecto
   const localCache = path.join(projectRoot || process.cwd(), '.agentic', '.model_cache');
   if (fs.existsSync(localCache)) {
-    // @xenova/transformers guarda como <org>/<model>; HF-Python como models--<org>--<model>
+    // transformers.js guarda como <org>/<model>; HF-Python como models--<org>--<model>
     const jinaXenova = path.join(localCache, ...MODELS.JINA_CODE.id.split('/'));
     const jinaHF = path.join(localCache, 'models--jinaai--jina-embeddings-v2-base-code');
     if (fs.existsSync(jinaXenova) || fs.existsSync(jinaHF)) {
@@ -82,13 +104,11 @@ function detectAvailableModel(projectRoot) {
     }
   }
 
-  // 3. Verificar si @xenova/transformers está instalado
-  try {
-    require.resolve('@xenova/transformers');
-    // MiniLM siempre descargable si transformers está
+  // 3. Con la librería instalada, MiniLM siempre se puede descargar
+  if (libreria()) {
     _available = 'mini';
     return 'mini';
-  } catch {}
+  }
 
   _available = false;
   return false;
@@ -107,7 +127,9 @@ async function getPipeline(projectRoot) {
 
   try {
     process.env.TRANSFORMERS_VERBOSITY = 'error';
-    const { pipeline, env } = require('@xenova/transformers');
+    const lib = cargar();
+    if (!lib) { _available = false; return { pipeline: null, model: null }; }
+    const { pipeline, env } = lib.mod;
 
     // Usar cache local del proyecto si existe
     const localCache = path.join(projectRoot || process.cwd(), '.agentic', '.model_cache');
@@ -116,7 +138,7 @@ async function getPipeline(projectRoot) {
     const model = available === 'jina' ? MODELS.JINA_CODE : MODELS.MINI_LM;
     _activeModel = model;
 
-    _pipeline = await pipeline('feature-extraction', model.id, { quantized: true });
+    _pipeline = await pipeline('feature-extraction', model.id, lib.opciones);
 
     return { pipeline: _pipeline, model };
   } catch (e) {
@@ -183,9 +205,13 @@ async function semanticSearch(query, items, topK = 10, projectRoot) {
 async function getStatus(projectRoot) {
   const available = detectAvailableModel(projectRoot || process.cwd());
   const model = available === 'jina' ? MODELS.JINA_CODE : available === 'mini' ? MODELS.MINI_LM : null;
+  const lib = libreria();
 
   return {
     available: !!available,
+    library: lib ? lib.nombre : null,
+    library_vulnerable: lib ? lib.vulnerable : null,
+    library_fix: lib && lib.vulnerable ? `npm uninstall @xenova/transformers && ${INSTALAR}` : null,
     active_model: model?.name || 'none',
     model_type: model?.type || 'none',
     dims: model?.dims || 0,
@@ -203,6 +229,18 @@ async function getStatus(projectRoot) {
 
 // ─── INSTALACIÓN ─────────────────────────────────────────────────────────────
 
+/** La librería no se instala sola en el proyecto de nadie: se dice el comando. */
+function requiereLibreria() {
+  const lib = cargar();
+  if (!lib) {
+    console.log(`[EMBEDDINGS] Falta la librería de modelos. Instálala tú en este proyecto:\n  ${INSTALAR}\n`);
+    process.exitCode = 1;
+    return null;
+  }
+  if (lib.vulnerable) console.log(`[EMBEDDINGS] ⚠️  ${lib.nombre} 2.x trae protobufjs/sharp con avisos críticos. Cambiar: npm uninstall @xenova/transformers && ${INSTALAR}`);
+  return lib;
+}
+
 /**
  * Instalar jina-embeddings-v2-base-code (modelo primario recomendado).
  * ~500MB. Se guarda en .agentic/.model_cache para uso offline.
@@ -213,27 +251,19 @@ async function installJina(projectRoot) {
   console.log('[EMBEDDINGS] Tamaño: ~500MB. Puede tomar 5-10 minutos.');
   console.log('[EMBEDDINGS] Modelo bimodal NL-PL — entrenado específicamente en código.\n');
 
-  // Verificar que @xenova/transformers está instalado
-  try {
-    require.resolve('@xenova/transformers');
-  } catch {
-    console.log('[EMBEDDINGS] Instalando @xenova/transformers primero...');
-    execSync('npm install @xenova/transformers --save-dev', {
-      stdio: 'inherit',
-      cwd: projectRoot,
-    });
-  }
+  const lib = requiereLibreria();
+  if (!lib) return;
 
   // Descargar el modelo
   try {
     process.env.TRANSFORMERS_VERBOSITY = 'info';
-    const { pipeline, env } = require('@xenova/transformers');
+    const { pipeline, env } = lib.mod;
     const localCache = path.join(projectRoot, '.agentic', '.model_cache');
     fs.mkdirSync(localCache, { recursive: true });
     env.cacheDir = localCache;
 
     console.log('[EMBEDDINGS] Descargando modelo...');
-    const pipe = await pipeline('feature-extraction', MODELS.JINA_CODE.id, { quantized: true });
+    const pipe = await pipeline('feature-extraction', MODELS.JINA_CODE.id, lib.opciones);
 
     // Test
     const testEmbed = await pipe('function test() { return 1; }', { pooling: 'mean', normalize: true });
@@ -260,19 +290,16 @@ async function installMini(projectRoot) {
   console.log('[EMBEDDINGS] Nota: este modelo es para texto natural, no optimizado para código.');
   console.log('[EMBEDDINGS] Para precisión máxima en código: akdd jina-install\n');
 
-  try {
-    require.resolve('@xenova/transformers');
-  } catch {
-    execSync('npm install @xenova/transformers --save-dev', { stdio: 'inherit', cwd: projectRoot });
-  }
+  const lib = requiereLibreria();
+  if (!lib) return;
 
   try {
-    const { pipeline, env } = require('@xenova/transformers');
+    const { pipeline, env } = lib.mod;
     const localCache = path.join(projectRoot, '.agentic', '.model_cache');
     fs.mkdirSync(localCache, { recursive: true });
     env.cacheDir = localCache;
 
-    const pipe = await pipeline('feature-extraction', MODELS.MINI_LM.id, { quantized: true });
+    const pipe = await pipeline('feature-extraction', MODELS.MINI_LM.id, lib.opciones);
     console.log('\n[EMBEDDINGS] ✅ all-MiniLM-L6-v2 instalado como fallback.\n');
     _available = 'mini';
     _pipeline = pipe;
@@ -435,6 +462,6 @@ if (require.main === module) {
   }
 }
 
-module.exports = { embed, cosineSim, semanticSearch, getStatus, installJina, installMini, detectAvailableModel, MODELS,
+module.exports = { embed, cosineSim, semanticSearch, getStatus, installJina, installMini, detectAvailableModel, MODELS, LIBRERIAS, libreria,
   // compat shim (API vieja consumida por grafo.cjs)
   isAvailable, instalar, buscarHibridoVectorial, indexarPendientes };

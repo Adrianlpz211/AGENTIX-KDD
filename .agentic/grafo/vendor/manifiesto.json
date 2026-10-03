@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "name": "d3.min.js",
+      "status": "DESCARGADO",
+      "sha256": "d6b03aefc9f6c44c7bc78713679c78c295028fa914319119e5cc4b4954855b1c",
+      "bytes": 279633
+    },
+    {
+      "name": "3d-force-graph.min.js",
+      "status": "DESCARGADO",
+      "sha256": "d96e738edcca580edd524730c1c6b05ed2efce028c23ca95db1bf43033a72e42",
+      "bytes": 1313897
+    },
+    {
+      "name": "three.min.js",
+      "status": "DESCARGADO",
+      "sha256": "170c6789f43217c96b3170f4b42fafe135de7f7cd48497a4218f9757ee1d49fa",
+      "bytes": 669884
+    },
+    {
+      "name": "three-spritetext.min.js",
+      "status": "DESCARGADO",
+      "sha256": "6c2059abe62aac9ee977a3630d8f1b6dd2b8a1ff0ef3db032cf2abd433f7a7be",
+      "bytes": 9179
+    },
+    {
+      "name": "force-graph.min.js",
+      "status": "DESCARGADO",
+      "sha256": "af9324ce63bb87f330643c04a9062ca17b3be32826234012197ced595eb0f83a",
+      "bytes": 161737
+    }
+  ],
+  "at": "2026-10-02T18:42:55.699Z"
+}

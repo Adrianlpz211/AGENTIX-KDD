@@ -53,6 +53,14 @@ if (!fs.existsSync(DB_PATH)) {
   process.stderr.write('[Agentic KDD MCP] Run: akdd init\n');
 }
 
+/* La versión sale del manifiesto que viaja con el motor (generado desde el
+   package.json de Agentix por scripts/sync-version.cjs). Sin manifiesto se
+   anuncia 'unknown', nunca una cifra fija que se desfase. */
+function versionFramework() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'framework.json'), 'utf8')).version || 'unknown'; }
+  catch { return 'unknown'; }
+}
+
 // ─── LAZY LOADERS ─────────────────────────────────────────────────────────────
 // Carga cada módulo bajo demanda — el MCP server arranca sin cargar todo.
 
@@ -255,8 +263,8 @@ const TOOLS = [
       const tasksPath = path.join(specDir, 'tasks.md');
       if (!fs.existsSync(tasksPath)) return { error: `spec '${modulo}' no tiene tasks.md` };
       const tasks = m.parseTasks(fs.readFileSync(tasksPath, 'utf8'));
-      const { waves } = m.buildWaves(tasks);
-      return { modulo, waves: waves.map((w, i) => ({ wave: i + 1, tasks: w })) };
+      const { waves, blocked, errors } = m.buildWaves(tasks);
+      return { modulo, waves: waves.map((w, i) => ({ wave: i + 1, tasks: w })), not_runnable: blocked || [], errors: errors || [] };
     },
   },
   {
@@ -404,7 +412,7 @@ const TOOLS = [
   // ── MÉTRICAS (v2 nuevo) ───────────────────────────────────────────────────
   {
     name: 'metrics_summary',
-    description: 'Métricas operacionales del proyecto: tasa de éxito, retrabajo, calidad de memoria, autonomy score, token savings estimado.',
+    description: 'Métricas operacionales del proyecto: tasa de éxito, retrabajo, calidad de memoria, autonomy score y tokens: uso real del proveedor y estimado por separado; ahorro solo si hay benchmark comparable (si no, null).',
     inputSchema: { type: 'object', properties: {}, required: [] },
     handler: async () => {
       const m = loadModule('metrics.cjs');
@@ -413,7 +421,7 @@ const TOOLS = [
         cycles: m.computeCycleMetrics(db),
         memory: m.computeMemoryMetrics(db),
         autonomy: m.computeAutonomyScore(db),
-        tokens: m.estimateTokenSavings(db),
+        tokens: m.estimateTokenSavings(db, ROOT),
       };
     },
   },
@@ -488,13 +496,19 @@ rl.on('line', async (line) => {
   try { request = JSON.parse(line); } catch { return; }
 
   const { id, method, params } = request;
+  // JSON-RPC: una notificación (sin id, p. ej. notifications/initialized) no
+  // lleva respuesta. Antes se contestaba con un error sin id, que algunos
+  // clientes registran como fallo del servidor.
+  if (id === undefined || id === null) return;
 
   try {
-    if (method === 'initialize') {
+    if (method === 'ping') {
+      sendResponse(id, {});
+    } else if (method === 'initialize') {
       sendResponse(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'agentic-kdd', version: '3.8.0' },
+        serverInfo: { name: 'agentic-kdd', version: versionFramework() },
       });
     } else if (method === 'tools/list') {
       sendResponse(id, {
@@ -600,7 +614,7 @@ async function handleV32Tool(name, args={}) {
     case 'report_benchmarks': {
       const m = require(path.join(ROOT, '.agentic/grafo/metrics.cjs'));
       const db = getDB();
-      return m.computeReportBenchmarks(db);
+      return m.computeReportBenchmarks(db, ROOT);
     }
     case 'causal_prune': {
       const m = require(path.join(ROOT, '.agentic/grafo/causal-edges.cjs'));
@@ -628,7 +642,7 @@ const TOOLS_CLI = [
   },
   {
     name: 'update_project',
-    description: 'Actualiza agentes y módulos desde GitHub. Equivale a "akdd update". La memoria queda intacta.',
+    description: 'Actualiza el motor del proyecto con el que trae el paquete agentic-kdd instalado (GitHub solo con --ref). Equivale a "akdd update". memoria.db, los Markdown de memoria y la config no se tocan; el esquema solo migra con --migrate.',
     inputSchema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -750,6 +764,9 @@ const TOOLS_V33 = [
   { name: 'creative_suggest',  description: 'List pending creative suggestions — simplifications, refactors, missing tests, fragility warnings.', inputSchema: {type:'object',properties:{module:{type:'string'}},required:[]} },
   { name: 'creative_apply',    description: 'Apply a creative suggestion (only if auto_applicable=true and blast_radius≤3).', inputSchema: {type:'object',properties:{id:{type:'string'}},required:['id']} },
   { name: 'creative_wins',     description: 'Show applied creative improvements and their impact.', inputSchema: {type:'object',properties:{},required:[]} },
+  { name: 'pipeline_step',     description: 'Register one aa: pipeline step through the harness (PRE/EXEC/POST). Reasoning steps need the agent output; tdd runs the gate. Same event_id twice runs once.', inputSchema: {type:'object',properties:{step:{type:'string',enum:['context_guard','analyst','implementation','tdd','qa','review','memory']},cycle_id:{type:'string'},output:{type:'object'},event_id:{type:'string'},area:{type:'string'}},required:['step']} },
+  { name: 'pipeline_gate',     description: 'Register a structured surface gate result (preservation, test-integrity, browser, visual) for the current aa: cycle. Only PASS of the same subject and policy closes it.', inputSchema: {type:'object',properties:{cycle_id:{type:'string'},result:{type:'object'}},required:['result']} },
+  { name: 'pipeline_status',   description: 'State of the current aa: cycle in the pipeline controller and whether it can close.', inputSchema: {type:'object',properties:{cycle_id:{type:'string'}},required:[]} },
 ];
 
 async function handleV33Tool(name, args={}) {
@@ -760,16 +777,30 @@ async function handleV33Tool(name, args={}) {
     }
     case 'contracts_list': {
       const m = require(path.join(ROOT, '.agentic/grafo/contract-guard.cjs'));
-      const db = getDB(); m.migrateSchema(db); return m.listContracts(db, args.module);
+      const db = getDB(); return m.listContracts(db, args.module);
     }
     case 'contracts_blast': {
       const m = require(path.join(ROOT, '.agentic/grafo/contract-guard.cjs'));
-      const db = getDB(); m.migrateSchema(db); return m.getBlastRadiusReport(db, ROOT, args.file);
+      const db = getDB(); return m.getBlastRadiusReport(db, ROOT, args.file);
     }
     case 'contracts_gate': {
       const m = require(path.join(ROOT, '.agentic/grafo/contract-guard.cjs'));
       const db = getDB(); m.migrateSchema(db);
       return m.runPreservationGate(db, ROOT, `mcp-${Date.now()}`, args.modified_files || []);
+    }
+    case 'pipeline_step':
+    case 'pipeline_gate':
+    case 'pipeline_status': {
+      const pc = require(path.join(ROOT, '.agentic/grafo/pipeline-controller.cjs'));
+      let cycleId = args.cycle_id;
+      if (!cycleId) {
+        const c = require(path.join(ROOT, '.agentic/grafo/ciclo-actual.cjs')).actual(ROOT);
+        cycleId = c && c.cycle_id;
+      }
+      if (!cycleId) return { status: 'ERROR', reason: 'sin ciclo en curso: pasa cycle_id o corre el context-enricher' };
+      if (name === 'pipeline_status') return { estado: pc.cargar(ROOT, cycleId), cierre: pc.puedeCerrar(ROOT, cycleId) };
+      if (name === 'pipeline_gate') return pc.registrarGate(ROOT, cycleId, Object.assign({}, args.result, { source: 'mcp' }));
+      return await pc.paso(ROOT, { cycle_id: cycleId, step: args.step, output: args.output, event_id: args.event_id, area: args.area, source: 'mcp', quiet: true });
     }
     case 'creative_level': {
       const m = require(path.join(ROOT, '.agentic/grafo/creative-engine.cjs'));
@@ -878,12 +909,17 @@ process.stderr.write('[Agentic KDD MCP] +3 autonomous tools (autonomous_decide, 
 
 // ─── v3.4: kdd-memory + knowledge-validator + telemetry MCP TOOLS ────────────
 const TOOLS_V34 = [
-  { name: 'recall', description: 'Ranked memory retrieval. BM25+vector hybrid. Use instead of reading errores.md/patrones.md directly. Returns top-K relevant entries by relevance score.', inputSchema: { type:'object', properties: { query:{type:'string'}, top_k:{type:'number'}, tipo:{type:'string'}, area:{type:'string'} }, required:['query'] } },
+  { name: 'recall', description: 'Ranked memory retrieval (BM25+vector). Use instead of reading errores.md/patrones.md. Returns id, title, confidence, files and a short summary within a token budget (estimate bytes/4, truncation reported). No match = empty. Obsolete entries are never returned. Pass id to get one entry in full; exclude_ids to skip what another role already got.', inputSchema: { type:'object', properties: { query:{type:'string'}, id:{type:['string','number']}, top_k:{type:'number'}, tipo:{type:'string'}, area:{type:'string'}, budget_tokens:{type:'number'}, exclude_ids:{type:'array', items:{type:['string','number']}} }, required:[] } },
   { name: 'remember', description: 'Write to memory with validation. Checks for duplicates, computes hash_contexto, adds frontmatter. Use at end of every cycle.', inputSchema: { type:'object', properties: { entry:{type:'string'}, tipo:{type:'string'}, area:{type:'string'}, confianza:{type:'string'}, archivos:{type:'array',items:{type:'string'}} }, required:['entry'] } },
   { name: 'validate_knowledge', description: 'Check if a memory entry is still valid before applying it. Returns: trusted, status (ACTIVO/SOSPECHOSO/OBSOLETO), recommendation.', inputSchema: { type:'object', properties: { node_id:{type:'string'} }, required:['node_id'] } },
   { name: 'memory_scan', description: 'Scan all memory for stale/obsolete/poisoned entries. Run periodically or before a major feature.', inputSchema: { type:'object', properties:{}, required:[] } },
   { name: 'telemetry_view', description: 'View execution trace for a cycle. Essential for L4 auditing.', inputSchema: { type:'object', properties:{ trace_id:{type:'string'} }, required:[] } },
   { name: 'telemetry_summary', description: 'Summary of all telemetry: total spans, STOPs, recalls, remembers.', inputSchema: { type:'object', properties:{}, required:[] } },
+  { name: 'effort_decide', description: 'Universal effort router: tier = max(difficulty, risk), LOW/MEDIUM/HIGH with gates, roles, context budget and repair attempts. Same decision for aa:, sprint and teams. A requested tier below the risk floor is rejected (MIN_SEGURIDAD). Pass event to re-evaluate an existing task.', inputSchema: { type:'object', properties:{ intent:{type:'string'}, paths:{type:'array', items:{type:'string'}}, change_type:{type:'string'}, task_id:{type:'string'}, requested_tier:{type:'string'}, index_coverage:{type:'string'}, max_context_bytes:{type:'number'}, max_tool_calls:{type:'number'}, event:{type:'string'}, detail:{type:'string'} }, required:[] } },
+  { name: 'context_pack', description: 'One context package per task (objective, acceptance, authorized paths, recall summaries, risks, file hashes, evidence). Reused when task and context are unchanged. Pass role to get only that role\'s part.', inputSchema: { type:'object', properties:{ task_id:{type:'string'}, objective:{type:'string'}, acceptance:{type:'array', items:{type:'string'}}, paths:{type:'array', items:{type:'string'}}, role:{type:'string'} }, required:['objective'] } },
+  { name: 'teams', description: 'TEAMS native backend (same as `akdd teams` and `teams:` in chat). action: init|plan|run|status|pause|resume|disable|pending|resolve|import|verify|views. init needs approve_migration=true to add teams_* tables (with backup). resolve only succeeds if the host prompt hook recorded the person writing "teams: resolver <id> <decision>".', inputSchema: { type:'object', properties:{ action:{type:'string'}, approve_migration:{type:'boolean'}, plan:{type:'object'}, pending_id:{type:'string'}, decision:{type:'string'}, text:{type:'string'}, task_id:{type:'string'}, gates:{type:'array', items:{type:'object'}}, sprint:{type:'string'} }, required:['action'] } },
+  { name: 'whatsapp', description: 'Optional WhatsApp notices (same backend as `akdd ws` and `ws:` in chat). action: estado|desactivar|reintentar|procesar|teams|activar|contacto|elegir. activar/contacto/elegir only succeed if the host prompt hook recorded the person typing them; this tool cannot activate on its own. Without a real tested transport the activation ends UNSUPPORTED and nothing is sent.', inputSchema: { type:'object', properties:{ action:{type:'string'}, activation_id:{type:'string'}, text:{type:'string'}, choice:{type:'string'} }, required:['action'] } },
+  { name: 'restore', description: 'Real code restore points (Git objects in private refs/agentix/restore/*, never HEAD/branch/index). action: list|create|show|preview|apply|resume. apply needs expected_current_hash from a fresh preview; a preview that asks for a decision cannot be confirmed from here (only an interactive terminal). Restores code only: databases, migrations, deploys and messages are listed as not reverted.', inputSchema: { type:'object', properties:{ action:{type:'string'}, id:{type:'string'}, label:{type:'string'}, files:{type:'array', items:{type:'string'}}, expected_current_hash:{type:'string'} }, required:['action'] } },
 ];
 
 async function handleV34Tool(name, args={}) {
@@ -891,11 +927,16 @@ async function handleV34Tool(name, args={}) {
   switch(name) {
     case 'recall': {
       const m = require(path.join(ROOT2, '.agentic/grafo/kdd-memory.cjs'));
-      return m.recall(args.query, { topK: args.top_k||10, tipo:args.tipo, area:args.area }, ROOT2);
+      if (args.id !== undefined && args.id !== null && args.id !== '') return m.detalle(args.id, ROOT2);
+      return m.recall(args.query, {
+        topK: args.top_k||10, tipo:args.tipo, area:args.area, via:'mcp',
+        presupuestoTokens: Number.isFinite(args.budget_tokens) ? args.budget_tokens : undefined,
+        excluir: Array.isArray(args.exclude_ids) ? args.exclude_ids : [],
+      }, ROOT2);
     }
     case 'remember': {
       const m = require(path.join(ROOT2, '.agentic/grafo/kdd-memory.cjs'));
-      return m.remember(args.entry, { tipo:args.tipo||'patron', area:args.area||'global', confianza:args.confianza||'BAJA', archivos:args.archivos||[] }, ROOT2);
+      return m.remember(args.entry, { tipo:args.tipo||'patron', area:args.area||'global', confianza:args.confianza||'BAJA', archivos:args.archivos||[], via:'mcp' }, ROOT2);
     }
     case 'validate_knowledge': {
       const m = require(path.join(ROOT2, '.agentic/grafo/knowledge-validator.cjs'));
@@ -904,6 +945,57 @@ async function handleV34Tool(name, args={}) {
     case 'memory_scan': {
       const m = require(path.join(ROOT2, '.agentic/grafo/knowledge-validator.cjs'));
       return m.scanAll(ROOT2);
+    }
+    case 'effort_decide': {
+      const r = require(path.join(ROOT2, '.agentic/grafo/effort-router.cjs'));
+      if (args.event) return r.reevaluar(ROOT2, args.task_id, args.event, args.detail);
+      const limites = {};
+      if (Number.isFinite(args.max_context_bytes)) limites.max_context_bytes = args.max_context_bytes;
+      if (Number.isFinite(args.max_tool_calls)) limites.max_tool_calls = args.max_tool_calls;
+      return r.decidirYGuardar(ROOT2, {
+        intent: args.intent || '', paths: args.paths || [], change_type: args.change_type, task_id: args.task_id,
+        requested_tier: args.requested_tier, index_coverage: args.index_coverage, origen: 'mcp',
+        user_limits: Object.keys(limites).length ? limites : undefined,
+      });
+    }
+    case 'context_pack': {
+      const c = require(path.join(ROOT2, '.agentic/grafo/context-pack.cjs'));
+      const p = await c.armar(ROOT2, { task_id: args.task_id, objetivo: args.objective, aceptacion: args.acceptance || [], paths: args.paths || [], origen: 'mcp' });
+      return args.role ? c.paraRol(ROOT2, p, args.role) : p;
+    }
+    case 'teams': {
+      const t = require(path.join(ROOT2, '.agentic/grafo/teams-manager.cjs'));
+      return t.ejecutarAccion(ROOT2, args.action, {
+        aprobar_migracion: args.approve_migration === true, plan: args.plan, pending_id: args.pending_id, decision: args.decision,
+        texto: args.text, task_id: args.task_id, gates: args.gates, sprint: args.sprint, origen: 'hook-prompt',
+      });
+    }
+    case 'whatsapp': {
+      const w = require(path.join(ROOT2, '.agentic/grafo/whatsapp-manager.cjs'));
+      const ad = w.adapterActual(ROOT2);
+      switch (args.action) {
+        case 'estado': return w.estado(ROOT2);
+        case 'desactivar': return w.desactivar(ROOT2, { adapter: ad });
+        case 'reintentar': return w.reintentar(ROOT2, { activation_id: args.activation_id, adapter: ad });
+        case 'procesar': return w.procesarCola(ROOT2, { adapter: ad });
+        case 'teams': return w.desdeTeams(ROOT2);
+        case 'activar': return w.activar(ROOT2, { origen: 'hook-prompt', texto: args.text || 'ws: activar' });
+        case 'contacto': return w.contacto(ROOT2, { activation_id: args.activation_id, texto: args.text, origen: 'hook-prompt', adapter: ad });
+        case 'elegir': return w.elegir(ROOT2, { activation_id: args.activation_id, eleccion: args.choice, origen: 'hook-prompt', adapter: ad });
+        default: return { status: 'USO', detalle: 'action: estado|desactivar|reintentar|procesar|teams|activar|contacto|elegir' };
+      }
+    }
+    case 'restore': {
+      const r = require(path.join(ROOT2, '.agentic/grafo/restore-manager.cjs'));
+      switch (args.action) {
+        case 'list': return r.listar(ROOT2);
+        case 'create': return r.crear(ROOT2, { label: args.label, archivos: args.files });
+        case 'show': return r.mostrar(ROOT2, args.id);
+        case 'preview': return r.preview(ROOT2, args.id);
+        case 'apply': return r.aplicar(ROOT2, args.id, { expected_current_hash: args.expected_current_hash, origen: 'mcp' });
+        case 'resume': return r.reanudar(ROOT2);
+        default: return { status: 'USO', detalle: 'action: list|create|show|preview|apply|resume' };
+      }
     }
     case 'telemetry_view': {
       const m = require(path.join(ROOT2, '.agentic/grafo/telemetry.cjs'));

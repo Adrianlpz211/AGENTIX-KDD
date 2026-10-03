@@ -1,11 +1,11 @@
 # SPEC — global
 Generado: 2026-09-03
-Última actualización: 2026-09-03
+Última actualización: 2026-09-05
 Estado: IMPLEMENTADO
 
 ## Qué hace
 Módulo global del proyecto Agency OS.
-Tests: 99 pasando ✅
+Tests: 109 pasando ✅
 
 ## Criterios de aceptación
 - ✅ CRUD completo con tenant isolation (agencyId en todas las queries)

@@ -4,8 +4,6 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { execSync } = require('child_process');
-
 const PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || 3847; // override: AKDD_DASH_PORT (permite correr dos versiones lado a lado)
 const projectPath = process.cwd();
 const dbPath = path.join(projectPath, '.agentic', 'memoria.db');
@@ -16,7 +14,25 @@ const configPath = path.join(projectPath, '.agentic', 'config.md');
 const memoriaPath = path.join(projectPath, '.agentic', 'memoria');
 
 if (!fs.existsSync(configPath)) { console.log('\n  Agentix KDD not installed.\n'); process.exit(1); }
-if (fs.existsSync(grafoPath)) { try { process.stdout.write('  Syncing... '); execSync(`node "${grafoPath}" sync`, { stdio: 'pipe', cwd: projectPath }); console.log('✓'); } catch {} }
+// Observar no escribe: abrir el tablero ya no sincroniza la memoria. Reindexar
+// es un comando aparte que la persona corre cuando quiere.
+if (fs.existsSync(grafoPath)) console.log(`  Solo lectura. Para reindexar la memoria: node "${path.relative(projectPath, grafoPath)}" sync`);
+
+function cargarGrafo(nombre) {
+  const local = path.join(__dirname, '.agentic', 'grafo', nombre);
+  return require(fs.existsSync(local) ? local : path.join(projectPath, '.agentic', 'grafo', nombre));
+}
+const datos = cargarGrafo('dashboard-datos.cjs');
+const estadoCiclo = cargarGrafo('estado-ciclo.cjs');
+const fechaMod = cargarGrafo('fecha-utc.cjs');
+const metricasServicio = cargarGrafo('metricas-servicio.cjs');
+const vista = cargarGrafo('dashboard-vista.cjs');
+const apiMod = cargarGrafo('dashboard-api.cjs');
+const operativaMod = cargarGrafo('operativa.cjs');
+// Zona para mostrar fechas: "Zona horaria:" en config.md; sin ella, la del sistema.
+const ZONA = fechaMod.zonaDeConfig(fs.readFileSync(configPath, 'utf8'));
+// Estado de cada fuente: lo que no se pudo leer se muestra como "sin dato", no como 0.
+const ESTADO_DATOS = {};
 
 function escHtml(str) {
   if (!str) return '';
@@ -25,8 +41,21 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
     .replace(/`/g, '&#96;')
     .replace(/\$/g, '&#36;');
+}
+
+// Argumento string para un handler inline (onclick="f(...)"): el navegador
+// decodifica el atributo ANTES de ejecutar el JS, así que escapar solo a HTML
+// deja pasar una comilla. JSON cierra el contexto JS y escHtml el del atributo.
+function jsArg(v) { return escHtml(JSON.stringify(String(v == null ? '' : v))); }
+
+// Cifra de una tarjeta. null = la fuente no se pudo leer: guion en gris, nunca
+// un 0 ni un color de "todo bien".
+function statVal(v, cls) {
+  if (v == null) return `<div class="il-stat-val vx" data-sin-dato="1" title="Sin dato: la fuente no se pudo leer">—</div>`;
+  return `<div class="il-stat-val ${typeof cls === 'function' ? cls(v) : cls}">${Number(v)}</div>`;
 }
 
 function readConfig() {
@@ -182,87 +211,12 @@ function readLogs() {
 }
 
 function calcMetrics(logs) {
-  if (ciclosDB && ciclosDB.length > 0) {
-    const total       = ciclosDB.length;
-    const completados = ciclosDB.filter(c => c.estado === 'COMPLETADO').length;
-    const stops       = ciclosDB.filter(c => c.estado === 'STOP').length;
-    const goal_attainment = Math.round(completados/total*100);
-    const autonomy_ratio  = Math.round((total-stops)/total*100);
-    const totalFases = ciclosDB.reduce((s,c) => s+(c.fases_total||0), 0);
-    const fasesOK    = ciclosDB.reduce((s,c) => s+(c.fases_completadas||0), 0);
-    const handoff    = totalFases>0 ? Math.round(fasesOK/totalFases*100) : 0;
-    let patronesTotal=0, erroresTotal=0;
-    ciclosDB.forEach(c => {
-      try { patronesTotal += JSON.parse(c.patrones_aplicados||'[]').length; } catch(e) {}
-      try { erroresTotal  += JSON.parse(c.errores_evitados||'[]').length; } catch(e) {}
-    });
-    const testsGen  = ciclosDB.reduce((s,c) => s+(c.tests_generados||0), 0);
-    const testsOK   = ciclosDB.reduce((s,c) => s+(c.tests_pasando||0), 0);
-    const test_rate = testsGen>0 ? Math.round(testsOK/testsGen*100) : 0;
-    const totalBlockers = ciclosDB.reduce((s,c) => s+(c.review_blockers||0), 0);
-    const drift_index   = (totalBlockers/total).toFixed(1);
-    const guardrails    = ciclosDB.filter(c => c.context_guard === 'STOP').length;
-
-    // Métrica 4: Tiempo promedio por ciclo (de los que tienen duracion)
-    const conDur = ciclosDB.filter(c => c.duracion_ms > 0);
-    const avg_duracion_ms = conDur.length>0
-      ? Math.round(conDur.reduce((s,c)=>s+c.duracion_ms,0)/conDur.length) : 0;
-
-    // Métrica 5: Éxito por tipo de tarea
-    const tipoMap = {};
-    ciclosDB.forEach(c => {
-      const t = c.tipo_tarea || 'feature';
-      if (!tipoMap[t]) tipoMap[t] = { total:0, ok:0 };
-      tipoMap[t].total++;
-      if (c.estado==='COMPLETADO') tipoMap[t].ok++;
-    });
-    const exito_por_tipo = Object.entries(tipoMap).map(([tipo,v]) => ({
-      tipo, total:v.total, ok:v.ok, rate: Math.round(v.ok/v.total*100)
-    }));
-
-    // Métrica 6: Evolución de memoria (snapshots antes/después)
-    let evolucion_memoria = null;
-    const conSnap = ciclosDB.filter(c => c.snapshot_fin);
-    if (conSnap.length >= 2) {
-      try {
-        const primero = JSON.parse(conSnap[conSnap.length-1].snapshot_fin);
-        const ultimo  = JSON.parse(conSnap[0].snapshot_fin);
-        evolucion_memoria = {
-          nodos_inicio: primero.totales?.total || 0,
-          nodos_ahora:  ultimo.totales?.total  || 0,
-          alta_inicio:  primero.totales?.alta  || 0,
-          alta_ahora:   ultimo.totales?.alta   || 0,
-          crecimiento:  (ultimo.totales?.total||0) - (primero.totales?.total||0),
-        };
-      } catch(e) {}
-    }
-
-    // Reintentos desde fases
-    let reintento_rate = 0, avg_fase_ms = 0;
-    if (fasesDB && fasesDB.length > 0) {
-      const conReintentos = fasesDB.filter(f => f.intentos > 1);
-      reintento_rate = Math.round(conReintentos.length/fasesDB.length*100);
-      const conFaseDur = fasesDB.filter(f => f.duracion_ms > 0);
-      avg_fase_ms = conFaseDur.length>0
-        ? Math.round(conFaseDur.reduce((s,f)=>s+f.duracion_ms,0)/conFaseDur.length) : 0;
-    }
-
-    return {
-      total, completados, stops,
-      goal_attainment, autonomy_ratio,
-      handoff_integrity: handoff,
-      drift_index, guardrail_violations: guardrails,
-      patronesTotal, erroresTotal,
-      test_rate, testsGen, testsOK,
-      avg_duracion_ms, avg_fase_ms,
-      reintento_rate, exito_por_tipo,
-      evolucion_memoria,
-      source: 'sqlite'
-    };
-  }
-  // Fallback a logs de archivos
-  const completados = logs.filter(l => l.resultado&&l.resultado.includes('COMPLETADO')).length;
-  const stops = logs.filter(l => l.resultado&&l.resultado.includes('STOP')).length;
+  const deBase = metricasServicio.metricasDeCiclos({ ciclos: ciclosTodosDB, eventosStop: stopsEventosDB, fasesAgg: fasesAggDB, snapshots: snapshotsDB });
+  if (deBase) return deBase;
+  // Fallback a logs de archivos: solo cuenta lo que el log dice; lo demás queda sin dato.
+  const estadoLog = (l) => ((String(l.resultado || '').match(/[A-Z_]{4,}/) || [''])[0]);
+  const completados = logs.filter(l => estadoCiclo.esCierreIntegro(estadoLog(l))).length;
+  const stops = logs.filter(l => estadoCiclo.clasificar(estadoLog(l)) === 'DETENIDO').length;
   let patronesTotal=0, erroresTotal=0;
   logs.forEach(l => {
     const pm=(l.patrones||'').match(/^(\d+)/); if(pm) patronesTotal+=parseInt(pm[1]);
@@ -270,27 +224,39 @@ function calcMetrics(logs) {
   });
   return {
     total:logs.length, completados, stops, patronesTotal, erroresTotal,
-    goal_attainment: logs.length>0?Math.round(completados/logs.length*100):0,
-    autonomy_ratio:0, handoff_integrity:0, drift_index:'0',
-    guardrail_violations:0, test_rate:0, testsGen:0, testsOK:0,
+    goal_attainment: logs.length>0?Math.round(completados/logs.length*100):null,
+    autonomy_ratio:null, handoff_integrity:null, drift_index:'0',
+    guardrail_violations:0, test_rate:null, testsGen:0, testsOK:0,
     avg_duracion_ms:0, avg_fase_ms:0, reintento_rate:0,
     exito_por_tipo:[], evolucion_memoria:null, source:'logs'
   };
 }
 
 function calcOnboarding(config, mImpl, dec, pat, specsArr) {
+  let textoConfig = '';
+  try { textoConfig = fs.readFileSync(configPath, 'utf8'); } catch {}
+  const configurado = /^\s*CONFIGURADO:\s*S[IÍ]\b/im.test(textoConfig) && config.nombre !== '—' && config.tipo !== '—';
+  const mem = ESTADO_DATOS.memoria;
+  const memoriaOk = !!(mem && mem.status === 'OK' && !mem.faltan.includes('nodos'));
+  const cierre = estadoCiclo.resumenCierre(ciclosTodosDB);
   const checks = [
-    { label: 'config.md configurado', ok: config.nombre !== '—' && config.tipo !== '—' },
-    { label: 'Primer sync del grafo', ok: fs.existsSync(dbPath) },
+    { label: 'config.md configurado', ok: configurado,
+      detalle: configurado ? '' : !textoConfig.trim() ? 'config.md vacío' : 'falta CONFIGURADO: SI, nombre o tipo' },
+    { label: 'Primer sync del grafo', ok: memoriaOk,
+      detalle: memoriaOk ? '' : 'la base no se pudo leer' + (mem && mem.reason_code ? ' (' + mem.reason_code + ')' : '') },
     { label: 'Módulos documentados', ok: mImpl.length > 0 },
     { label: 'Primera decisión registrada', ok: dec.length > 0 },
     { label: 'Primer patrón registrado', ok: pat.length > 0 },
-    { label: 'Primer ciclo aa: completado', ok: (ciclosDB && ciclosDB.length > 0) || readMemoria('trabajo.md').includes('COMPLETADO') },
+    // Tener ciclos no basta: el primero cuenta cuando cierra verificado.
+    { label: 'Primer ciclo aa: completado', ok: cierre.verificados > 0,
+      detalle: cierre.verificados > 0 ? '' : `ningún ciclo con cierre verificado (${cierre.por_clase.COMPLETADO_SIN_VEREDICTO} completados sin veredicto, ${cierre.por_clase.CON_PENDIENTES} con pendientes)` },
     { label: 'Specs generadas', ok: specsArr.length > 0 },
   ];
   const done = checks.filter(c => c.ok).length;
-  return { checks, done, total: checks.length, pct: Math.round(done/checks.length*100) };
+  return { checks, done, total: checks.length, pct: Math.round(done/checks.length*100), integraciones: integracionesOnboarding() };
 }
+
+const integracionesOnboarding = () => apiMod.integraciones(projectPath);
 
 const PLACEHOLDER_TITLES = /^(Título de la decisión|Título del patrón|Nombre del patrón|Nombre del error|Nombre del error o patrón)$/i;
 
@@ -326,13 +292,18 @@ try {
 let graphFreshness = null;
 try { graphFreshness = require(path.join(projectPath, '.agentic', 'grafo', 'graph-freshness.cjs')).checkFreshness(projectPath); } catch {}
 
-// PIEZA 5 (aditivo): visita guiada, si "akdd tour" ya la generó. Ausente o
-// corrupta → null, el panel lo dice, jamás rompe el dashboard.
+// PIEZA 5: la visita se arma al abrir (mecánico, sin LLM). Cache en
+// .agentic/_cache, nunca en memoria.db. Si no hay índice, el panel lo dice.
 let tourData = null;
 try {
-  const tp = path.join(projectPath, '.agentic', 'tour.json');
-  if (fs.existsSync(tp)) tourData = JSON.parse(fs.readFileSync(tp, 'utf8'));
-} catch {}
+  const tourSvc = cargarGrafo('tour-servicio.cjs');
+  tourData = tourSvc.obtener(projectPath).tour || null;
+} catch {
+  try {
+    const tp = path.join(projectPath, '.agentic', 'tour.json');
+    if (fs.existsSync(tp)) tourData = JSON.parse(fs.readFileSync(tp, 'utf8'));
+  } catch {}
+}
 const freshnessBadge = (() => {
   if (!graphFreshness) return '';
   if (graphFreshness.status === 'fresh') return `<span class="badge" style="background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)" title="El grafo está sellado en el commit actual">🟢 grafo al día</span>`;
@@ -341,9 +312,32 @@ const freshnessBadge = (() => {
   return '';  // unknown → sin badge, sin ruido
 })();
 
-const patrones = parseEntries(readMemoria('patrones.md')).filter(p => p.estado === 'ACTIVO');
-const decisiones = parseEntries(readMemoria('decisiones.md'));
-const errores = parseEntries(readMemoria('errores.md'));
+// La memoria se cuenta desde memoria.db. Los .md son una proyección: solo se
+// usan si la base no se puede leer, y entonces la vista lo dice.
+const MEMORIA = (() => {
+  const r = datos.filas(dbPath, {
+    nodos: { tabla: 'nodos', sql: "SELECT tipo, titulo, contenido, area, confianza, aplicado, util, estado FROM nodos WHERE tipo IN ('patron','decision','error') ORDER BY fecha_creacion DESC" },
+  });
+  if (r.status === 'OK' && !(r.faltan || []).includes('nodos')) {
+    const de = (tipo) => r.value.nodos.filter(n => n.tipo === tipo).map(n => ({
+      titulo: String(n.titulo || '').replace(/^\[.*?\]\s*/, '').trim(),
+      area: n.area || 'global', confianza: n.confianza || 'BAJA',
+      aplicado: Number(n.aplicado) || 0, util: Number(n.util) || 0,
+      estado: n.estado || 'ACTIVO', contenido: n.contenido || '',
+    })).filter(e => e.titulo.length >= 5 && !PLACEHOLDER_TITLES.test(e.titulo));
+    return { fuente: 'sqlite', patrones: de('patron').filter(p => p.estado === 'ACTIVO'), decisiones: de('decision'), errores: de('error') };
+  }
+  return {
+    fuente: 'markdown_legado', motivo: r.reason_code || 'TABLA_AUSENTE',
+    patrones: parseEntries(readMemoria('patrones.md')).filter(p => p.estado === 'ACTIVO'),
+    decisiones: parseEntries(readMemoria('decisiones.md')),
+    errores: parseEntries(readMemoria('errores.md')),
+  };
+})();
+const { patrones, decisiones, errores } = MEMORIA;
+const avisoMemoriaLegado = MEMORIA.fuente === 'markdown_legado'
+  ? `<div class="empty-state" data-fuente="markdown_legado" style="padding:8px 12px;margin-bottom:10px;text-align:left">Fuente: archivos .md (proyección heredada). La base no se pudo leer (${escHtml(MEMORIA.motivo)}); esta lista puede estar atrasada y no confirma que la memoria esté sincronizada.</div>`
+  : '';
 
 /* ── CURAS: los errores que de verdad pueden ayudar ─────────────────────────
    Un error con su `Solución:` escrita es una cura: el motor la entrega sola en
@@ -427,49 +421,40 @@ function attachSymbolMentions(nodes, mencionesRaw) {
 }
 
 function getGraphData() {
-  try {
-    if (!fs.existsSync(dbPath)) return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] };
-    let db = null, usingSqlJs = false;
-    // Intentar better-sqlite3 primero, fallback a sql.js
-    try {
-      const BS3 = require('better-sqlite3');
-      // (Se eliminó un wrapper `db` muerto que abría una conexión nueva por query sin cerrarla.)
-      const _db = new BS3(dbPath, { readonly: true });
-      const nodes = _db.prepare('SELECT * FROM nodos ORDER BY fecha_creacion DESC').all();
-      const edges = _db.prepare('SELECT * FROM relaciones').all();
-      let ciclos = [], fases = [], menciones = [];
-      try { ciclos = _db.prepare('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30').all(); } catch(e) {}
-      try { fases  = _db.prepare('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100').all(); } catch(e) {}
-      let tiemposPorModulo = [], friccionPorArchivo = [], ritmoPorDia = [];
-      try { tiemposPorModulo  = _db.prepare("SELECT IFNULL(NULLIF(modulo,''),'(sin módulo)') m, COUNT(*) ciclos, SUM(CASE WHEN tipo_tarea='fix' THEN 1 ELSE 0 END) fixes, SUM(CASE WHEN duracion_ms > 0 THEN 1 ELSE 0 END) con_dur, SUM(CASE WHEN duracion_ms > 0 THEN duracion_ms ELSE 0 END) ms, MAX(tests_pasando) tests, MIN(fecha_fin) desde, MAX(fecha_fin) hasta, COUNT(DISTINCT substr(fecha_fin,1,10)) dias_activos FROM ciclos GROUP BY m ORDER BY ciclos DESC").all(); } catch(e) {}
-      try { friccionPorArchivo = _db.prepare("SELECT IFNULL(file,'(sin archivo)') archivo, gate, verdict, COUNT(*) n, MAX(ts) ultimo FROM gate_events WHERE verdict IN ('STOP','WARN','DOUBT') GROUP BY archivo, gate, verdict ORDER BY n DESC LIMIT 40").all(); } catch(e) {}
-      try { ritmoPorDia       = _db.prepare("SELECT substr(fecha_fin,1,10) dia, COUNT(*) n FROM ciclos WHERE fecha_fin IS NOT NULL GROUP BY dia ORDER BY dia").all(); } catch(e) {}
-      try { menciones = _db.prepare("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'").all(); } catch(e) {}
-      _db.close();
-      return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases, tiemposPorModulo, friccionPorArchivo, ritmoPorDia };
-    } catch(e) {
-      // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
-      try {
-        const { DatabaseSync } = require('node:sqlite');
-        const _db = new DatabaseSync(dbPath);
-        const allSQL = (sql) => {
-          try { return _db.prepare(sql).all(); } catch(e) { return []; }
-        };
-        const nodes  = allSQL('SELECT * FROM nodos ORDER BY fecha_creacion DESC');
-        const edges  = allSQL('SELECT * FROM relaciones');
-        const ciclos = allSQL('SELECT * FROM ciclos ORDER BY fecha_inicio DESC LIMIT 30');
-        const fases  = allSQL('SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100');
-        const tiemposPorModulo = allSQL("SELECT IFNULL(NULLIF(modulo,''),'(sin módulo)') m, COUNT(*) ciclos, SUM(CASE WHEN tipo_tarea='fix' THEN 1 ELSE 0 END) fixes, SUM(CASE WHEN duracion_ms > 0 THEN 1 ELSE 0 END) con_dur, SUM(CASE WHEN duracion_ms > 0 THEN duracion_ms ELSE 0 END) ms, MAX(tests_pasando) tests, MIN(fecha_fin) desde, MAX(fecha_fin) hasta, COUNT(DISTINCT substr(fecha_fin,1,10)) dias_activos FROM ciclos GROUP BY m ORDER BY ciclos DESC");
-        const friccionPorArchivo = allSQL("SELECT IFNULL(file,'(sin archivo)') archivo, gate, verdict, COUNT(*) n, MAX(ts) ultimo FROM gate_events WHERE verdict IN ('STOP','WARN','DOUBT') GROUP BY archivo, gate, verdict ORDER BY n DESC LIMIT 40");
-        const ritmoPorDia = allSQL("SELECT substr(fecha_fin,1,10) dia, COUNT(*) n FROM ciclos WHERE fecha_fin IS NOT NULL GROUP BY dia ORDER BY dia");
-        const menciones = allSQL("SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'");
-        try { _db.close(); } catch {}
-        return { nodes: attachSymbolMentions(nodes, menciones), edges, ciclos, fases, tiemposPorModulo, friccionPorArchivo, ritmoPorDia };
-      } catch(e2) {
-        return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] };
-      }
-    }
-  } catch { return { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [] }; }
+  const vacio = { nodes: [], edges: [], ciclos: [], fases: [], tiemposPorModulo: [], friccionPorArchivo: [], ritmoPorDia: [], eventosOperativos: [], friccionTotal: null, locks: [], fasesTodas: [] };
+  const r = datos.filas(dbPath, {
+    nodes:  { tabla: 'nodos', sql: 'SELECT * FROM nodos ORDER BY fecha_creacion DESC' },
+    edges:  { tabla: 'relaciones', sql: 'SELECT * FROM relaciones' },
+    ciclos: { tabla: 'ciclos', sql: 'SELECT * FROM ciclos' },
+    fases:  { tabla: 'fases', sql: 'SELECT * FROM fases ORDER BY fecha_inicio DESC LIMIT 100' },
+    tiemposPorModulo:   { tabla: 'ciclos', sql: "SELECT IFNULL(NULLIF(modulo,''),'(sin módulo)') m, COUNT(*) ciclos, SUM(CASE WHEN tipo_tarea='fix' THEN 1 ELSE 0 END) fixes, SUM(CASE WHEN duracion_ms > 0 THEN 1 ELSE 0 END) con_dur, SUM(CASE WHEN duracion_ms > 0 THEN duracion_ms ELSE 0 END) ms, MAX(tests_pasando) tests, MIN(fecha_fin) desde, MAX(fecha_fin) hasta, COUNT(DISTINCT substr(fecha_fin,1,10)) dias_activos FROM ciclos GROUP BY m ORDER BY ciclos DESC" },
+    menciones:          { tabla: 'relaciones_semanticas', sql: "SELECT desde_entidad, hacia_entidad, descripcion FROM relaciones_semanticas WHERE tipo='menciona_simbolo'" },
+    // Los agregados usan todo el historial; las listas de arriba son ventanas.
+    ...metricasServicio.CONSULTAS,
+    ...operativaMod.CONSULTAS,
+  });
+  ESTADO_DATOS.memoria = { status: r.status, reason_code: r.reason_code, faltan: r.faltan || [] };
+  if (r.status !== 'OK') return vacio;
+  const v = r.value;
+  const ventana = (filas, total, limite) => ({ total, shown: filas.length, limit: limite, truncated: total > filas.length });
+  // Las fechas mezclan formato SQLite e ISO: se ordena por instante, no por texto.
+  const recientes = v.ciclos.filter((c) => fechaMod.fechaUtc(c.fecha_inicio))
+    .sort((a, b) => fechaMod.compararPorFecha(b, a, 'fecha_inicio'))
+    .concat(v.ciclos.filter((c) => !fechaMod.fechaUtc(c.fecha_inicio)))
+    .slice(0, 30);
+  const porDia = new Map();
+  for (const c of v.ciclosTodos) {
+    const dia = fechaMod.diaEnZona(fechaMod.fechaUtc(c.fecha_fin), ZONA);
+    if (dia) porDia.set(dia, (porDia.get(dia) || 0) + 1);
+  }
+  const ritmo = [...porDia].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([dia, n]) => ({ dia, n }));
+  return {
+    nodes: attachSymbolMentions(v.nodes, v.menciones), edges: v.edges, ciclos: recientes, fases: v.fases,
+    tiemposPorModulo: v.tiemposPorModulo, friccionPorArchivo: operativaMod.topN(v.friccionGrupos, Infinity).filas, ritmoPorDia: ritmo,
+    eventosOperativos: v.eventosOperativos, friccionTotal: v.friccionTotal.length ? Number(v.friccionTotal[0].n) : null, locks: v.locks, fasesTodas: v.fasesTodas,
+    ciclosTodos: v.ciclosTodos, stopsEventos: v.stopsEventos, fasesAgg: v.fasesAgg[0] || null, snapshots: v.snapshots,
+    ventanas: { ciclos: ventana(recientes, v.ciclosTodos.length, 30), fases: ventana(v.fases, Number((v.fasesAgg[0] || {}).n) || 0, 100) },
+  };
 }
 
 // Agrupa un archivo en un "módulo" visual a partir de su ruta — más útil que el
@@ -494,7 +479,7 @@ if (typeof deriveModulo !== 'function') {
 }
 
 function getCodeStructureGraph() {
-  const empty = { nodes: [], edges: [] };
+  const empty = { nodes: [], edges: [], coverage: { completo: false, reason: 'DB_AUSENTE' } };
   if (!fs.existsSync(dbPath)) return empty;
 
   // Agregación a nivel de ARCHIVO (no función individual) para que el
@@ -585,123 +570,82 @@ function getCodeStructureGraph() {
     return { nodes, edges };
   }
 
-  // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
-  try {
-    const BS3 = require('better-sqlite3');
-    const _db = new BS3(dbPath, { readonly: true });
-    try {
-      const files = _db.prepare(FILES_SQL).all();
-      const rawEdges = _db.prepare(EDGES_SQL).all();
-      const rawSymbols = _db.prepare(SYMBOLS_SQL).all();
-      const rawExtra = _db.prepare(EXTRA_SYMBOLS_SQL).all();
-      let rawSummaries = []; try { rawSummaries = _db.prepare(SUMMARIES_SQL).all(); } catch {}
-      return buildGraph(files, rawEdges, rawSymbols, rawExtra, rawSummaries);
-    } finally {
-      try { _db.close(); } catch {}
-    }
-  } catch (e) {
-    // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
-    try {
-      const { DatabaseSync } = require('node:sqlite');
-      const _db = new DatabaseSync(dbPath);
-      const allSQL = (sql) => {
-        try { return _db.prepare(sql).all(); } catch(e) { return []; }
-      };
-      const files = allSQL(FILES_SQL);
-      const rawEdges = allSQL(EDGES_SQL);
-      const rawSymbols = allSQL(SYMBOLS_SQL);
-      const rawExtra = allSQL(EXTRA_SYMBOLS_SQL);
-      const rawSummaries = allSQL(SUMMARIES_SQL);
-      try { _db.close(); } catch {}
-      return buildGraph(files, rawEdges, rawSymbols, rawExtra, rawSummaries);
-    } catch(e2) {
-      return empty;
-    }
-  }
+  const r = datos.filas(dbPath, {
+    files:     { tabla: 'ast_symbols', sql: FILES_SQL },
+    edges:     { tabla: 'ast_edges', sql: EDGES_SQL },
+    symbols:   { tabla: 'ast_symbols', sql: SYMBOLS_SQL },
+    extra:     { tabla: 'ast_symbols', sql: EXTRA_SYMBOLS_SQL },
+    summaries: { tabla: 'code_summaries', sql: SUMMARIES_SQL },
+  });
+  ESTADO_DATOS.codigo = { status: r.status, reason_code: r.reason_code, faltan: r.faltan || [] };
+  if (r.status !== 'OK') return { nodes: [], edges: [], coverage: { completo: false, reason: r.reason_code, faltan: r.faltan || [] } };
+  const g = buildGraph(r.value.files, r.value.edges, r.value.symbols, r.value.extra, r.value.summaries);
+  const faltan = r.faltan || [];
+  g.coverage = { completo: !faltan.includes('ast_symbols') && !faltan.includes('ast_edges'), files: g.nodes.length, edges: g.edges.length, faltan };
+  return g;
 }
 
 
 // ─── Task 9: STRUCTURAL LEARNING VERIFICATION DATA ───────────────────────────
 function getStructuralLearningData() {
-  const empty = { patronesEstructurales: 0, ultimoIndex: null, archivosCambiados: 0, cadenasActivas: [] };
-  try {
-    const patronesRaw = readMemoria('patrones.md');
-    const matches = [...patronesRaw.matchAll(/\[ESTRUCTURAL\] (.+)/g)];
-    const cadenasActivas = matches.map(m => m[1].trim()).slice(0, 5);
-
-    let ultimoIndex = null, archivosCambiados = 0;
-    if (fs.existsSync(dbPath)) {
-      const LAST_INDEX_SQL = 'SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1';
-      let last = null;
-      // Intentar better-sqlite3 primero, fallback a sql.js (mismo patrón que getGraphData())
-      try {
-        const BS3 = require('better-sqlite3');
-        const _db = new BS3(dbPath, { readonly: true });
-        try {
-          last = _db.prepare(LAST_INDEX_SQL).get();
-        } finally {
-          try { _db.close(); } catch {}
-        }
-      } catch (e) {
-        // Fallback node:sqlite (better-sqlite3 no disponible — sin compilador C++)
-        try {
-          const { DatabaseSync } = require('node:sqlite');
-          const _db = new DatabaseSync(dbPath);
-          try { last = _db.prepare(LAST_INDEX_SQL).get(); } catch {}
-          try { _db.close(); } catch {}
-        } catch (e2) {}
-      }
-      if (last) {
-        ultimoIndex = last.ran_at;
-        archivosCambiados = JSON.parse(last.changed_files || '[]').length;
-      }
-    }
-
-    return { patronesEstructurales: matches.length, ultimoIndex, archivosCambiados, cadenasActivas };
-  } catch {
-    return empty;
+  const r = datos.filas(dbPath, {
+    cadenas: { tabla: 'nodos', sql: "SELECT titulo FROM nodos WHERE tipo='patron' AND titulo LIKE '%[ESTRUCTURAL]%' AND (estado IS NULL OR estado='ACTIVO') ORDER BY fecha_creacion DESC" },
+    last:    { tabla: 'ast_index_runs', sql: 'SELECT ran_at, changed_files FROM ast_index_runs ORDER BY id DESC LIMIT 1' },
+  });
+  let titulos, fuente;
+  if (r.status === 'OK' && !(r.faltan || []).includes('nodos')) {
+    titulos = r.value.cadenas.map(n => n.titulo);
+    fuente = 'sqlite';
+  } else {
+    // Instalación sin base legible: el markdown es una copia que puede ir atrasada.
+    titulos = [...readMemoria('patrones.md').matchAll(/\[ESTRUCTURAL\] (.+)/g)].map(m => m[0]);
+    fuente = 'markdown_legado';
   }
+  const cadenasActivas = titulos.map(t => t.replace(/^.*\[ESTRUCTURAL\]\s*/, '').trim()).slice(0, 5);
+  let ultimoIndex = null, archivosCambiados = null;
+  const last = r.status === 'OK' ? r.value.last[0] || null : null;
+  if (last) {
+    ultimoIndex = last.ran_at;
+    try { archivosCambiados = JSON.parse(last.changed_files || '[]').length; } catch { archivosCambiados = null; }
+  }
+  return { patronesEstructurales: titulos.length, ultimoIndex, archivosCambiados, cadenasActivas, fuente };
 }
 
 
 // ─── v3.3: CONTRACT GUARD DATA ────────────────────────────────────────────────
 function getContractData() {
-  const empty = { total:0, protected:0, verified:0, candidate:0, violations:0, recent:[] };
-  if (!fs.existsSync(dbPath)) return empty;
-  let _db;
-  try {
-    const BS3 = require('better-sqlite3');
-    _db = new BS3(dbPath, { readonly: true });
-    const safe = (fn) => { try { return fn(); } catch { return null; } };
-    return {
-      total:     safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts").get()?.n) || 0,
-      protected: safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='protected'").get()?.n) || 0,
-      verified:  safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='verified'").get()?.n) || 0,
-      candidate: safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status='candidate'").get()?.n) || 0,
-      violations:safe(() => _db.prepare("SELECT COUNT(*) as n FROM contract_violations WHERE recovered=0").get()?.n) || 0,
-      recent:    safe(() => _db.prepare("SELECT id, module, name, status, verification_count, failure_count FROM verified_contracts ORDER BY updated_at DESC LIMIT 8").all()) || [],
-    };
-  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
+  const r = datos.contratos(dbPath);
+  ESTADO_DATOS.contratos = { status: r.status, reason_code: r.reason_code };
+  if (r.status === 'UNAVAILABLE') return { estado: r, total: null, protected: null, verified: null, candidate: null, unverified: null, violated: null, violations: null, recent: [] };
+  const v = r.value;
+  return {
+    estado: r, total: v.total,
+    protected: v.por_estado.PROTECTED, verified: v.por_estado.VERIFIED, candidate: v.por_estado.CANDIDATE,
+    unverified: v.por_estado.UNVERIFIED, violated: v.por_estado.VIOLATED,
+    violations: v.violaciones, recent: v.recientes,
+  };
 }
 
 function getCreativeData() {
-  const empty = { level:1, suggestions:0, wins:0, auto_applicable:0, recent_suggestions:[], protected_for_level2:0 };
-  if (!fs.existsSync(dbPath)) return empty;
-  let _db;
-  try {
-    const BS3 = require('better-sqlite3');
-    _db = new BS3(dbPath, { readonly: true });
-    const safe = (fn) => { try { return fn(); } catch { return null; } };
-    const protCount = safe(() => _db.prepare("SELECT COUNT(*) as n FROM verified_contracts WHERE status IN ('protected','verified')").get()?.n) || 0;
-    return {
-      level:              protCount >= 10 ? 2 : 1,
-      protected_for_level2: protCount,
-      suggestions:        safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE applied=0 AND dismissed=0").get()?.n) || 0,
-      wins:               safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_wins").get()?.n) || 0,
-      auto_applicable:    safe(() => _db.prepare("SELECT COUNT(*) as n FROM creative_suggestions WHERE auto_applicable=1 AND applied=0 AND dismissed=0").get()?.n) || 0,
-      recent_suggestions: safe(() => _db.prepare("SELECT id, type, title, risk_level, module, auto_applicable FROM creative_suggestions WHERE applied=0 AND dismissed=0 ORDER BY created_at DESC LIMIT 5").all()) || [],
-    };
-  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
+  const c = datos.conteos(dbPath, {
+    protCount:       { tabla: 'verified_contracts', sql: "SELECT COUNT(*) AS n FROM verified_contracts WHERE status IN ('protected','verified')" },
+    suggestions:     { tabla: 'creative_suggestions', sql: 'SELECT COUNT(*) AS n FROM creative_suggestions WHERE applied=0 AND dismissed=0' },
+    wins:            { tabla: 'creative_wins', sql: 'SELECT COUNT(*) AS n FROM creative_wins' },
+    auto_applicable: { tabla: 'creative_suggestions', sql: 'SELECT COUNT(*) AS n FROM creative_suggestions WHERE auto_applicable=1 AND applied=0 AND dismissed=0' },
+  });
+  ESTADO_DATOS.creativo = { status: c.status, reason_code: c.reason_code, faltan: c.faltan || [] };
+  const v = c.value || {};
+  const rec = v.suggestions ? datos.filas(dbPath, { s: { tabla: 'creative_suggestions', sql: 'SELECT id, type, title, risk_level, module, auto_applicable FROM creative_suggestions WHERE applied=0 AND dismissed=0 ORDER BY created_at DESC LIMIT 5' } }) : null;
+  const prot = v.protCount == null ? null : v.protCount;
+  return {
+    estado: c,
+    level: prot == null ? null : prot >= 10 ? 2 : 1,
+    protected_for_level2: prot,
+    suggestions: v.suggestions == null ? null : v.suggestions,
+    wins: v.wins == null ? null : v.wins,
+    auto_applicable: v.auto_applicable == null ? null : v.auto_applicable,
+    recent_suggestions: rec && rec.status === 'OK' ? rec.value.s : [],
+  };
 }
 
 // ─── Feature 5 (14/07/2026): MEMORIA UI/FRONTEND ─────────────────────────────
@@ -710,30 +654,33 @@ function getCreativeData() {
 // datos que ya usa Contract Guard/Creative Engine, más el resultado del
 // UI Native Gate (Feature 4, chequeo mecánico de confirm/alert/prompt nativos).
 function getUiMemoryData() {
-  const empty = { patronesAlta: 0, decisionesConArchivo: 0, erroresFrontend: 0, nativeGateViolations: 0, nativeGateSample: [], uiForms: 0, uiSelects: 0, uiFields: 0, uiCssClasses: 0, uiFlujosProtegidos: 0, browserGateConfig: false };
-  if (!fs.existsSync(dbPath)) return empty;
-  let _db;
-  try {
-    const BS3 = require('better-sqlite3');
-    _db = new BS3(dbPath, { readonly: true });
-    const safe = (fn) => { try { return fn(); } catch { return null; } };
+  // area = 'frontend' exacto solo cubre lo que pasó por el detector nuevo
+  // (Feature 2) — patrones.md tiene áreas escritas a mano (ej.
+  // "panel/frontend") desde antes, así que hace falta LIKE, no igualdad.
+  // Plan 2 (Ojos UI, v3.13): la materia de interfaz que el indexador ya ve,
+  // los flujos UI que el Regression Guard protege, y si el browser-gate
+  // tiene config para verificar por comportamiento.
+  const c = datos.conteos(dbPath, {
+    patronesAlta:         { tabla: 'nodos', sql: "SELECT COUNT(*) AS n FROM nodos WHERE tipo='patron' AND area LIKE '%frontend%' AND confianza='ALTA'" },
+    decisionesConArchivo: { tabla: 'nodos', sql: "SELECT COUNT(*) AS n FROM nodos WHERE tipo='decision' AND area LIKE '%frontend%' AND archivos_aplica != '[]'" },
+    erroresFrontend:      { tabla: 'nodos', sql: "SELECT COUNT(*) AS n FROM nodos WHERE tipo='error' AND area LIKE '%frontend%'" },
+    uiForms:      { tabla: 'ast_symbols', sql: "SELECT COUNT(*) AS n FROM ast_symbols WHERE kind='form'" },
+    uiSelects:    { tabla: 'ast_symbols', sql: "SELECT COUNT(*) AS n FROM ast_symbols WHERE kind='select'" },
+    uiFields:     { tabla: 'ast_symbols', sql: "SELECT COUNT(*) AS n FROM ast_symbols WHERE kind='field'" },
+    uiCssClasses: { tabla: 'ast_symbols', sql: "SELECT COUNT(*) AS n FROM ast_symbols WHERE kind='css_class'" },
+    uiFlujosProtegidos: { tabla: 'protected_behaviors', sql: `SELECT COUNT(*) AS n FROM protected_behaviors WHERE status='active' AND (critical_flows LIKE '%"FORM %' OR critical_flows LIKE '%"SELECT %' OR critical_flows LIKE '%"REQUIRED %')` },
+  });
+  ESTADO_DATOS.ui = { status: c.status, reason_code: c.reason_code, faltan: c.faltan || [] };
+  const v = c.value || {};
+  const k = (n) => (v[n] == null ? null : v[n]);
+  {
     const data = {
-      // area = 'frontend' exacto solo cubre lo que pasó por el detector nuevo
-      // (Feature 2) — patrones.md tiene áreas escritas a mano (ej.
-      // "panel/frontend") desde antes, así que hace falta LIKE, no igualdad.
-      patronesAlta:         safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='patron' AND area LIKE '%frontend%' AND confianza='ALTA'").get()?.n) || 0,
-      decisionesConArchivo: safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='decision' AND area LIKE '%frontend%' AND archivos_aplica != '[]'").get()?.n) || 0,
-      erroresFrontend:      safe(() => _db.prepare("SELECT COUNT(*) as n FROM nodos WHERE tipo='error' AND area LIKE '%frontend%'").get()?.n) || 0,
-      nativeGateViolations: 0,
+      estado: c,
+      patronesAlta: k('patronesAlta'), decisionesConArchivo: k('decisionesConArchivo'), erroresFrontend: k('erroresFrontend'),
+      nativeGateViolations: null,
       nativeGateSample:     [],
-      // Plan 2 (Ojos UI, v3.13): la materia de interfaz que el indexador ya ve,
-      // los flujos UI que el Regression Guard protege, y si el browser-gate
-      // tiene config para verificar por comportamiento.
-      uiForms:      safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='form'").get()?.n) || 0,
-      uiSelects:    safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='select'").get()?.n) || 0,
-      uiFields:     safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='field'").get()?.n) || 0,
-      uiCssClasses: safe(() => _db.prepare("SELECT COUNT(*) as n FROM ast_symbols WHERE kind='css_class'").get()?.n) || 0,
-      uiFlujosProtegidos: safe(() => _db.prepare(`SELECT COUNT(*) as n FROM protected_behaviors WHERE status='active' AND (critical_flows LIKE '%"FORM %' OR critical_flows LIKE '%"SELECT %' OR critical_flows LIKE '%"REQUIRED %')`).get()?.n) || 0,
+      uiForms: k('uiForms'), uiSelects: k('uiSelects'), uiFields: k('uiFields'), uiCssClasses: k('uiCssClasses'),
+      uiFlujosProtegidos: k('uiFlujosProtegidos'),
       browserGateConfig: fs.existsSync(path.join(projectPath, '.agentic', 'browser-gate.json')),
     };
     try {
@@ -753,7 +700,7 @@ function getUiMemoryData() {
       data.nativeGateSample = (gate.findings || []).slice(0, 3).map(f => `${path.basename(f.file)}:${f.line} — ${f.id}`);
     } catch {}
     return data;
-  } catch { return empty; } finally { try { _db && _db.close(); } catch {} }
+  }
 }
 
 function getCuratorData() {
@@ -890,7 +837,13 @@ function getEndpointHeuristicEdgesLegacy(codeNodes, root) {
   return result;
 }
 
-const { nodes, edges, ciclos: ciclosDB, fases: fasesDB, tiemposPorModulo: tiemposDB, friccionPorArchivo: friccionDB, ritmoPorDia: ritmoDB } = getGraphData();
+const { nodes, edges, ciclos: ciclosDB, fases: fasesDB, tiemposPorModulo: tiemposDB, friccionPorArchivo: friccionDB, ritmoPorDia: ritmoDB,
+  ciclosTodos: ciclosTodosDB = [], stopsEventos: stopsEventosDB = [], fasesAgg: fasesAggDB = null, snapshots: snapshotsDB = [], ventanas: ventanasDB = null,
+  eventosOperativos: eventosOpDB = [], friccionTotal: friccionTotalDB = null, locks: locksDB = [], fasesTodas: fasesTodasDB = [] } = getGraphData();
+const OP = operativaMod.operativa({
+  ciclos: ciclosTodosDB, eventos: eventosOpDB, grupos: friccionDB, totalFriccion: friccionTotalDB, locks: locksDB,
+  fases: fasesTodasDB, modulos: tiemposDB, teams: operativaMod.leerTeams(projectPath),
+});
 const codeStructure = getCodeStructureGraph();
 const endpointHeuristicEdges = getEndpointHeuristicEdges(codeStructure.nodes, projectPath);
 
@@ -1057,6 +1010,14 @@ const modulosImpl = parseModulos(config.implementados);
 const specsData = readSpecs();
 const logsData = readLogs();
 const metricsData = calcMetrics(logsData);
+const KPIS = vista.kpisVista(metricsData);
+const PROJECT_ID = path.basename(path.resolve(projectPath));
+const API = apiMod.crearApi({ dbPath, projectPath, projectId: PROJECT_ID });
+const REVISION_INICIAL = API.revision();
+function kpiHtml(id, estilo, clase) {
+  const k = KPIS[id];
+  return `<div${clase ? ` class="${clase}"` : ''} data-kpi="${id}" title="${escHtml(k.title)}"${k.sinDato ? ' data-sin-dato="1"' : ''} style="${estilo}color:${k.color}">${escHtml(k.v)}</div>`;
+}
 const onboardingData = calcOnboarding(config, modulosImpl, decisiones, patrones, specsData);
 const modulosPend = parseModulos(config.pendientes);
 const reglas = (config.reglas || '').split('\n').map(l => l.trim()).filter(l => l && l !== '—' && l.length > 5);
@@ -1111,24 +1072,24 @@ function buildModuleGraph() {
     mNodes.filter((n, ti) => n.tipo === 'impl' && ti > si).forEach(tgt => {
       const key = [src.area, tgt.area].sort().join('::');
       if (areaRelations[key] >= 1) {
-        mEdges.push({ source: src.id, target: tgt.id, weight: areaRelations[key], tipo: 'shared_knowledge' });
+        mEdges.push({ source: src.id, target: tgt.id, weight: areaRelations[key], tipo: 'shared_knowledge', provenance: 'memoria', razonamiento: true });
       }
     });
   });
 
-  // Siempre conectar módulos consecutivos como relación de flujo
+  // Líneas consecutivas y "pendiente → primer impl" son decoración del
+  // layout: se pintan igual, pero no son dependencia (D17).
   mNodes.filter(n => n.tipo === 'impl').forEach((n, i, arr) => {
     if (i < arr.length - 1) {
       const exists = mEdges.find(e => (e.source === n.id && e.target === arr[i+1].id) || (e.source === arr[i+1].id && e.target === n.id));
-      if (!exists) mEdges.push({ source: n.id, target: arr[i+1].id, weight: 1, tipo: 'flow' });
+      if (!exists) mEdges.push({ source: n.id, target: arr[i+1].id, weight: 1, tipo: 'flow', provenance: 'layout', razonamiento: false });
     }
   });
 
-  // Conectar pendientes con el módulo impl más relacionado
   mNodes.filter(n => n.tipo === 'pend').forEach(pend => {
     if (mNodes.filter(n => n.tipo === 'impl').length > 0) {
       const target = mNodes.filter(n => n.tipo === 'impl')[0];
-      mEdges.push({ source: pend.id, target: target.id, weight: 1, tipo: 'depends' });
+      mEdges.push({ source: pend.id, target: target.id, weight: 1, tipo: 'depends', provenance: 'layout', razonamiento: false });
     }
   });
 
@@ -1157,19 +1118,19 @@ function buildSuggestedQuestions() {
 const suggestedQuestions = buildSuggestedQuestions();
 
 const HTML = `<!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
 <meta charset="UTF-8">
 <title>Agentix KDD — ${escHtml(config.nombre)}</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
-<script src="https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"></script>
+<script src="/vendor/d3.min.js"></script>
+<script src="/vendor/3d-force-graph.min.js"></script>
 <!-- three-spritetext necesita un THREE global — 3d-force-graph trae su PROPIA copia
      interna pero no la expone como variable global. Three.js quitó su build clásico
      (script suelto, sin módulos) a partir de r160 — 0.160.0 es la ÚLTIMA versión que
      todavía lo tiene (verificado: 0.161.0 en adelante da 404). Tira un warning de
      "deprecated" en consola, inofensivo — sigue funcionando igual, es solo el aviso. -->
-<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three-spritetext@1.10.0/dist/three-spritetext.min.js"></script>
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/three-spritetext.min.js"></script>
 <style>
 :root{--bg:#0a0d14;--bg2:#111520;--bg3:#1a1f2e;--bg4:#232840;--border:#2a3050;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--purple:#8b5cf6;--pl:#a78bfa;--green:#10b981;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b;--cyan:#06b6d4;--pink:#ec4899;--r:12px}
 .light{--bg:#f0f4f8;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#eef2f7;--border:#dde3ee;--text:#0f172a;--text2:#475569;--text3:#94a3b8}
@@ -1419,6 +1380,26 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .divider{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 @media print{.hdr,.mode-tabs,.docs-nav,.docs-actions{display:none!important}.docs-main{padding:0}}
+#tabla-btn{display:none}
+#kdd-tabla{display:none;position:absolute;inset:8px;z-index:8;overflow:auto;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px}
+#kdd-tabla.visible{display:block}
+#kdd-tabla table{width:100%;border-collapse:collapse;font-size:12px}
+#kdd-tabla th,#kdd-tabla td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+#kdd-tabla tr[tabindex]{cursor:pointer}
+#kdd-tabla tr.selected{background:rgba(139,92,246,.15)}
+#kdd-tabla tr:focus{outline:2px solid var(--pl);outline-offset:-2px}
+@media (max-width:768px){
+  body{overflow:auto;height:auto;min-height:100vh}
+  #graph-sub-kdd{flex-direction:column}
+  .sidebar{width:100%;max-height:42vh}
+  .graph-area{min-height:52vh}
+  #tour-panel{max-width:100%;left:4px;right:4px}
+  #tabla-btn{display:inline-block}
+}
+@media (max-width:390px){
+  .hdr{flex-wrap:wrap}
+  .graph-sub-tabs,.graph-controls{overflow-x:auto}
+}
 </style>
 </head>
 <body id="app">
@@ -1426,7 +1407,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <header class="hdr">
   <div style="display:flex;align-items:center;min-width:0">
     <div class="logo">🤖 Agentix KDD</div>
-    <div class="proj">${config.nombre}</div>
+    <div class="proj">${escHtml(config.nombre)}</div>
     <div class="dot"></div>
   </div>
   <div class="hdr-r">
@@ -1525,7 +1506,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         ${surprisingEdges.slice(0,2).map(e => {
           const src = nodes.find(n => n.id === e.desde_id);
           const tgt = nodes.find(n => n.id === e.hacia_id);
-          return src && tgt ? `<div class="sur-item" onclick="highlightEdge(${e.desde_id},${e.hacia_id})"><span class="sur-dot">⟶</span><span>${src.area} connects to ${tgt.area}</span></div>` : '';
+          return src && tgt ? `<div class="sur-item" onclick="highlightEdge(${e.desde_id},${e.hacia_id})"><span class="sur-dot">⟶</span><span>${escHtml(src.area)} connects to ${escHtml(tgt.area)}</span></div>` : '';
         }).join('')}
       </div>` : ''}
       <div class="search-box"><input class="search-input" placeholder="Search nodes..." id="srch" oninput="filterSearch(this.value)"></div>
@@ -1558,7 +1539,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div style="margin-bottom:14px">
         <div style="font-size:10px;color:var(--pink);font-weight:600;margin-bottom:6px">✨ Surprising Connections</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.5">Links between nodes from different areas</div>
-        ${surprisingEdges.slice(0,4).map(e => { const src = nodes.find(n=>n.id===e.desde_id); const tgt = nodes.find(n=>n.id===e.hacia_id); return src&&tgt?`<div style="padding:5px 7px;background:rgba(236,72,153,.05);border:1px solid rgba(236,72,153,.15);border-radius:5px;margin-bottom:3px;cursor:pointer;font-size:10px;color:var(--text2);line-height:1.5" onclick="highlightEdge(${e.desde_id},${e.hacia_id})">${src.area} <span style="color:var(--pink)">→</span> ${tgt.area}</div>`:''; }).join('')}
+        ${surprisingEdges.slice(0,4).map(e => { const src = nodes.find(n=>n.id===e.desde_id); const tgt = nodes.find(n=>n.id===e.hacia_id); return src&&tgt?`<div style="padding:5px 7px;background:rgba(236,72,153,.05);border:1px solid rgba(236,72,153,.15);border-radius:5px;margin-bottom:3px;cursor:pointer;font-size:10px;color:var(--text2);line-height:1.5" onclick="highlightEdge(${e.desde_id},${e.hacia_id})">${escHtml(src.area)} <span style="color:var(--pink)">→</span> ${escHtml(tgt.area)}</div>`:''; }).join('')}
       </div>` : ''}
       <div>
         <div style="font-size:10px;color:var(--pl);font-weight:600;margin-bottom:6px">💡 Suggested Questions</div>
@@ -1596,6 +1577,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="graph-area" id="graph-area-main">
     <button class="help-fab" onclick="showTermsGlossary('kdd')" title="¿Qué significan los términos de este grafo?">?</button>
     <div id="gc"></div>
+    <div id="kdd-tabla" role="region" aria-label="Vista tabular del grafo" hidden></div>
     <div class="gtt" id="gtt"></div>
     <div class="graph-legend" style="flex-wrap:wrap;max-width:460px">
       <div class="lg-item"><div class="lg-dot" style="background:#ef4444"></div><span data-i="l_err">error</span></div>
@@ -1612,6 +1594,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <button class="gc-btn" onclick="toggleLabels()" id="label-btn" data-i="btn_labels">Labels OFF</button>
       <button class="gc-btn" onclick="spreadGraph()" title="Spread nodes apart">⊹ Spread</button>
       <button class="gc-btn" onclick="releaseAll()" title="Release all pinned nodes">⊠ Unpin all</button>
+      <button class="gc-btn" id="tabla-btn" onclick="toggleTablaKdd()" title="Vista tabular equivalente, mismos filtros y selección">☰ Tabla</button>
       <div class="gc-slider-wrap" title="Node repulsion">
         <span class="gc-slider-label">⊷</span>
         <input type="range" class="gc-slider" id="repulsion-slider" min="50" max="800" value="140"
@@ -1637,7 +1620,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="gtt" id="code-gtt"></div>
     <div class="graph-legend" style="max-width:280px;flex-wrap:wrap;gap:5px">
       <div class="fpill active code-mod-chip-all" onclick="setCodeModulesAll()">Todos</div>
-      ${modulesPresent.length ? modulesPresent.map(m => `<div class="fpill code-mod-chip" data-mod="${escHtml(m)}" onclick="toggleCodeModuleChip('${escHtml(m)}')" style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${MOD_COLORS_SERVER[m]};display:inline-block;flex-shrink:0"></span><span>${escHtml(m)}</span></div>`).join('') : `
+      ${modulesPresent.length ? modulesPresent.map(m => `<div class="fpill code-mod-chip" data-mod="${escHtml(m)}" onclick="toggleCodeModuleChip(${jsArg(m)})" style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${MOD_COLORS_SERVER[m]};display:inline-block;flex-shrink:0"></span><span>${escHtml(m)}</span></div>`).join('') : `
       <div class="lg-item"><div class="lg-dot" style="background:#00e5ff"></div><span>archivo</span></div>
       <div class="lg-item"><div class="lg-dot" style="background:#d88aff"></div><span>clase</span></div>`}
     </div>
@@ -1729,14 +1712,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
       <!-- OVERVIEW -->
       <div class="docs-section active" id="doc-overview">
-        <div class="docs-h1">${config.nombre}</div>
-        <div class="docs-sub">${config.descripcion !== '—' ? config.descripcion : 'No description yet — run aa: configurar'}</div>
+        <div class="docs-h1">${escHtml(config.nombre)}</div>
+        <div class="docs-sub">${config.descripcion !== '—' ? escHtml(config.descripcion) : 'No description yet — run aa: configurar'}</div>
         <div class="docs-actions">
           <button class="action-btn" onclick="window.print()">🖨️ <span data-i="btn_print">Print / Export PDF</span></button>
           <button class="action-btn" onclick="copyMarkdown()">📋 <span data-i="btn_copy">Copy as Markdown</span></button>
         </div>
         <div class="info-grid">
-          <div class="info-card"><div class="ic-label">Type</div><div class="ic-val">${config.tipo || '—'}</div></div>
+          <div class="info-card"><div class="ic-label">Type</div><div class="ic-val">${escHtml(config.tipo) || '—'}</div></div>
           <div class="info-card"><div class="ic-label">Modules</div><div class="ic-val">${modulosImpl.length} <span style="color:var(--text3);font-size:12px">impl</span> · ${modulosPend.length} <span style="color:var(--text3);font-size:12px">pending</span></div></div>
           <div class="info-card"><div class="ic-label">Knowledge</div><div class="ic-val">${stats.total} <span style="color:var(--text3);font-size:12px">nodes</span> · ${stats.high} <span style="color:var(--text3);font-size:12px">HIGH</span></div></div>
         </div>
@@ -1761,17 +1744,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div class="docs-h1" data-i="h_stack">Tech Stack</div>
         <div class="docs-sub" data-i="sub_stack">Technologies and frameworks used in this project.</div>
         <div class="stack-grid">
-          <div class="stack-item"><div class="si-label">Framework</div><div class="si-val">${config.framework && config.framework !== '—' ? config.framework : (config.stack || '—')}</div></div>
-          <div class="stack-item"><div class="si-label">Language</div><div class="si-val">${config.language && config.language !== '—' ? config.language : '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Runtime</div><div class="si-val">${config.runtime && config.runtime !== '—' ? config.runtime : '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Database</div><div class="si-val">${config.base_datos && config.base_datos !== '—' ? config.base_datos : '—'}</div></div>
-          <div class="stack-item"><div class="si-label">Package Manager</div><div class="si-val">${config.package_manager && config.package_manager !== '—' ? config.package_manager : '—'}</div></div>
+          <div class="stack-item"><div class="si-label">Framework</div><div class="si-val">${escHtml(config.framework && config.framework !== '—' ? config.framework : (config.stack || '—'))}</div></div>
+          <div class="stack-item"><div class="si-label">Language</div><div class="si-val">${escHtml(config.language && config.language !== '—' ? config.language : '—')}</div></div>
+          <div class="stack-item"><div class="si-label">Runtime</div><div class="si-val">${escHtml(config.runtime && config.runtime !== '—' ? config.runtime : '—')}</div></div>
+          <div class="stack-item"><div class="si-label">Database</div><div class="si-val">${escHtml(config.base_datos && config.base_datos !== '—' ? config.base_datos : '—')}</div></div>
+          <div class="stack-item"><div class="si-label">Package Manager</div><div class="si-val">${escHtml(config.package_manager && config.package_manager !== '—' ? config.package_manager : '—')}</div></div>
           ${config.stack ? '<div class="stack-item" style="grid-column:1/-1"><div class="si-label">Full Stack</div><div class="si-val">' + escHtml(config.stack) + '</div></div>' : ''}
         </div>
         <div class="docs-h2">Commands</div>
-        <div class="cmd-row"><div class="cmd-label">dev</div><div class="cmd-val">${config.cmd_dev || '—'}</div></div>
-        <div class="cmd-row"><div class="cmd-label">test</div><div class="cmd-val">${config.cmd_test || '—'}</div></div>
-        <div class="cmd-row"><div class="cmd-label">build</div><div class="cmd-val">${config.cmd_build || '—'}</div></div>
+        <div class="cmd-row"><div class="cmd-label">dev</div><div class="cmd-val">${escHtml(config.cmd_dev) || '—'}</div></div>
+        <div class="cmd-row"><div class="cmd-label">test</div><div class="cmd-val">${escHtml(config.cmd_test) || '—'}</div></div>
+        <div class="cmd-row"><div class="cmd-label">build</div><div class="cmd-val">${escHtml(config.cmd_build) || '—'}</div></div>
       </div>
 
       <!-- COMMANDS -->
@@ -1825,12 +1808,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
               const nc = nodes.filter(n => n.area === area);
               const errs = nc.filter(n => n.tipo === 'error').length;
               const pats = nc.filter(n => n.tipo === 'patron').length;
-              return `<div onclick="selectModule('${clean.replace(/'/g,"\'")}','${area}',null)" style="padding:7px 10px;border-radius:6px;margin-bottom:4px;cursor:pointer;border:1px solid transparent;background:var(--bg3);transition:all .15s" onmouseover="this.style.borderColor='#10b981'" onmouseout="this.style.borderColor='transparent'"><div style="font-size:11px;font-weight:500;color:var(--text);margin-bottom:2px">${clean.length>24?clean.slice(0,24)+'…':clean}</div><div style="display:flex;gap:4px">${errs>0?`<span style="font-size:9px;color:#f87171">${errs} err</span>`:''}${pats>0?`<span style="font-size:9px;color:#34d399">${pats} pat</span>`:''}</div></div>`;
+              return `<div onclick="selectModule(${jsArg(clean)},${jsArg(area)},null)" style="padding:7px 10px;border-radius:6px;margin-bottom:4px;cursor:pointer;border:1px solid transparent;background:var(--bg3);transition:all .15s" onmouseover="this.style.borderColor='#10b981'" onmouseout="this.style.borderColor='transparent'"><div style="font-size:11px;font-weight:500;color:var(--text);margin-bottom:2px">${escHtml(clean.length>24?clean.slice(0,24)+'…':clean)}</div><div style="display:flex;gap:4px">${errs>0?`<span style="font-size:9px;color:#f87171">${errs} err</span>`:''}${pats>0?`<span style="font-size:9px;color:#34d399">${pats} pat</span>`:''}</div></div>`;
             }).join('') : '<div style="font-size:11px;color:var(--text3);padding:8px">No modules</div>'}
             <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin:12px 0 8px">⏳ Pending (${modulosPend.length})</div>
             ${modulosPend.length ? modulosPend.map(m => {
               const clean = m.replace(/\\*\\*/g,'').replace(/\\[.\\]\\s*/g,'').trim();
-              return `<div style="padding:7px 10px;border-radius:6px;margin-bottom:4px;border:1px solid rgba(245,158,11,.2);background:rgba(245,158,11,.04)"><div style="font-size:11px;color:#fbbf24">${clean.length>24?clean.slice(0,24)+'…':clean}</div></div>`;
+              return `<div style="padding:7px 10px;border-radius:6px;margin-bottom:4px;border:1px solid rgba(245,158,11,.2);background:rgba(245,158,11,.04)"><div style="font-size:11px;color:#fbbf24">${escHtml(clean.length>24?clean.slice(0,24)+'…':clean)}</div></div>`;
             }).join('') : ''}
           </div>
         </div>
@@ -1846,12 +1829,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-patterns">
         <div class="docs-h1">Patterns</div>
         <div class="docs-sub">Rules the system learned from this project. HIGH = permanent rule applied automatically.</div>
+        ${avisoMemoriaLegado}
         ${patrones.length ? patrones.filter(p => p.titulo && p.titulo !== 'Nombre del patrón' && p.titulo.length > 5).sort((a,b) => {const w={ALTA:3,MEDIA:2,BAJA:1}; return (w[b.confianza]||0)-(w[a.confianza]||0);}).map(p => {
           const maxUse = Math.max(...patrones.map(x => x.aplicado), 1);
           return `<div class="pattern-card ${p.confianza==='ALTA'?'high':''}">
             <div class="pc-top">
               <div class="pc-title">${escHtml(p.titulo)}</div>
-              <span class="mb c${p.confianza}">${escHtml(p.confianza)}</span>
+              <span class="mb c${escHtml(p.confianza)}">${escHtml(p.confianza)}</span>
               <span class="ab">${escHtml(p.area)}</span>
             </div>
             ${p.aplicado > 0 ? `<div style="font-size:10px;color:var(--text3);margin-bottom:4px">Applied ${p.aplicado} times · ${p.util} useful</div><div class="usage-bar"><div class="usage-fill" style="width:${Math.round(p.aplicado/maxUse*100)}%"></div></div>` : ''}
@@ -1863,15 +1847,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div class="docs-section" id="doc-decisions">
         <div class="docs-h1">Architectural Decisions</div>
         <div class="docs-sub">Why things are the way they are. The most important layer of project knowledge.</div>
-        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${escHtml(d.titulo)}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${escHtml(d.area)} · ${d.confianza}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
+        ${avisoMemoriaLegado}
+        ${decisiones.length ? decisiones.map(d => `<div class="decision-card"><div class="dc-title">${escHtml(d.titulo)}</div><div class="dc-body" style="color:var(--text3);font-size:10px;margin-bottom:4px">${escHtml(d.area)} · ${escHtml(d.confianza)}</div></div>`).join('') : '<div class="empty-state">No decisions recorded yet</div>'}
       </div>
 
       <!-- ERRORS -->
       <div class="docs-section" id="doc-errors">
         <div class="docs-h1">Known Error Patterns</div>
         <div class="docs-sub">Errors the system has already learned to avoid automatically.</div>
+        ${avisoMemoriaLegado}
         ${errores.length ? errores.filter(e => e.titulo && e.titulo !== 'Nombre del patrón' && e.titulo.length > 5).sort((a,b)=>b.aplicado-a.aplicado).map(e => `<div class="pattern-card" style="border-left:3px solid var(--red)">
-          <div class="pc-top"><div class="pc-title">${escHtml(e.titulo)}</div><span class="mb c${e.confianza}">${e.confianza}</span><span class="ab">${escHtml(e.area)}</span></div>
+          <div class="pc-top"><div class="pc-title">${escHtml(e.titulo)}</div><span class="mb c${escHtml(e.confianza)}">${escHtml(e.confianza)}</span><span class="ab">${escHtml(e.area)}</span></div>
           ${e.aplicado > 0 ? `<div style="font-size:10px;color:var(--text3)">Resolved ${e.aplicado} times</div>` : ''}
         </div>`).join('') : '<div class="empty-state">No errors recorded yet</div>'}
       </div>
@@ -1884,6 +1870,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           el brief la próxima vez que alguien toque esa zona, sin que nadie la busque.
           Un error sin solución escrita no cura nada — es un susto anotado.
         </div>
+        ${avisoMemoriaLegado}
 
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0">
           <div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
@@ -1975,17 +1962,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <!-- Fila 1: 4 KPIs principales -->
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
           <div style="background:linear-gradient(135deg,rgba(139,92,246,.08),rgba(16,185,129,.04));border:1px solid rgba(139,92,246,.2);border-radius:10px;padding:14px;text-align:center">
-            <div style="font-size:28px;font-weight:700;color:${metricsData.goal_attainment>=80?'#34d399':metricsData.goal_attainment>=60?'#fbbf24':'#f87171'}">${metricsData.goal_attainment}%</div>
+            ${kpiHtml('goal', 'font-size:28px;font-weight:700;')}
             <div style="font-size:10px;font-weight:600;color:var(--text2);margin-top:3px">Goal Attainment</div>
             <div style="font-size:9px;color:${metricsData.goal_attainment>=80?'#34d399':'var(--text3)'}">target >80%</div>
           </div>
           <div style="background:rgba(6,182,212,.05);border:1px solid rgba(6,182,212,.2);border-radius:10px;padding:14px;text-align:center">
-            <div style="font-size:28px;font-weight:700;color:var(--cyan)">${metricsData.autonomy_ratio||0}%</div>
+            ${kpiHtml('autonomy', 'font-size:28px;font-weight:700;')}
             <div style="font-size:10px;font-weight:600;color:var(--text2);margin-top:3px">Autonomy Ratio</div>
             <div style="font-size:9px;color:var(--text3)">cycles without STOP</div>
           </div>
           <div style="background:rgba(16,185,129,.04);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px;text-align:center">
-            <div style="font-size:28px;font-weight:700;color:${(metricsData.handoff_integrity||0)>=90?'#34d399':'#fbbf24'}">${metricsData.handoff_integrity||0}%</div>
+            <div${metricsData.handoff_integrity == null ? ' data-sin-dato="1"' : ''} style="font-size:28px;font-weight:700;color:${metricsData.handoff_integrity == null ? 'var(--text3)' : metricsData.handoff_integrity>=90?'#34d399':'#fbbf24'}">${metricsData.handoff_integrity == null ? '—' : metricsData.handoff_integrity + '%'}</div>
             <div style="font-size:10px;font-weight:600;color:var(--text2);margin-top:3px">Handoff Integrity</div>
             <div style="font-size:9px;color:${(metricsData.handoff_integrity||0)>=90?'#34d399':'var(--text3)'}">target >90%</div>
           </div>
@@ -1999,11 +1986,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <!-- Fila 2: 6 stats secundarios -->
         <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px">
           <div class="info-card"><div class="ic-label">Cycles</div><div class="ic-val" style="color:var(--pl)">${metricsData.total}</div></div>
-          <div class="info-card"><div class="ic-label">Completed</div><div class="ic-val" style="color:var(--green)">${metricsData.completados}</div></div>
-          <div class="info-card"><div class="ic-label">STOPs</div><div class="ic-val" style="color:var(--red)">${metricsData.stops}</div></div>
+          <div class="info-card"><div class="ic-label">Completed</div>${kpiHtml('completed', '', 'ic-val')}</div>
+          <div class="info-card"><div class="ic-label">STOPs</div>${kpiHtml('stops', '', 'ic-val')}</div>
           <div class="info-card"><div class="ic-label">Patterns used</div><div class="ic-val" style="color:var(--amber)">${metricsData.patronesTotal}</div></div>
           <div class="info-card"><div class="ic-label">Errors avoided</div><div class="ic-val" style="color:var(--cyan)">${metricsData.erroresTotal}</div></div>
-          <div class="info-card"><div class="ic-label">Test pass rate</div><div class="ic-val" style="color:var(--green)">${metricsData.test_rate||0}%</div></div>
+          <div class="info-card"><div class="ic-label">Test pass rate</div>${kpiHtml('tests', '', 'ic-val')}</div>
         </div>
 
         <!-- Métrica extra: tiempo por ciclo y reintentos -->
@@ -2026,7 +2013,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           ${metricsData.exito_por_tipo.map(t => `
           <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center">
             <div style="font-size:18px;font-weight:700;color:${t.rate>=80?'#34d399':t.rate>=60?'#fbbf24':'#f87171'}">${t.rate}%</div>
-            <div style="font-size:10px;color:var(--text2);margin-top:2px">${t.tipo}</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px">${escHtml(t.tipo)}</div>
             <div style="font-size:9px;color:var(--text3)">${t.ok}/${t.total}</div>
           </div>`).join('')}
         </div>` : ''}
@@ -2044,30 +2031,33 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         </div>` : ''}
 
         <!-- Ciclos recientes -->
-        <div class="docs-h2">Recent cycles</div>
+        <div class="docs-h2">Recent cycles${ventanasDB && ventanasDB.ciclos.truncated ? ` <span data-ventana="ciclos" style="font-size:10px;font-weight:400;color:var(--text3)">· ${ventanasDB.ciclos.shown} de ${ventanasDB.ciclos.total} (las métricas usan los ${ventanasDB.ciclos.total})</span>` : ''}</div>
         ${(ciclosDB&&ciclosDB.length>0?ciclosDB:logsData).map(l => {
           const esDB = !!l.ciclo_id;
           const tarea = (esDB ? l.tarea : l.header)||'';
           const modulo = l.modulo;
-          const ok = esDB ? l.estado==='COMPLETADO' : (l.resultado&&l.resultado.includes('COMPLETADO'));
+          const clase = estadoCiclo.clasificar(esDB ? l.estado : ((String(l.resultado||'').match(/[A-Z_]{4,}/) || [''])[0]));
+          const VISTA = { VERIFICADO: ['verified', 'g'], COMPLETADO_SIN_VEREDICTO: ['done', 'g'], CON_PENDIENTES: ['partial', 'a'], DETENIDO: ['stop', 'r'], FALLIDO: ['failed', 'r'], CANCELADO: ['cancelled', 'x'], EN_CURSO: ['running', 'x'], DESCONOCIDO: ['unknown', 'x'] };
+          const [rotulo, tono] = VISTA[clase];
+          const C = { g: ['var(--green)', 'rgba(16,185,129,.15)', '#34d399'], a: ['var(--amber)', 'rgba(245,158,11,.15)', '#fbbf24'], r: ['var(--red)', 'rgba(239,68,68,.15)', '#f87171'], x: ['var(--border)', 'rgba(148,163,184,.12)', 'var(--text3)'] }[tono];
           const fases = esDB && l.fases_total>0 ? l.fases_completadas+'/'+l.fases_total+' phases' : '';
           const tests = esDB ? (l.tests_pasando||0)+'/'+(l.tests_generados||0)+' tests' : (l.tests||'');
           const tipo  = esDB && l.tipo_tarea ? l.tipo_tarea : '';
           let pats=0; if(esDB){try{pats=JSON.parse(l.patrones_aplicados||'[]').length;}catch(e){}}
-          return `<div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${ok?'var(--green)':'var(--red)'};border-radius:8px;padding:10px 14px;margin-bottom:6px">
+          return `<div data-clase="${clase}" style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${C[0]};border-radius:8px;padding:10px 14px;margin-bottom:6px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-              <div style="font-size:12px;font-weight:500;color:var(--text);flex:1;margin-right:8px">${tarea.slice(0,65)}</div>
+              <div style="font-size:12px;font-weight:500;color:var(--text);flex:1;margin-right:8px">${escHtml(tarea.slice(0,65))}</div>
               <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-                ${tipo?`<span style="font-size:9px;background:rgba(139,92,246,.15);color:#a78bfa;border-radius:3px;padding:1px 5px">${tipo}</span>`:''}
-                <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${ok?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${ok?'#34d399':'#f87171'}">${ok?'done':'stop'}</span>
+                ${tipo?`<span style="font-size:9px;background:rgba(139,92,246,.15);color:#a78bfa;border-radius:3px;padding:1px 5px">${escHtml(tipo)}</span>`:''}
+                <span title="${escHtml(esDB ? l.estado : l.resultado)}" style="font-size:10px;padding:2px 7px;border-radius:4px;background:${C[1]};color:${C[2]}">${rotulo}</span>
               </div>
             </div>
             <div style="display:flex;gap:10px;font-size:10px;color:var(--text3);flex-wrap:wrap">
-              ${modulo&&modulo!=='global'?`<span>📦 ${modulo}</span>`:''}
+              ${modulo&&modulo!=='global'?`<span>📦 ${escHtml(modulo)}</span>`:''}
               ${fases?`<span>${fases}</span>`:''}
               ${tests&&tests!=='0/0'?`<span style="color:#34d399">🧪 ${tests}</span>`:''}
               ${pats>0?`<span style="color:var(--amber)">★ ${pats} patterns</span>`:''}
-              <span style="margin-left:auto">${(l.fecha_inicio||'').slice(0,16)}</span>
+              <span style="margin-left:auto">${esDB ? fechaMod.formatearFecha(fechaMod.fechaUtc(l.fecha_inicio), ZONA, true) : ''}</span>
             </div>
           </div>`;
         }).join('')}
@@ -2120,8 +2110,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           </div>
           ${onboardingData.checks.map(c => `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">
             <span style="font-size:16px">${c.ok?'✅':'⬜'}</span>
-            <span style="font-size:12px;color:${c.ok?'var(--text)':'var(--text3)'}">${c.label}</span>
+            <span style="font-size:12px;color:${c.ok?'var(--text)':'var(--text3)'}"${c.detalle ? ` title="${escHtml(c.detalle)}"` : ''}>${c.label}</span>
             ${!c.ok?'<span style="font-size:10px;color:var(--amber);margin-left:auto">pending</span>':'<span style="font-size:10px;color:var(--green);margin-left:auto">done</span>'}
+          </div>`).join('')}
+          ${onboardingData.integraciones.map(g => `<div data-integracion="${escHtml(g.id)}" data-estado="${escHtml(g.estado)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="font-size:16px">${g.estado === 'degradada' ? '🟡' : g.estado === 'instalada' ? '⬜' : '▫️'}</span>
+            <span style="font-size:12px;color:var(--text3)" title="${escHtml(g.detalle)}">Integración ${escHtml(g.id)}</span>
+            <span style="font-size:10px;color:${g.estado === 'degradada' ? 'var(--amber)' : 'var(--text3)'};margin-left:auto" title="${escHtml(g.accion)}">${escHtml(g.estado.replace('_', ' '))}</span>
           </div>`).join('')}
         </div>
 
@@ -2141,7 +2136,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
             <span style="font-size:18px;flex-shrink:0">⏳</span>
             <div>
               <div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:4px">${c.label}</div>
-              <div style="font-size:11px;color:var(--text2)">${steps[c.label]||'Follow the setup instructions'}</div>
+              <div style="font-size:11px;color:var(--text2)">${steps[c.label]||'Follow the setup instructions'}${c.detalle ? ` <span style="color:var(--text3)">— ${escHtml(c.detalle)}</span>` : ''}</div>
             </div>
           </div>`;
         }).join('')}` : `
@@ -2170,20 +2165,22 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div><div class="il-card-name">Contratos verificados</div><div class="il-card-sub">Lo que no se puede romper</div></div>
       </div>
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val vp">${contractData.protected}</div><div class="il-stat-lbl">Protected</div></div>
-        <div class="il-stat"><div class="il-stat-val vg">${contractData.verified}</div><div class="il-stat-lbl">Verified</div></div>
-        <div class="il-stat"><div class="il-stat-val va">${contractData.candidate}</div><div class="il-stat-lbl">Candidate</div></div>
-        <div class="il-stat"><div class="il-stat-val ${contractData.violations > 0 ? 'vr' : 'vx'}">${contractData.violations}</div><div class="il-stat-lbl">Violations</div></div>
+        <div class="il-stat">${statVal(contractData.protected, 'vp')}<div class="il-stat-lbl">Protected</div></div>
+        <div class="il-stat">${statVal(contractData.verified, 'vg')}<div class="il-stat-lbl">Verified</div></div>
+        <div class="il-stat">${statVal(contractData.candidate, 'va')}<div class="il-stat-lbl">Candidate</div></div>
+        <div class="il-stat">${statVal(contractData.violations, v => v > 0 ? 'vr' : 'vx')}<div class="il-stat-lbl">Violations</div></div>
       </div>
       ${contractData.recent && contractData.recent.length > 0 ? `
       <div class="il-list">
         ${contractData.recent.map(c => `
           <div class="il-row">
-            <span class="il-badge b${c.status[0]}">${c.status.toUpperCase()}</span>
-            <span class="il-row-name" title="${escHtml(c.name)}">${escHtml(c.name.substring(0,38))}</span>
+            <span class="il-badge b${escHtml(String(c.status || 'u')[0])}">${escHtml(c.estado)}</span>
+            <span class="il-row-name" title="${escHtml(c.name)}">${escHtml(String(c.name || '').substring(0,38))}</span>
             <span class="il-row-mod">${escHtml(c.module)}</span>
           </div>`).join('')}
-      </div>` : `<div class="empty-state">Sin contratos — corre ciclos aa: para generarlos</div>`}
+      </div>` : contractData.total == null
+        ? `<div class="empty-state" data-sin-dato="1">Sin dato de contratos: ${escHtml(contractData.estado.reason_code)}. No significa que no haya contratos.</div>`
+        : `<div class="empty-state">Sin contratos — corre ciclos aa: para generarlos</div>`}
     </div>
 
     <div class="il-card">
@@ -2192,20 +2189,20 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div><div class="il-card-name">Creative Engine</div><div class="il-card-sub">Autonomía creativa dirigida</div></div>
       </div>
       <div class="lvl-bar">
-        <span style="font-size:11px;color:var(--text3);white-space:nowrap">Nivel ${creativeData.level}</span>
-        <div class="lvl-track"><div class="lvl-fill" style="width:${Math.round(creativeData.level / 3 * 100)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
-        <span style="font-size:11px;color:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap">${creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap">Nivel ${creativeData.level == null ? '—' : creativeData.level}</span>
+        <div class="lvl-track"><div class="lvl-fill" style="width:${creativeData.level == null ? 0 : Math.round(creativeData.level / 3 * 100)}%;background:${creativeData.level >= 2 ? '#34d399' : '#fbbf24'}"></div></div>
+        <span style="font-size:11px;color:${creativeData.level == null ? 'var(--text3)' : creativeData.level >= 2 ? '#34d399' : '#fbbf24'};white-space:nowrap"${creativeData.level == null ? ' data-sin-dato="1"' : ''}>${creativeData.level == null ? 'SIN DATO' : creativeData.level >= 2 ? 'CREATIVO' : 'ASISTIDO'}</span>
       </div>
-      ${creativeData.level < 2 ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Faltan ${10 - (creativeData.protected_for_level2 || 0)} contratos para Nivel 2</div>` : ''}
+      ${creativeData.level != null && creativeData.level < 2 ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Faltan ${10 - creativeData.protected_for_level2} contratos para Nivel 2</div>` : ''}
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val va">${creativeData.suggestions}</div><div class="il-stat-lbl">Pendientes</div></div>
-        <div class="il-stat"><div class="il-stat-val vg">${creativeData.wins}</div><div class="il-stat-lbl">Aplicadas</div></div>
+        <div class="il-stat">${statVal(creativeData.suggestions, 'va')}<div class="il-stat-lbl">Pendientes</div></div>
+        <div class="il-stat">${statVal(creativeData.wins, 'vg')}<div class="il-stat-lbl">Aplicadas</div></div>
       </div>
       ${creativeData.recent_suggestions && creativeData.recent_suggestions.length > 0 ? `
         ${creativeData.recent_suggestions.map(s => `
           <div class="sug-row">
-            <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${s.type}</span>
-            <span class="sug-txt" title="${escHtml(s.title)}">${escHtml(s.title.substring(0,50))}</span>
+            <span class="sug-type ${s.auto_applicable ? 'sug-auto' : ''}">${escHtml(s.type)}</span>
+            <span class="sug-txt" title="${escHtml(s.title)}">${escHtml(String(s.title || '').substring(0,50))}</span>
           </div>`).join('')}` : `<div class="empty-state">Sin sugerencias todavía</div>`}
     </div>
 
@@ -2230,8 +2227,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div><div class="il-card-name">Aprendizaje Estructural</div><div class="il-card-sub">Nativo — ast_symbols/ast_edges, sin herramienta externa</div></div>
       </div>
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val ${structuralData.patronesEstructurales > 0 ? 'vg' : 'vx'}">${structuralData.patronesEstructurales}</div><div class="il-stat-lbl">Patrones aprendidos</div></div>
-        <div class="il-stat"><div class="il-stat-val vp">${structuralData.archivosCambiados}</div><div class="il-stat-lbl">Archivos en último index</div></div>
+        <div class="il-stat">${statVal(structuralData.patronesEstructurales, v => v > 0 ? 'vg' : 'vx')}<div class="il-stat-lbl">Patrones aprendidos</div></div>
+        <div class="il-stat">${statVal(structuralData.archivosCambiados, 'vp')}<div class="il-stat-lbl">Archivos en último index</div></div>
       </div>
       ${structuralData.ultimoIndex ? `<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Último index AST: ${escHtml(structuralData.ultimoIndex)}</div>` : `<div class="empty-state">Sin índice AST todavía — corre: node .agentic/grafo/ast-indexer.cjs index</div>`}
       ${structuralData.cadenasActivas.length > 0 ? `
@@ -2252,9 +2249,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div><div class="il-card-name">Memoria de diseño</div><div class="il-card-sub">Misma memoria de siempre, filtrada por área frontend</div></div>
       </div>
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val ${uiMemoryData.patronesAlta > 0 ? 'vg' : 'vx'}">${uiMemoryData.patronesAlta}</div><div class="il-stat-lbl">Patrones ALTA</div></div>
-        <div class="il-stat"><div class="il-stat-val vp">${uiMemoryData.decisionesConArchivo}</div><div class="il-stat-lbl">Decisiones c/archivo</div></div>
-        <div class="il-stat"><div class="il-stat-val va">${uiMemoryData.erroresFrontend}</div><div class="il-stat-lbl">Errores UI</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.patronesAlta, v => v > 0 ? 'vg' : 'vx')}<div class="il-stat-lbl">Patrones ALTA</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.decisionesConArchivo, 'vp')}<div class="il-stat-lbl">Decisiones c/archivo</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.erroresFrontend, 'va')}<div class="il-stat-lbl">Errores UI</div></div>
       </div>
       <div style="margin-top:6px;font-size:11px;color:var(--text3)">
         Ver reglas: pestaña <b>KDD Memory</b>, buscar por área "frontend"
@@ -2263,16 +2260,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
     <div class="il-card">
       <div class="il-card-head">
-        <div class="il-card-icon ${uiMemoryData.nativeGateViolations > 0 ? 'icon-a' : 'icon-g'}">${uiMemoryData.nativeGateViolations > 0 ? '⚠️' : '✅'}</div>
+        <div class="il-card-icon ${uiMemoryData.nativeGateViolations == null ? 'icon-p' : uiMemoryData.nativeGateViolations > 0 ? 'icon-a' : 'icon-g'}">${uiMemoryData.nativeGateViolations == null ? '❔' : uiMemoryData.nativeGateViolations > 0 ? '⚠️' : '✅'}</div>
         <div><div class="il-card-name">UI Native Gate</div><div class="il-card-sub">confirm/alert/prompt nativos — chequeo mecánico</div></div>
       </div>
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val ${uiMemoryData.nativeGateViolations > 0 ? 'vr' : 'vg'}">${uiMemoryData.nativeGateViolations}</div><div class="il-stat-lbl">Violaciones activas</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.nativeGateViolations, v => v > 0 ? 'vr' : 'vg')}<div class="il-stat-lbl">Violaciones activas</div></div>
       </div>
       ${uiMemoryData.nativeGateSample.length > 0 ? `
       <div class="il-list">
         ${uiMemoryData.nativeGateSample.map(s => `<div class="il-row"><span class="il-badge bi">NATIVO</span><span class="il-row-name" title="${escHtml(s)}">${escHtml(s)}</span></div>`).join('')}
-      </div>` : `<div class="empty-state">Sin elementos nativos sin estilizar en public/panel/js</div>`}
+      </div>` : uiMemoryData.nativeGateViolations == null
+        ? `<div class="empty-state" data-sin-dato="1">El chequeo no se pudo correr: sin dato.</div>`
+        : `<div class="empty-state">Sin elementos nativos sin estilizar en public/panel/js</div>`}
       <div style="margin-top:10px;font-size:11px;color:var(--text3)">
         Verificar tú mismo: <code style="color:#a5b4fc">node .agentic/grafo/ui-native-gate.cjs &lt;archivos&gt;</code>
       </div>
@@ -2284,13 +2283,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <div><div class="il-card-name">Ojos UI</div><div class="il-card-sub">v3.13 — forms/selects/required y CSS como nodos del grafo</div></div>
       </div>
       <div class="il-stat-row">
-        <div class="il-stat"><div class="il-stat-val vg">${uiMemoryData.uiForms}</div><div class="il-stat-lbl">Forms</div></div>
-        <div class="il-stat"><div class="il-stat-val vg">${uiMemoryData.uiSelects}</div><div class="il-stat-lbl">Selects</div></div>
-        <div class="il-stat"><div class="il-stat-val vp">${uiMemoryData.uiFields}</div><div class="il-stat-lbl">Campos</div></div>
-        <div class="il-stat"><div class="il-stat-val va">${uiMemoryData.uiCssClasses}</div><div class="il-stat-lbl">Clases CSS</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.uiForms, 'vg')}<div class="il-stat-lbl">Forms</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.uiSelects, 'vg')}<div class="il-stat-lbl">Selects</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.uiFields, 'vp')}<div class="il-stat-lbl">Campos</div></div>
+        <div class="il-stat">${statVal(uiMemoryData.uiCssClasses, 'va')}<div class="il-stat-lbl">Clases CSS</div></div>
       </div>
       <div style="margin-top:8px;font-size:11px;color:var(--text3)">
-        Flujos UI protegidos por el Regression Guard: <b style="color:${uiMemoryData.uiFlujosProtegidos > 0 ? '#4ade80' : 'var(--text3)'}">${uiMemoryData.uiFlujosProtegidos}</b>
+        Flujos UI protegidos por el Regression Guard: <b style="color:${uiMemoryData.uiFlujosProtegidos > 0 ? '#4ade80' : 'var(--text3)'}"${uiMemoryData.uiFlujosProtegidos == null ? ' data-sin-dato="1"' : ''}>${uiMemoryData.uiFlujosProtegidos == null ? '—' : uiMemoryData.uiFlujosProtegidos}</b>
         &nbsp;·&nbsp; Browser Gate por vista: ${uiMemoryData.browserGateConfig
           ? '<b style="color:#4ade80">config lista ✓</b>'
           : '<span title="Crear .agentic/browser-gate.json con {port, routes} para activar los checks por comportamiento">config faltante — <code style="color:#a5b4fc">.agentic/browser-gate.json</code></span>'}
@@ -2318,9 +2317,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
             const T = tiemposDB || [], F = friccionDB || [], R = ritmoDB || [];
             if (!T.length) return '<div class="empty-state" style="padding:40px">Sin ciclos registrados todavía — aparecen solos al cerrar cada tarea.</div>';
       
-            const fecha = (x) => x ? new Date(String(x).replace(' ','T')+'Z') : null;
-            const dias = (a,b) => (a&&b&&!isNaN(a)&&!isNaN(b))
-              ? Math.round((new Date(b.getFullYear(),b.getMonth(),b.getDate())-new Date(a.getFullYear(),a.getMonth(),a.getDate()))/86400000)+1 : 0;
+            const fecha = fechaMod.fechaUtc;
+            // Días de calendario en la zona configurada, contando los dos extremos.
+            const dias = (a,b) => (a&&b)
+              ? Math.round((Date.parse(fechaMod.diaEnZona(b, ZONA)) - Date.parse(fechaMod.diaEnZona(a, ZONA)))/86400000)+1 : 0;
             const hoy = new Date();
             const durTxt = (ms) => { if(!ms) return '—'; const m=Math.round(ms/60000);
               return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min'; };
@@ -2337,22 +2337,22 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
             }
       
             const totCiclos = T.reduce((a,t)=>a+(t.ciclos||0),0);
-            const totFixes  = T.reduce((a,t)=>a+(t.fixes||0),0);
             const totConDur = T.reduce((a,t)=>a+(t.con_dur||0),0);
             const totMs     = T.reduce((a,t)=>a+(t.ms||0),0);
             const totFric   = F.reduce((a,f)=>a+(f.n||0),0);
-            const stops     = F.filter(f=>f.verdict==='STOP').reduce((a,f)=>a+f.n,0);
-            const retrabajo = totCiclos ? Math.round((totFixes/totCiclos)*100) : 0;
+            const stops     = estadoCiclo.incidentesStop(ciclosTodosDB, stopsEventosDB).total;
             const cobertura = totCiclos ? Math.round((totConDur/totCiclos)*100) : 0;
-      
-            // Estancado = tres semanas sin cerrar un ciclo. Es el umbral que hace que un
-            // proyecto de tres semanas tenga sentido: por debajo, todo parecería activo.
-            const conEdad = T.map(t => {
-              const u = fecha(t.hasta);
-              const edad = u && !isNaN(u) ? Math.floor((hoy-u)/86400000) : null;
-              return {...t, edad};
-            });
-            const estancados = conEdad.filter(t => t.edad != null && t.edad >= 21).length;
+            const rw = OP.retrabajo;
+            const act = OP.actividad;
+            const tm = OP.tiempos;
+            const inactivos = (act.modulos || []).filter(m => m.estado === 'POSIBLE_INACTIVIDAD').length;
+            const estables = (act.modulos || []).filter(m => m.estado === 'ESTABLE').length;
+            const retrabajoTxt = rw.tasa == null ? '—' : rw.tasa + '%';
+            const retrabajoNota = rw.entregas_verificadas
+              ? rw.reaperturas + ' reaperturas de ' + rw.entregas_verificadas + ' entregas verificadas'
+              : (rw.arreglos_sin_vinculo ? rw.arreglos_sin_vinculo + ' arreglos sin vínculo (no es retrabajo)' : 'sin entregas verificadas');
+            const calMs = tm.total && tm.total.calendario_ms;
+            const acuMs = tm.total && tm.total.acumulado_ms;
       
             const kpi = (val,lab,col,nota) => `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
               <div style="font-size:22px;font-weight:600;color:${col}">${val}</div>
@@ -2360,11 +2360,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
               ${nota?`<div style="font-size:10px;color:var(--text3);margin-top:4px;opacity:.8">${nota}</div>`:''}</div>`;
       
             let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">';
-            h += kpi(totCiclos, 'ciclos cerrados', 'var(--text)', T.length+' módulos');
-            h += kpi(retrabajo+'%', 'retrabajo', retrabajo>30?'#f87171':retrabajo>15?'#fbbf24':'#34d399', totFixes+' de '+totCiclos+' fueron arreglos');
-            h += kpi(stops||totFric, stops?'veces que un gate frenó':'avisos de gate', (stops>0)?'#f87171':'var(--text2)', stops?totFric+' eventos en total':'ningún STOP');
-            h += kpi(estancados, 'módulos parados', estancados>0?'#fbbf24':'#34d399', '21 días o más sin cerrar nada');
-            h += kpi(durTxt(totMs), 'tiempo medido', 'var(--text)', cobertura+'% de los ciclos lo tiene');
+            const cierreT = estadoCiclo.resumenCierre(ciclosTodosDB);
+            h += kpi(totCiclos, 'ciclos registrados', 'var(--text)', T.length+' módulos · '+cierreT.cerrados+' cerrados íntegros'+(cierreT.por_clase.CON_PENDIENTES?' · '+cierreT.por_clase.CON_PENDIENTES+' con pendientes':''));
+            h += kpi(retrabajoTxt, 'retrabajo', rw.tasa>30?'#f87171':rw.tasa>15?'#fbbf24':'#34d399', retrabajoNota);
+            h += kpi(stops||totFric, stops?'STOP únicos':'avisos de gate', (stops>0)?'#f87171':'var(--text2)', stops?totFric+' eventos de gate en total':'ningún STOP');
+            h += kpi(inactivos, 'posible inactividad', inactivos>0?'#fbbf24':'#34d399', estables+' ESTABLE (terminado no es parado)');
+            h += kpi(durTxt(calMs), 'calendario activo', 'var(--text)', 'acumulado '+durTxt(acuMs)+(tm.total && tm.total.sin_dato?' · '+tm.total.sin_dato+' sin dato':''));
             h += '</div>';
       
             // ── Tabla por módulo ──
@@ -2380,19 +2381,27 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
               + '</tr></thead><tbody>';
       
             const maxC = Math.max(...T.map(t=>t.ciclos||0), 1);
+            const conEdad = T.map(t => {
+              const u = fecha(t.hasta);
+              const edad = u && !isNaN(u) ? Math.floor((hoy-u)/86400000) : null;
+              return {...t, edad};
+            });
+            const estadoMod = Object.fromEntries((act.modulos || []).map(m => [m.m, m]));
             const orden = [...conEdad].sort((a,b) => (a.edad??9e9)-(b.edad??9e9));
             for (const t of orden) {
-              const rt = t.ciclos ? Math.round((t.fixes/t.ciclos)*100) : 0;
+              const rm = (rw.por_modulo || {})[t.m] || { tasa: null, reaperturas: 0 };
+              const rt = rm.tasa;
               const fr = frPorMod[String(t.m)] || 0;
               const pct = Math.round(((t.ciclos||0)/maxC)*100);
               const edadTxt = t.edad == null ? '—' : t.edad === 0 ? 'hoy' : t.edad === 1 ? 'ayer' : 'hace '+t.edad+' d';
-              const edadCol = t.edad == null ? 'var(--text3)' : t.edad >= 21 ? '#f87171' : t.edad >= 7 ? '#fbbf24' : '#34d399';
+              const est = (estadoMod[t.m] || {}).estado || 'ESTABLE';
+              const edadCol = est === 'POSIBLE_INACTIVIDAD' ? '#fbbf24' : est === 'TRABAJANDO' ? '#60a5fa' : 'var(--text3)';
               const rtCol = rt > 30 ? '#f87171' : rt > 15 ? '#fbbf24' : 'var(--text2)';
               h += '<tr>'
                 + '<td style="padding:9px 10px;border-bottom:1px solid var(--border)"><div style="color:var(--text);margin-bottom:3px">'+escHtml(String(t.m))+'</div>'
                 + '<div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--blue)"></div></div></td>'
                 + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text)">'+(t.ciclos||0)+'</td>'
-                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+rtCol+'">'+(t.fixes?rt+'%':'—')+'</td>'
+                + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+rtCol+'">'+(rt==null?'—':rt+'%')+'</td>'
                 + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:'+(fr?'#f87171':'var(--text3)')+'">'+(fr||'—')+'</td>'
                 + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+(t.dias_activos||'—')+'</td>'
                 + '<td style="padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text2)">'+durTxt(t.ms)+(t.con_dur&&t.con_dur<t.ciclos?'<span style="color:var(--text3);font-size:10px"> ('+t.con_dur+'/'+t.ciclos+')</span>':'')+'</td>'
@@ -2473,17 +2482,16 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
             <b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar
             simplemente que es más grande — por sí solos no acusan a nadie.
             <br><br>
-            <b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción.
-            Es la métrica que más habla: un módulo que construye avanza, uno que repara gira
-            en el sitio. Si sube, suele ser que algo se cerró antes de estar listo.
+            <b>Retrabajo</b> son reaperturas de una entrega que ya se había verificado.
+            Un arreglo sin ese vínculo no cuenta: es trabajo, no retrabajo. El denominador
+            son las entregas verificadas, no el total de ciclos.
             <br><br>
             <b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la
             fricción real, la que no aparece en ninguna estimación porque nadie la planifica.
             <br><br>
-            <b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un
-            módulo en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, puede
-            estar terminado, o puede que nadie lo esté tocando. La tabla no lo sabe — dice
-            dónde preguntar.
+            <b>Última vez</b> es cuándo se cerró algo por última vez. Un módulo ESTABLE
+            puede llevar meses sin cambios porque ya terminó. Posible inactividad es una
+            tarea abierta sin latido: no se deduce de la fecha del archivo.
             <br><br>
             <b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si
             dice (2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el
@@ -2512,6 +2520,72 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
    — sin comilla, backtick ni $. Dos copias de una función de escape es
    el terreno donde aparecen los agujeros: la copia débil se olvida. */
 ${escHtml.toString()}
+${jsArg.toString()}
+${fechaMod.fechaUtc.toString()}
+${fechaMod.diaEnZona.toString()}
+${fechaMod.formatearFecha.toString()}
+var ZONA_FECHAS = ${jsonSafe(ZONA)};
+${vista.kpisVista.toString()}
+
+// ─── Actualización viva: SSE con respaldo por sondeo con ETag ───────────────
+// Solo cambia texto y título de las tarjetas por su data-kpi: el grafo, la
+// cámara y la selección no se tocan. Sin modelo, sin sync: lee /api/v1/summary.
+(function vivo() {
+  var rev = ${jsonSafe(REVISION_INICIAL)}, etag = null, modo = 'conectando', ultima = null, fallos = 0, sondeo = null;
+  var POLL = ${Number(process.env.AKDD_DASH_CLIENT_POLL_MS) || 10000};
+  var dot = document.querySelector('.hdr .dot');
+  var NOMBRE = { vivo: 'en vivo', sondeo: 'sondeo periódico', desconectado: 'sin conexión, reintentando', conectando: 'conectando' };
+  function marcar(m) {
+    modo = m;
+    if (!dot) return;
+    dot.setAttribute('data-conexion', m);
+    dot.title = (ultima ? 'Actualizado ' + formatearFecha(ultima, ZONA_FECHAS, true) : 'Datos del arranque del tablero') + ' · ' + NOMBRE[m];
+    dot.style.background = m === 'desconectado' ? 'var(--text3)' : m === 'sondeo' ? 'var(--amber)' : '';
+  }
+  function aplicar(s) {
+    if (!s || !s.data || !s.data.metricas) return;
+    var K = kpisVista(s.data.metricas);
+    Object.keys(K).forEach(function (id) {
+      var el = document.querySelector('[data-kpi="' + id + '"]');
+      if (!el) return;
+      el.textContent = K[id].v; el.title = K[id].title; el.style.color = K[id].color;
+      if (K[id].sinDato) el.setAttribute('data-sin-dato', '1'); else el.removeAttribute('data-sin-dato');
+    });
+    rev = s.snapshot_revision; ultima = new Date();
+    window.__akddRevision = rev; window.__akddRefrescos = (window.__akddRefrescos || 0) + 1;
+    marcar(modo);
+  }
+  function traer() {
+    var h = {}; if (etag) h['If-None-Match'] = etag;
+    return fetch('/api/v1/summary', { headers: h, cache: 'no-store' }).then(function (r) {
+      if (r.status === 304) { ultima = new Date(); marcar(modo); return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      etag = r.headers.get('ETag');
+      return r.json().then(aplicar);
+    });
+  }
+  function sondear() {
+    if (sondeo) return;
+    marcar('sondeo');
+    traer().catch(function () { marcar('desconectado'); });
+    sondeo = setInterval(function () { traer().then(function () { if (modo !== 'sondeo') marcar('sondeo'); }, function () { marcar('desconectado'); }); }, POLL);
+  }
+  if (!window.EventSource || !window.fetch) { sondear(); return; }
+  function conectar() {
+    var es = new EventSource('/api/v1/events');
+    es.addEventListener('open', function () { fallos = 0; if (sondeo) { clearInterval(sondeo); sondeo = null; } marcar('vivo'); });
+    es.addEventListener('revision', function (e) { try { if (JSON.parse(e.data).snapshot_revision !== rev) traer().catch(function () {}); } catch (x) {} });
+    es.addEventListener('snapshot', function () { traer().catch(function () {}); });
+    es.addEventListener('error', function () {
+      fallos++;
+      // Cerrado = el navegador ya no reintenta solo: sondear y volver a probar más tarde.
+      if (es.readyState === 2) { sondear(); setTimeout(conectar, POLL * 3); }
+      else if (fallos >= 3) sondear();
+      else marcar('desconectado');
+    });
+  }
+  conectar();
+})();
 
 // ─── "¡NO ENTIENDO!" — explicación de ESE nodo específico, no un glosario ───
 // Reorganiza los datos reales que YA existen para ese nodo puntual (su propio
@@ -2557,7 +2631,7 @@ const TERMS_GLOSSARY={
     {term:'endpoint≈ (línea cian)',explain:'Une un archivo de frontend con un archivo de backend cuando el primero llama a una ruta de API (ej. /api/embudo/...) que el segundo registra. Es una coincidencia de texto de ruta, no un vínculo exacto guardado en la base de datos — si el front arma la URL de forma dinámica sin el wrapper de siempre, esa conexión no se detecta.'},
     {term:'🔥 Cambios (botón)',explain:'Responde la pregunta "¿y esto que toqué, qué más puede romper?". Al activarlo, el grafo se pinta así: ROJO = archivos que tú modificaste y aún no guardaste en el historial; ÁMBAR = archivos que no tocaste pero dependen de los rojos (ahí es donde algo podría dolerse); NARANJA más intenso = de esos, los que tienen pruebas protegiéndolos (los más delicados de romper); apagado = no tienen nada que ver con tus cambios. Se actualiza pidiendo "akdd overlay" en el chat. Al desactivar el botón, todo vuelve a los colores normales.'},
     {term:'🧩 Descripción del asistente (en ¡NO ENTIENDO!)',explain:'Cuando un archivo muestra "Qué hace este archivo" con una explicación clara, es porque el asistente LEYÓ ese código de verdad y escribió qué hace en palabras simples. Si un archivo aún no la tiene, se muestra una versión aproximada deducida de los nombres — y puedes pedir "akdd describe" en el chat para que el asistente lo lea y lo explique de verdad.'},
-    {term:'🧭 Visita guiada (botón)',explain:'Un recorrido por el proyecto en el orden en que conviene aprenderlo: primero los archivos base, después los que dependen de ellos. Cada parada trae su explicación en palabras simples, con qué archivos necesita, quién depende de él, qué recuerda el proyecto de esa zona y si tiene pruebas protegiéndolo. Se genera pidiendo "akdd tour" en el chat (podés pedirlo de una parte del proyecto, ej. "akdd tour ai").'},
+    {term:'🧭 Visita guiada (botón)',explain:'Un recorrido por el proyecto en el orden en que conviene aprenderlo: primero los archivos base, después los que dependen de ellos. Cada parada trae su explicación en palabras simples, con qué archivos necesita, quién depende de él, qué recuerda el proyecto de esa zona y si tiene pruebas protegiéndolo. Se arma sola al abrir el tablero si hay índice de archivos; no hace falta un comando aparte.'},
   ]},
   combined:{title:'❓ Combined — términos generales',items:[
     {term:'¿Qué es esta pestaña?',explain:'Une los dos mundos: lo que aprendiste del proyecto (errores, patrones, decisiones) y tu código real, para ver si se relacionan.'},
@@ -2704,7 +2778,7 @@ function explainCodeNode(node){
   // cualquier persona sea dev o no.
   let summary=\`Este archivo vive en la carpeta \${node.modulo||'principal'} del proyecto. Es \${rankNote}. \`;
   summary+=usedByNames.length?\`Si lo cambias, hay que revisar estos otros archivos que dependen de él: \${usedByNames.slice(0,6).join(', ')}\${usedByNames.length>6?'…':''}. \`:'Ningún otro archivo conocido depende de este por ahora. ';
-  summary+=needsNames.length?\`A su vez, para funcionar este archivo usa: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:'Y funciona solo — no necesita de otros archivos del proyecto.';
+  summary+=needsNames.length?\`A su vez, para funcionar este archivo usa: \${needsNames.slice(0,6).join(', ')}\${needsNames.length>6?'…':''}.\`:(CODE_INDEX_COVERAGE&&CODE_INDEX_COVERAGE.completo?'En lo indexado no se detectaron dependencias de otros archivos.':'En lo indexado no se detectaron dependencias de otros archivos — el índice puede estar incompleto, no afirma que funcione solo.');
   const items=[{label:'📝 En resumen',text:summary}];
 
   // PIEZA 3: si el asistente ya describió este archivo LEYENDO su código de
@@ -2807,6 +2881,7 @@ function closeGlossary(){
 const NODES = ${jsonSafe(nodes)};
 const CODE_NODES = ${jsonSafe(codeStructure.nodes)};
 const CODE_EDGES = ${jsonSafe(codeStructure.edges)};
+const CODE_INDEX_COVERAGE = ${jsonSafe(codeStructure.coverage || { completo: false })};
 const ENDPOINT_HEURISTIC_EDGES = ${jsonSafe(endpointHeuristicEdges)};
 const CODE_COLORS = { archivo: '#00e5ff', clase: '#d88aff' };
 // Color por lenguaje — FUENTE ÚNICA: se inyecta desde LANG_COLORS_SERVER (arriba,
@@ -2817,7 +2892,7 @@ const MOD_COLORS = ${jsonSafe(MOD_COLORS_SERVER)};
 // PIEZA 4: diff overlay generado por akdd overlay (null si nunca se corrió)
 const DIFF_OVERLAY = ${jsonSafe(diffOverlayData)};
 // PIEZA 5: visita guiada generada por akdd tour (null si nunca se corrió)
-const TOUR_DATA = ${jsonSafe(tourData)};
+let TOUR_DATA = ${jsonSafe(tourData)};
 function codeNodeColor(d){ return MOD_COLORS[d.modulo] || LANG_COLORS[d.language] || CODE_COLORS[d.tipo] || '#00e5ff'; }
 const LANGS_PRESENT = [...new Set(CODE_NODES.map(n=>n.language).filter(Boolean))].sort();
 const codeNodeMap={};
@@ -2987,10 +3062,12 @@ function getFiltered(){
 }
 
 function getConfTag(n){
-  const deg=DEGREE_MAP[n.id]||0;
-  if(deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0)return '<span class="tag-ext">EXTRACTED</span>';
-  if(n.confianza==='ALTA')return '<span class="tag-inf">INFERRED</span>';
-  return '<span class="tag-amb">AMBIGUOUS</span>';
+  // Procedencia ≠ confianza ≠ verificación. La cantidad de enlaces no
+  // convierte un nodo BAJA en EXTRACTED (D18).
+  const p=String(n.provenance||n.vigencia_tipo||'inferred').toLowerCase();
+  const cls=p==='ast'||p==='declared'||p==='declarada'?'tag-ext':p==='inferred'||p==='inferida'?'tag-inf':'tag-amb';
+  const ver=n.verificacion||n.verification||'';
+  return '<span class="'+cls+'" title="procedencia '+escHtml(p)+(ver?' · '+escHtml(ver):'')+'">'+escHtml(p.toUpperCase())+'</span>';
 }
 
 function renderNodeList(){
@@ -3005,18 +3082,44 @@ function renderNodeList(){
     return \`<div class="nitem\${n.id===selectedNodeId?' selected':''}\${isGod?' god-node':''}" onclick="selectNode(\${n.id})" id="nitem-\${n.id}">
       <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
         \${isGod?'<span style="color:var(--amber);font-size:10px">⚡</span>':''}
-        <span class="ntb t-\${n.tipo}\${esNodoFrontend(n)?' front':''}">\${tl[n.tipo]||n.tipo}\${esNodoFrontend(n)?' · front':''}</span>
+        <span class="ntb t-\${escHtml(n.tipo)}\${esNodoFrontend(n)?' front':''}">\${escHtml(tl[n.tipo]||n.tipo)}\${esNodoFrontend(n)?' · front':''}</span>
         <span style="font-size:11px;color:var(--text);flex:1;line-height:1.3">\${title}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-        <span class="mb c\${n.confianza}">\${n.confianza}</span>
-        <span class="ab">\${n.area}</span>
+        <span class="mb c\${escHtml(n.confianza)}">\${escHtml(n.confianza)}</span>
+        <span class="ab">\${escHtml(n.area)}</span>
         \${deg>0?'<span class="ab">'+deg+' conn</span>':''}
         \${n.aplicado>0?'<span class="ab">✓ '+n.aplicado+'x</span>':''}
         \${getConfTag(n)}
       </div>
     </div>\`;
   }).join('');
+  renderTablaKdd(filtered);
+}
+
+function renderTablaKdd(filtered){
+  const box=document.getElementById('kdd-tabla');
+  if(!box)return;
+  const rows=filtered||getFiltered();
+  const rels=typeof EDGES!=='undefined'?EDGES:(typeof edges!=='undefined'?edges:[]);
+  if(!rows.length){box.innerHTML='<p class="empty-state">📭 No nodes found</p>';return;}
+  box.innerHTML='<table><thead><tr><th>Tipo</th><th>Título</th><th>Área</th><th>Confianza</th><th>Conexiones</th></tr></thead><tbody>'+
+    rows.map(n=>{
+      const deg=DEGREE_MAP[n.id]||0;
+      return '<tr tabindex="0" data-id="'+n.id+'" class="'+(n.id===selectedNodeId?'selected':'')+'" onclick="selectNode('+n.id+')" onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();selectNode('+n.id+')}">'+
+        '<td>'+escHtml(n.tipo)+'</td><td>'+escHtml(n.titulo)+'</td><td>'+escHtml(n.area)+'</td><td>'+escHtml(n.confianza)+'</td><td>'+deg+'</td></tr>';
+    }).join('')+'</tbody></table><p style="font-size:11px;color:var(--text3);margin-top:8px">'+rows.length+' nodos · '+(Array.isArray(rels)?rels.length:0)+' relaciones · mismos filtros que el grafo</p>';
+}
+
+function toggleTablaKdd(){
+  const box=document.getElementById('kdd-tabla');
+  if(!box)return;
+  const on=!box.classList.contains('visible');
+  box.classList.toggle('visible',on);
+  if(on){box.removeAttribute('hidden');renderTablaKdd();}
+  else box.setAttribute('hidden','');
+  const btn=document.getElementById('tabla-btn');
+  if(btn)btn.setAttribute('aria-pressed',on?'true':'false');
 }
 
 function selectNode(id){
@@ -3040,15 +3143,15 @@ function showDetail(node){
     if(!other)return'';
     const t=escHtml(other.titulo.length>30?other.titulo.slice(0,30)+'…':other.titulo);
     const relLabel=r.dir==='out'?r.tipo:'← '+r.tipo;
-    return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${kddNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${relLabel}</span></div>\`;
+    return \`<div class="rel-item" onclick="selectNode(\${other.id})"><div style="width:7px;height:7px;border-radius:50%;background:\${kddNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${t}</div><span class="rel-type-label">\${escHtml(relLabel)}</span></div>\`;
   }).filter(Boolean).join('');
   const cl=node.contenido?node.contenido.split('\\n').filter(l=>l.trim()&&!l.startsWith('##')&&!l.startsWith('Área')&&!l.startsWith('Confianza')&&!l.startsWith('Aplicado')&&!l.startsWith('Útil')&&!l.startsWith('Estado')).slice(0,5).join('\\n'):'';
   const confPct=node.aplicado>0?Math.min(Math.round(node.util/node.aplicado*100),100):0;
   document.getElementById('dp-body').innerHTML=\`
     <div class="dp-badges">
       \${isGod?'<span class="mb" style="background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid rgba(245,158,11,.3)">⚡ divine</span>':''}
-      <span class="mb t-\${node.tipo}" style="font-size:11px;padding:3px 8px">\${node.tipo}</span>
-      <span class="mb c\${node.confianza}" style="font-size:11px;padding:3px 8px">\${node.confianza}</span>
+      <span class="mb t-\${escHtml(node.tipo)}" style="font-size:11px;padding:3px 8px">\${escHtml(node.tipo)}</span>
+      <span class="mb c\${escHtml(node.confianza)}" style="font-size:11px;padding:3px 8px">\${escHtml(node.confianza)}</span>
       <span class="ab" style="font-size:11px;padding:3px 8px">\${escHtml(node.area)}</span>
     </div>
     <div class="dp-section">
@@ -3744,7 +3847,7 @@ function renderGraph(){
       const isGod=deg>=GOD_THRESHOLD&&GOD_THRESHOLD>0;
       return '<div style="background:rgba(17,21,32,.95);border:1px solid #2a3050;border-radius:6px;padding:6px 9px;font-family:sans-serif;max-width:220px">'
         +'<strong style="color:#e2e8f0">'+(isGod?'⚡ ':'')+escHtml(d.titulo.slice(0,50))+(d.titulo.length>50?'…':'')+'</strong><br>'
-        +'<span style="color:#64748b;font-size:10px">'+d.tipo+' · '+escHtml(d.area)+' · '+d.confianza+' · '+deg+' connections</span></div>';
+        +'<span style="color:#64748b;font-size:10px">'+escHtml(d.tipo)+' · '+escHtml(d.area)+' · '+escHtml(d.confianza)+' · '+deg+' connections</span></div>';
     },
     // Etiqueta 3D real (sprite de texto, siempre mirando a cámara) — solo para
     // ALTA confianza / divinos, igual que el 2D original. Solo si labelsVisible
@@ -3857,7 +3960,7 @@ function toggleTourPanel(){
     if (!TOUR_DATA || (!TOUR_DATA.front.length && !TOUR_DATA.back.length)) {
       document.getElementById('tour-tabs').style.display = 'none';
       document.getElementById('tour-jump').style.display = 'none';
-      document.getElementById('tour-body').innerHTML = '<div style="font-size:13px;color:var(--text3)">Todavía no hay visita guiada generada. Pide <code>akdd tour</code> en el chat.</div>';
+      document.getElementById('tour-body').innerHTML = '<div style="font-size:13px;color:var(--text3)">Aún no hay visita: falta índice de archivos o no se pudo armar el recorrido. No hace falta un comando aparte — al reabrir el tablero se intenta de nuevo.</div>';
       return;
     }
     // Arranca en la pestaña que sí tenga contenido si la otra está vacía
@@ -4130,7 +4233,7 @@ function showCodeDetail(node){
     const other=codeNodeMap[otherId];
     if(!other)return'';
     const name=other.file.split(/[\\\\/]/).pop();
-    return \`<div class="rel-item" onclick="focusCodeNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${codeNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${e.tipo}</span></div>\`;
+    return \`<div class="rel-item" onclick="focusCodeNode(\${jsArg(otherId)})"><div style="width:7px;height:7px;border-radius:50%;background:\${codeNodeColor(other)};flex-shrink:0"></div><div class="rel-name">\${escHtml(name)}</div><span class="rel-type-label">\${escHtml(e.tipo)}</span></div>\`;
   }).filter(Boolean).join('');
   const rankNote=node.pagerank>0.01?'archivo central — muchas cosas dependen de él':node.pagerank>0.002?'conectividad media':'archivo periférico';
   document.getElementById('code-dp-body').innerHTML=\`
@@ -4358,13 +4461,13 @@ function showCombinedDetail(node){
     if(!other)return'';
     const label=other.group==='kdd'?other.titulo:other.file.split(/[\\\\/]/).pop();
     const dotColor=other.group==='kdd'?kddNodeColor(other):'#00e5ff';
-    return \`<div class="rel-item" onclick="focusCombinedNode('\${otherId}')"><div style="width:7px;height:7px;border-radius:50%;background:\${dotColor};flex-shrink:0"></div><div class="rel-name">\${escHtml(String(label).slice(0,36))}</div><span class="rel-type-label">área≈</span></div>\`;
+    return \`<div class="rel-item" onclick="focusCombinedNode(\${jsArg(otherId)})"><div style="width:7px;height:7px;border-radius:50%;background:\${dotColor};flex-shrink:0"></div><div class="rel-name">\${escHtml(String(label).slice(0,36))}</div><span class="rel-type-label">área≈</span></div>\`;
   }).filter(Boolean).join('');
 
   const bodyHTML=isKdd?\`
     <div class="dp-badges">
-      <span class="mb t-\${node.tipo}" style="font-size:11px;padding:3px 8px">\${node.tipo}</span>
-      <span class="mb c\${node.confianza}" style="font-size:11px;padding:3px 8px">\${node.confianza}</span>
+      <span class="mb t-\${escHtml(node.tipo)}" style="font-size:11px;padding:3px 8px">\${escHtml(node.tipo)}</span>
+      <span class="mb c\${escHtml(node.confianza)}" style="font-size:11px;padding:3px 8px">\${escHtml(node.confianza)}</span>
       <span class="ab" style="font-size:11px;padding:3px 8px">\${escHtml(node.area||'global')}</span>
     </div>
     <div class="dp-section">
@@ -4542,7 +4645,7 @@ function renderModuleGraph(){
 function showModTT(ev,d,container){
   var tt=document.getElementById('gtt');
   var icon=d.tipo==='impl'?'✅':'⏳';
-  tt.innerHTML='<strong style="color:var(--text)">'+icon+' '+d.label+'</strong><br><span style="color:var(--text3);font-size:10px">'+d.errors+' errors · '+d.patterns+' patterns</span>';
+  tt.innerHTML='<strong style="color:var(--text)">'+icon+' '+escHtml(d.label)+'</strong><br><span style="color:var(--text3);font-size:10px">'+d.errors+' errors · '+d.patterns+' patterns</span>';
   tt.style.opacity=1;
   var r=container.getBoundingClientRect();
   tt.style.left=(ev.clientX-r.left+14)+'px';
@@ -4592,7 +4695,7 @@ function centerModGraph(){
 // que sale es autocontenido: se manda por correo y se abre sin conexion, que es
 // el caso real (la persona no tiene como entrar al dashboard).
 // La barra escapada evita que un dato que contenga un cierre de script rompa la pagina.
-const TIEMPOS_DATA = JSON.parse(${jsonSafe(JSON.stringify({proyecto: config.nombre || 'Proyecto', modulos: tiemposDB || [], friccion: friccionDB || [], ritmo: ritmoDB || []}))});
+const TIEMPOS_DATA = JSON.parse(${jsonSafe(JSON.stringify({proyecto: config.nombre || 'Proyecto', modulos: tiemposDB || [], friccion: friccionDB || [], ritmo: ritmoDB || [], stops_unicos: estadoCiclo.incidentesStop(ciclosTodosDB, stopsEventosDB).total, cierre: estadoCiclo.resumenCierre(ciclosTodosDB), retrabajo: OP.retrabajo, actividad: OP.actividad, tiempos: OP.tiempos}))});
 
 /** Escapa para HTML. El reporte lleva rutas de archivo y nombres de módulo. */
 
@@ -4733,11 +4836,7 @@ function repDur(ms){
   return m<60 ? m+' min' : Math.floor(m/60)+'h '+(m%60)+'min';
 }
 
-function repFecha(x){
-  if(!x) return null;
-  var d=new Date(String(x).replace(' ','T')+'Z');
-  return isNaN(d)?null:d;
-}
+function repFecha(x){ return fechaUtc(x); }
 
 /**
  * Arma el reporte completo como documento HTML independiente.
@@ -4747,7 +4846,7 @@ function repFecha(x){
 function reporteTiemposHTML(){
   var D=TIEMPOS_DATA||{}, T=D.modulos||[], F=D.friccion||[], R=D.ritmo||[];
   var hoy=new Date();
-  var fmtF=function(d){ return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear(); };
+  var fmtF=function(d){ return formatearFecha(d, ZONA_FECHAS, false); };
 
   var totCiclos=0, totFixes=0, totConDur=0, totMs=0;
   for(var a=0;a<T.length;a++){
@@ -4755,8 +4854,10 @@ function reporteTiemposHTML(){
     totConDur+=T[a].con_dur||0; totMs+=T[a].ms||0;
   }
   var totFric=0, stops=0;
-  for(var b=0;b<F.length;b++){ totFric+=F[b].n||0; if(F[b].verdict==='STOP') stops+=F[b].n||0; }
-  var retrabajo=totCiclos?Math.round((totFixes/totCiclos)*100):0;
+  for(var b=0;b<F.length;b++){ totFric+=F[b].n||0; }
+  stops=D.stops_unicos||0;
+  var rw=D.retrabajo||{};
+  var retrabajo=rw.tasa;
   var cobertura=totCiclos?Math.round((totConDur/totCiclos)*100):0;
 
   // Friccion atribuida por nombre de archivo. Lo que no case queda fuera: no se
@@ -4775,7 +4876,7 @@ function reporteTiemposHTML(){
     var u=repFecha(t.hasta);
     return Object.assign({}, t, { edad: u?Math.floor((hoy-u)/86400000):null });
   }).sort(function(x,y){ return (x.edad==null?9e9:x.edad)-(y.edad==null?9e9:y.edad); });
-  var parados=conEdad.filter(function(t){ return t.edad!=null && t.edad>=21; }).length;
+  var parados=((D.actividad&&D.actividad.modulos)||[]).filter(function(m){ return m.estado==='POSIBLE_INACTIVIDAD'; }).length;
 
   var css='body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
     +'color:#1a2233;background:#fff;margin:0;padding:38px 44px;line-height:1.55;font-size:13px}'
@@ -4809,12 +4910,13 @@ function reporteTiemposHTML(){
   h+='<div class="kpis">';
   var kpi=function(v,l,cl,n){ return '<div class="kpi"><div class="kv '+(cl||'')+'">'+v+'</div>'
     +'<div class="kl">'+l+'</div>'+(n?'<div class="kn">'+n+'</div>':'')+'</div>'; };
-  h+=kpi(totCiclos,'ciclos cerrados','',T.length+' módulos');
-  h+=kpi(retrabajo+'%','retrabajo',retrabajo>30?'rojo':retrabajo>15?'ambar':'verde',
-        totFixes+' de '+totCiclos+' fueron arreglos');
-  h+=kpi(stops||totFric,stops?'veces que un control frenó':'avisos de control',stops?'rojo':'',
-        stops?totFric+' eventos en total':'ningún freno');
-  h+=kpi(parados,'módulos parados',parados?'ambar':'verde','21 días o más sin cerrar nada');
+  var CR=D.cierre||{por_clase:{}};
+  h+=kpi(totCiclos,'ciclos registrados','',T.length+' módulos · '+(CR.cerrados||0)+' cerrados íntegros'+(CR.por_clase.CON_PENDIENTES?' · '+CR.por_clase.CON_PENDIENTES+' con pendientes':''));
+  h+=kpi(retrabajo==null?'—':retrabajo+'%','retrabajo',retrabajo>30?'rojo':retrabajo>15?'ambar':'verde',
+        rw.entregas_verificadas?rw.reaperturas+' reaperturas de '+rw.entregas_verificadas+' entregas verificadas':(rw.arreglos_sin_vinculo?rw.arreglos_sin_vinculo+' arreglos sin vínculo':'sin entregas verificadas'));
+  h+=kpi(stops||totFric,stops?'STOP únicos':'avisos de control',stops?'rojo':'',
+        stops?totFric+' eventos de control en total':'ningún freno');
+  h+=kpi(parados,'posible inactividad',parados?'ambar':'verde','tarea abierta sin latido; terminado es ESTABLE');
   h+=kpi(repDur(totMs),'tiempo medido','',cobertura+'% de los ciclos lo tiene');
   h+='</div>';
 
@@ -4868,13 +4970,13 @@ function reporteTiemposHTML(){
   h+='<h2>Cómo leer esto</h2><div class="leer">'
     +'<b>Ciclos</b> son las vueltas que dio el módulo. Muchos ciclos pueden significar '
     +'simplemente que es más grande — por sí solos no acusan a nadie.<br><br>'
-    +'<b>Retrabajo</b> es qué parte del trabajo fueron arreglos en vez de construcción. '
+    +'<b>Retrabajo</b> son reaperturas de una entrega verificada. '
     +'Es la métrica que más habla: un módulo que construye avanza, uno que repara gira en '
     +'el sitio.<br><br>'
     +'<b>Frenos</b> son las veces que un control automático paró o avisó. Ahí está la '
     +'fricción real, la que no aparece en ninguna estimación porque nadie la planifica.<br><br>'
     +'<b>Última vez</b> es lo primero que hay que mirar en un proyecto de semanas. Un módulo '
-    +'en rojo lleva 21 días o más sin cerrar nada: puede estar bloqueado, terminado, o sin '
+    +'en ámbar tiene una tarea abierta sin latido; terminado hace meses es ESTABLE, no parado. '
     +'nadie encima. El reporte no lo sabe — dice dónde preguntar.<br><br>'
     +'<b>Trabajado</b> lleva entre paréntesis cuántos ciclos tienen tiempo medido. Si dice '
     +'(2/58), ese total cubre dos ciclos de cincuenta y ocho: es un suelo, no el total real. '
@@ -4925,7 +5027,7 @@ function exportarTiempos(sel){
 
 
 function copyMarkdown(){
-  const t='# '+('${config.nombre}')+'\\n\\nGenerated by Agentix KDD Dashboard\\n';
+  const t='# '+${jsonSafe(String(config.nombre || ''))}+'\\n\\nGenerated by Agentix KDD Dashboard\\n';
   navigator.clipboard?.writeText(t).then(()=>alert('Copied!')).catch(()=>alert('Copy manually'));
 }
 
@@ -4941,6 +5043,48 @@ function copyMarkdown(){
     texto:'var(--text2)', tenue:'var(--text3)'
   });
 })();
+function activarTeclado(){
+  const esControl=el=>el.matches && el.matches('.mode-tab,.gst,.sb-tab,.fpill,.nitem,.gc-btn,button,[onclick]');
+  document.querySelectorAll('.mode-tab,.gst,.sb-tab,.fpill,.nitem,.gc-btn').forEach(el=>{
+    if(!el.getAttribute('role')) el.setAttribute('role','button');
+    if(!el.hasAttribute('tabindex')) el.setAttribute('tabindex','0');
+  });
+  document.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape'){
+      if(typeof closeTourPanel==='function') closeTourPanel();
+      if(typeof closeDetail==='function') closeDetail();
+      if(typeof closeGlossary==='function') closeGlossary();
+      return;
+    }
+    if(ev.altKey && (ev.key==='t' || ev.key==='T') && typeof toggleTablaKdd==='function'){
+      ev.preventDefault(); toggleTablaKdd(); return;
+    }
+    if(ev.key!=='Enter' && ev.key!==' ') return;
+    const el=ev.target;
+    if(!esControl(el)) return;
+    ev.preventDefault();
+    el.click();
+  });
+}
+document.addEventListener('visibilitychange',()=>{
+  const ids=Object.keys(typeof active3DGraphs==='undefined'?{}:active3DGraphs);
+  if(document.hidden) ids.forEach(pause3DGraph);
+  else if(typeof activeGraphId!=='undefined') resume3DGraph(activeGraphId);
+});
+if((!TOUR_DATA || (!TOUR_DATA.front||!TOUR_DATA.front.length)&&(!TOUR_DATA.back||!TOUR_DATA.back.length))){
+  fetch('/api/v1/tour').then(r=>r.json()).then(j=>{
+    if(j && j.data && ( (j.data.front&&j.data.front.length) || (j.data.back&&j.data.back.length) )){
+      TOUR_DATA=j.data;
+      const panel=document.getElementById('tour-panel');
+      if(panel && panel.style.display==='block' && typeof renderTourStop==='function'){
+        tourTab=TOUR_DATA.front.length?'front':'back';
+        tourIndex=0;
+        renderTourStop();
+      }
+    }
+  }).catch(()=>{});
+}
+activarTeclado();
 renderNodeList();
 renderGraph();
 </script>
@@ -4948,15 +5092,62 @@ renderGraph();
   </body>
 </html>`;
 
+// Los handlers inline del render actual todavía necesitan 'unsafe-inline';
+// el resto queda cerrado: sin envío de datos a otros orígenes, sin <object>,
+// sin <base>, sin formularios y sin ser embebido por otra página.
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+// Solo loopback: un Host ajeno es otra página intentando leer el tablero
+// mediante un nombre que apunta a 127.0.0.1 (rebinding de DNS).
+const HOSTS_PERMITIDOS = new Set(['localhost', '127.0.0.1', '[::1]']);
+function hostPermitido(h) {
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(h || '').toLowerCase());
+  return !!m && HOSTS_PERMITIDOS.has(m[1]) && (!m[2] || Number(m[2]) === Number(PORT));
+}
+
 const server = require('http').createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(HTML);
+  const base = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' };
+  const fin = (status, texto, extra) => { res.writeHead(status, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, base, extra)); res.end(req.method === 'HEAD' ? undefined : texto); };
+  if (!hostPermitido(req.headers.host)) return fin(403, 'Host no permitido');
+  if (req.method !== 'GET' && req.method !== 'HEAD') return fin(405, 'Método no permitido', { Allow: 'GET, HEAD' });
+  let url;
+  try { url = new URL(String(req.url || '/'), 'http://127.0.0.1'); } catch { return fin(400, 'URL inválida'); }
+  const ruta = url.pathname;
+  if (API.manejar(req, res, ruta, url.searchParams)) return;
+  if (ruta.startsWith('/vendor/')) {
+    const permitidos = new Set(['d3.min.js', '3d-force-graph.min.js', 'three.min.js', 'three-spritetext.min.js', 'force-graph.min.js']);
+    const nombre = path.basename(ruta);
+    if (!permitidos.has(nombre) || ruta.split('/').some((s) => s === '..' || s === '.')) return fin(404, 'No encontrado');
+    const vendorDir = path.resolve(__dirname, '.agentic', 'grafo', 'vendor');
+    const full = path.resolve(vendorDir, nombre);
+    if (full !== path.join(vendorDir, nombre)) return fin(403, 'Ruta no permitida');
+    if (!fs.existsSync(full)) return fin(404, 'Asset local ausente');
+    res.writeHead(200, Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+    res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(full));
+    return;
+  }
+  if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
+  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+  res.end(req.method === 'HEAD' ? undefined : HTML);
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
   console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}\n`);
+  if (process.env.AKDD_DASH_NO_OPEN === '1') return;
   // Open browser
   const { exec } = require('child_process');
   const cmd = process.platform === 'win32' ? `start "" "${url}"`

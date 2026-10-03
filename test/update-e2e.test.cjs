@@ -84,12 +84,12 @@ function tarballDelRepoLocal() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-pack-'));
   const tar = path.join(dir, 'fuente.tar.gz');
   /* Un directorio raíz, porque el extractor usa --strip-components=1. */
-  const padre = path.dirname(RAIZ).replace(/\\/g, '/');
-  const nombre = path.basename(RAIZ);
-  execSync(
-    `tar --force-local -czf "${tar.replace(/\\/g, '/')}" -C "${padre}" ` +
-    `--exclude=node_modules --exclude=.git "${nombre}"`,
-    { stdio: 'pipe', timeout: 180000 }
+  /* bsdtar (Windows) no acepta --force-local; GNU tar lo necesita con "C:/". */
+  /* La base y el caché del motor están ignorados por Git (el tarball real no los trae)
+     y un ciclo en curso los tiene abiertos: en Windows tar no puede leerlos. */
+  require(path.join(RAIZ, 'src', 'tar-extract.js')).createTarGz(
+    tar, path.dirname(RAIZ), path.basename(RAIZ),
+    require(path.join(RAIZ, 'src', 'tar-extract.js')).EXCLUIR_ESTADO_VOLATIL, { timeout: 180000 }
   );
   return tar;
 }
@@ -108,6 +108,18 @@ cp.execSync = function (cmd, opts) {
     if (m) { fs.copyFileSync(${JSON.stringify(tarLocal.replace(/\\/g, '/'))}, m[1]); return Buffer.from(''); }
   }
   return real.call(this, cmd, opts);
+};
+const realSpawn = cp.spawnSync;
+cp.spawnSync = function (cmd, args, opts) {
+  /* La ref se resuelve a un commit fijo antes de descargar: también es red. */
+  if (cmd === 'git' && Array.isArray(args) && args[0] === 'ls-remote') {
+    return { status: 0, signal: null, stdout: Buffer.from('0123456789abcdef0123456789abcdef01234567\\trefs/heads/main\\n'), stderr: Buffer.from('') };
+  }
+  if (cmd === 'curl' && Array.isArray(args) && args.includes('-o')) {
+    fs.copyFileSync(${JSON.stringify(tarLocal.replace(/\\/g, '/'))}, args[args.indexOf('-o') + 1]);
+    return { status: 0, signal: null, stdout: Buffer.from(''), stderr: Buffer.from('') };
+  }
+  return realSpawn.call(this, cmd, args, opts);
 };
 `);
   return f;
@@ -170,10 +182,14 @@ test('akdd update actualiza el framework sin destruir el proyecto', { timeout: 3
   assert.match(dash, /setMode\('tiempos'/,
     'el dashboard nuevo, con la pestaña de Línea de Tiempo, debe llegar');
 
-  const hook = path.join(root, '.agentic', 'grafo', 'git-hooks', 'pre-commit');
-  if (fs.existsSync(hook)) {
-    assert.match(fs.readFileSync(hook, 'utf8'), /canario-gate/,
-      'el hook actualizado debe traer el canario');
+  /* El canario corre en commit-msg (con el mensaje de ESTE commit) a través
+     del runner: el hook y el runner deben llegar los dos. */
+  const hooks = path.join(root, '.agentic', 'grafo', 'git-hooks');
+  if (fs.existsSync(path.join(hooks, 'pre-commit'))) {
+    assert.match(fs.readFileSync(path.join(hooks, 'commit-msg'), 'utf8'), /exec node "\$RUNNER" commit-msg/,
+      'el hook commit-msg actualizado debe llegar');
+    assert.match(fs.readFileSync(path.join(root, '.agentic', 'grafo', 'hook-runner.cjs'), 'utf8'), /canario-gate\.cjs/,
+      'el runner actualizado debe traer el canario');
   }
 
   assert.ok(!/error|Error|fail/i.test(salida.split('\n').filter((l) => !/errores|Errors/.test(l)).join('\n')) ||

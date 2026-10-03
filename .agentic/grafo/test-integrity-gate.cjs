@@ -64,17 +64,13 @@ function contarAserciones(contenido) {
 function openDB(projectRoot) {
   const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) return null;
-  try { return new (require('better-sqlite3'))(dbPath, { readonly: true }); } catch {}
-  try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath, { readOnly: true }); } catch {}
-  return null;
+  return safe(() => require('./db-adapter.cjs').openReadOnly(dbPath));
 }
 
 function openDBWrite(projectRoot) {
   const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) return null;
-  try { return new (require('better-sqlite3'))(dbPath); } catch {}
-  try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath); } catch {}
-  return null;
+  return safe(() => require('./db-adapter.cjs').openWrite(dbPath));
 }
 
 /** ¿Este archivo de test está citado (archivos_aplica) por un nodo ALTA? */
@@ -96,14 +92,16 @@ function esTestProtegido(db, testFileRel) {
 }
 
 function contenidoAnterior(projectRoot, fileRel) {
-  return safe(() => execSync(`git show HEAD:${JSON.stringify(fileRel).slice(1, -1)}`, {
-    cwd: projectRoot, stdio: 'pipe', timeout: 10000,
-  }).toString(), null);
+  const r = require('child_process').spawnSync('git', ['show', 'HEAD:' + String(fileRel).replace(/\\/g, '/')], {
+    cwd: projectRoot, timeout: 10000, maxBuffer: 32 * 1024 * 1024,
+  });
+  return r.status === 0 ? r.stdout.toString('utf8') : null;
 }
 
-function scan(projectRoot, { staged = true, files = null } = {}) {
+function scan(projectRoot, { staged = true, files = null, readContent = null, readBase = null, deleted = [], renamed = {} } = {}) {
   const findings = [];
-  let cambiados = files;
+  const borrados = new Set(deleted);
+  let cambiados = files ? [...files, ...deleted] : files;
   if (!cambiados) {
     const diffFiles = safe(() => execSync(`git diff ${staged ? '--cached' : 'HEAD'} --name-only`, {
       cwd: projectRoot, stdio: 'pipe', timeout: 15000,
@@ -114,20 +112,29 @@ function scan(projectRoot, { staged = true, files = null } = {}) {
   if (!testFiles.length) return { findings, scanned: false };
 
   const db = openDB(projectRoot);
+  const leerBase = readBase || ((rel) => contenidoAnterior(projectRoot, rel));
+  const sinBase = [];
+  let gitOk = null;
 
   for (const fileRel of testFiles) {
     const abs = path.isAbsolute(fileRel) ? fileRel : path.join(projectRoot, fileRel);
-    const nuevo = safe(() => fs.readFileSync(abs, 'utf8'), null);
+    const nuevo = borrados.has(fileRel) ? ''
+      : readContent ? readContent(fileRel) : safe(() => fs.readFileSync(abs, 'utf8'), null);
     if (nuevo == null) continue;
-    const viejo = contenidoAnterior(projectRoot, fileRel);
-    if (viejo == null) continue; // archivo nuevo — nada que comparar
+    const viejo = leerBase(renamed[fileRel] || fileRel);
+    if (viejo == null) {
+      // Sin git no se distingue "archivo nuevo" de "no pude leer la versión anterior".
+      if (!readBase && gitOk === null) gitOk = gitDisponible(projectRoot);
+      if (!readBase && !gitOk) sinBase.push(fileRel);
+      continue;
+    }
 
     const titulosViejos = extraerTitulos(viejo);
     const titulosNuevos = extraerTitulos(nuevo);
     const desaparecidos = [...titulosViejos].filter(t => !titulosNuevos.has(t));
     if (!desaparecidos.length) continue;
 
-    const proteccion = esTestProtegido(db, fileRel);
+    const proteccion = esTestProtegido(db, fileRel) || (renamed[fileRel] ? esTestProtegido(db, renamed[fileRel]) : null);
     const aVieja = contarAserciones(viejo);
     const aNueva = contarAserciones(nuevo);
 
@@ -156,7 +163,33 @@ function scan(projectRoot, { staged = true, files = null } = {}) {
       }
     } catch {}
   }
-  return { findings, scanned: true };
+  return { findings, scanned: true, sinBase };
+}
+
+function gitDisponible(projectRoot) {
+  const r = require('child_process').spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectRoot, timeout: 10000 });
+  return r.status === 0;
+}
+
+/**
+ * Resultado de gate para el controlador: FAIL si desapareció un test que
+ * protege un nodo ALTA o cualquier título sin decisión registrada; UNVERIFIED
+ * si no hay versión anterior con qué comparar; PASS si no se debilitó nada.
+ */
+function evaluar(projectRoot, { files = [], deleted = [], renamed = {}, readBase = null, readContent = null, subject_hash = null } = {}) {
+  const { POLICY_ID } = require('./escenarios.cjs');
+  const execution_id = require('crypto').randomUUID();
+  const base = { gate: 'test-integrity', policy_id: POLICY_ID, execution_id, subject_hash };
+  let res;
+  try { res = scan(projectRoot, { staged: false, files, deleted, renamed, readBase, readContent }); }
+  catch (e) { return Object.assign(base, { status: 'ERROR', reason_code: 'ESCANEO_FALLIDO', message: e.message }); }
+  if (!res.scanned) return Object.assign(base, { status: 'PASS', reason_code: 'SIN_TESTS_TOCADOS', findings: [] });
+  if (res.findings.length) {
+    const criticos = res.findings.filter((f) => f.nivel === 'CRITICAL');
+    return Object.assign(base, { status: 'FAIL', reason_code: criticos.length ? 'TEST_PROTEGIDO_REMOVIDO' : 'TITULO_DE_TEST_DESAPARECIDO', findings: res.findings });
+  }
+  if (res.sinBase && res.sinBase.length) return Object.assign(base, { status: 'UNVERIFIED', reason_code: 'SIN_VERSION_ANTERIOR', sin_base: res.sinBase, findings: [] });
+  return Object.assign(base, { status: 'PASS', findings: [] });
 }
 
 function formatear(res) {
@@ -190,4 +223,4 @@ if (require.main === module) {
   process.exit(hayCritica ? 1 : 0); // CRÍTICO bloquea; WARN no (igual que los demás gates mecánicos)
 }
 
-module.exports = { scan, formatear, extraerTitulos, contarAserciones };
+module.exports = { scan, evaluar, formatear, extraerTitulos, contarAserciones };

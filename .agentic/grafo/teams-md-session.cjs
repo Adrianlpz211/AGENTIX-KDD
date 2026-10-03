@@ -1,0 +1,251 @@
+'use strict';
+
+/**
+ * Canal MD entre sesiones ya abiertas (C01). El director (Claude Code) y el
+ * constructor (Cursor) trabajan en la misma carpeta; ninguna API inyecta
+ * mensajes en el chat del IDE, pero las dos sesiones leen archivos y corren
+ * node. Este canal aprovecha eso sin pedirle a la persona que pegue nada:
+ *
+ *   director → sesión   `.legion/AUDITORIA-CURSOR.md`, un solo escritor
+ *                       (teams-manager.regenerarVistas) con envoltorios por rol
+ *   sesión → director   `.legion/cola-<rol>.jsonl`, de solo agregar, una
+ *                       línea por mensaje (ACK, RESULT, VISTO) con event_id
+ *   registro           `.legion/sesiones/<rol>.json`, cada sesión el suyo
+ *
+ * El director consume la cola de forma idempotente: repetirla entera no
+ * duplica transiciones (ACK y RESULT se deduplican en la base por entrega y
+ * event_id). AVAILABLE exige las dos sesiones vivas y un ida y vuelta real
+ * verificado (tarea → ACK → resultado → verificación del director). Un archivo
+ * escrito o un binario detectado no es ACK. El host no se despierta desde
+ * fuera: la sesión consume la señal en su siguiente pase, y eso se declara.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const tm = require('./teams-manager.cjs');
+
+const VIGENCIA_SESION_MS = 10 * 60 * 1000;
+const ROLES = ['director', 'builder'];
+const BLOQUE = /<<<AKDD-TEAMS v1\r?\n([\s\S]*?)\r?\nAKDD-TEAMS>>>/g;
+
+const dirLegion = (root) => path.join(root, '.legion');
+const archivoSesion = (root, rol) => path.join(dirLegion(root), 'sesiones', rol + '.json');
+const archivoCola = (root, rol) => path.join(dirLegion(root), 'cola-' + rol + '.jsonl');
+const archivoEstado = (root) => path.join(dirLegion(root), '_md-session', 'estado.json');
+const leerJson = (f, def) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return def; } };
+
+function escribirAtomico(f, contenido) {
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const tmp = f + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, contenido);
+  fs.renameSync(tmp, f);
+}
+
+function leerCola(root, rol) {
+  let txt = '';
+  try { txt = fs.readFileSync(archivoCola(root, rol), 'utf8'); } catch { return []; }
+  return txt.split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+
+/* ─── lado de la sesión (lo corre Cursor o Claude Code en su propio turno) ── */
+
+/** La sesión se anuncia. Solo escribe su propio archivo. */
+function registrar(root, { rol, host, session_id }) {
+  if (!ROLES.includes(rol)) return { status: 'ROL_DESCONOCIDO', rol };
+  const id = session_id || ('ses-' + crypto.randomUUID().slice(0, 8));
+  const previo = leerJson(archivoSesion(root, rol), null);
+  const ahora = new Date().toISOString();
+  escribirAtomico(archivoSesion(root, rol), JSON.stringify({ rol, host: host || null, session_id: id, registrada_at: previo && previo.session_id === id ? previo.registrada_at : ahora, latido_at: ahora }, null, 2));
+  return { status: 'OK', session_id: id };
+}
+
+function latido(root, { rol, session_id }) {
+  const s = leerJson(archivoSesion(root, rol), null);
+  if (!s || s.session_id !== session_id) return { status: 'SESION_DESCONOCIDA' };
+  s.latido_at = new Date().toISOString();
+  escribirAtomico(archivoSesion(root, rol), JSON.stringify(s, null, 2));
+  return { status: 'OK' };
+}
+
+function encolar(root, rol, msg) {
+  const f = archivoCola(root, rol);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const linea = Object.assign({ event_id: msg.event_id || ('ev-' + crypto.randomUUID()), at: new Date().toISOString() }, msg);
+  fs.appendFileSync(f, JSON.stringify(linea) + '\n');
+  return linea;
+}
+
+/** Lo que el canal tiene para este rol, sin lo que esta sesión ya confirmó. */
+function leerCanal(root, { rol }) {
+  let txt = '';
+  try { txt = fs.readFileSync(path.join(dirLegion(root), 'AUDITORIA-CURSOR.md'), 'utf8'); } catch { return { status: 'SIN_CANAL', eventos: [] }; }
+  const propios = leerCola(root, rol);
+  const ackeadas = new Set(propios.filter((m) => m.kind === 'ACK').map((m) => m.delivery_id));
+  const visto = Math.max(0, ...propios.filter((m) => m.kind === 'VISTO').map((m) => Number(m.hasta_seq) || 0));
+  const eventos = [];
+  for (const m of txt.matchAll(BLOQUE)) {
+    let e;
+    try { e = JSON.parse(m[1]); } catch { continue; }
+    if (e.kind !== 'EVENT' || e.rol !== rol || e.seq <= visto) continue;
+    if (e.event_kind === 'TASK_ASSIGNED' && ackeadas.has(e.payload && e.payload.delivery_id)) continue;
+    eventos.push(e);
+  }
+  return { status: 'OK', eventos };
+}
+
+/** La sesión acepta una tarea: queda escrito en su cola, no en el canal del director. */
+function ackear(root, { rol = 'builder', session_id, owner_id, delivery_id }) {
+  return encolar(root, rol, { kind: 'ACK', delivery_id, owner_id, host_session_id: session_id, event_id: 'ack-' + delivery_id });
+}
+
+function entregar(root, { rol = 'builder', resultado }) {
+  return encolar(root, rol, Object.assign({ kind: 'RESULT' }, resultado, { event_id: resultado.event_id || ('res-' + resultado.task_id + '-' + resultado.fencing) }));
+}
+
+/** La sesión confirma que leyó hasta `seq`: es su aceptación duradera para la vigilancia. */
+function visto(root, { rol, hasta_seq }) {
+  return encolar(root, rol, { kind: 'VISTO', hasta_seq: Number(hasta_seq), event_id: 'visto-' + rol + '-' + hasta_seq });
+}
+
+/**
+ * Tras compactar el chat: la foto de continuidad, lo nuevo y lo que esta
+ * sesión ya tiene en curso. Una tarea aceptada no se vuelve a ofrecer.
+ */
+function retomar(root, { rol, session_id }) {
+  let continuidad = '';
+  try { continuidad = fs.readFileSync(path.join(dirLegion(root), 'CONTINUIDAD.md'), 'utf8'); } catch { /* sin vista */ }
+  const propios = leerCola(root, rol);
+  const enCurso = propios.filter((m) => m.kind === 'ACK' && m.host_session_id === session_id).map((m) => m.delivery_id)
+    .filter((d) => !propios.some((r) => r.kind === 'RESULT' && r.delivery_id === d));
+  return { continuidad, nuevos: leerCanal(root, { rol }).eventos, en_curso: enCurso };
+}
+
+/* ─── lado del director ───────────────────────────────────────────────────── */
+
+function estadoCanal(root) { return leerJson(archivoEstado(root), { consumidos: {}, roundtrip: null, acks: {} }); }
+function guardarEstado(root, e) { escribirAtomico(archivoEstado(root), JSON.stringify(e, null, 2)); }
+
+function sesiones(root, ahora = Date.now()) {
+  const out = {};
+  for (const rol of ROLES) {
+    const s = leerJson(archivoSesion(root, rol), null);
+    out[rol] = s ? Object.assign({}, s, { viva: ahora - Date.parse(s.latido_at) <= VIGENCIA_SESION_MS }) : null;
+  }
+  return out;
+}
+
+class AdapterMdSesion {
+  constructor(root, { rol = 'builder', owner_id } = {}) {
+    Object.assign(this, { root, rol, owner_id: owner_id || rol + '-md-session' });
+  }
+
+  capabilities() {
+    const s = sesiones(this.root);
+    const faltan = ROLES.filter((r) => !s[r] || !s[r].viva);
+    const latencia = 'la sesión consume la señal en su siguiente pase: no se despierta sola desde fuera';
+    if (faltan.length) {
+      return {
+        host: 'md-session', status: 'DEGRADED', transport: 'MD_SESSION', version: '1', latencia,
+        motivo: 'SESION_AUSENTE', faltan,
+        accion: faltan.map((r) => `en la sesión del ${r === 'builder' ? 'constructor' : 'director'} corre una vez: node .agentic/grafo/teams-md-session.cjs registrar --rol=${r} --host=<cursor|claude-code>`),
+      };
+    }
+    const rt = estadoCanal(this.root).roundtrip;
+    if (!rt || rt.session_id !== s.builder.session_id) {
+      return { host: 'md-session', status: 'DEGRADED', transport: 'MD_SESSION', version: '1', latencia, motivo: 'HANDSHAKE_SIN_IDA_Y_VUELTA', accion: ['completar una tarea real: asignación → ACK de la sesión → resultado → verificación del director'] };
+    }
+    return { host: 'md-session', status: 'AVAILABLE', transport: 'MD_SESSION', version: '1', latencia, verificado: rt };
+  }
+
+  /** Publica la asignación en el canal (único escritor). El ACK llega después por la cola de la sesión. */
+  submitTask(asg) {
+    tm.regenerarVistas(this.root);
+    return { delivery_id: asg.delivery_id, host_session_id: null, accepted: false, ack_at: null, motivo: 'ESPERA_ACK_DE_LA_SESION' };
+  }
+
+  /** Lee la cola de la sesión: los ACK se aplican aquí; los resultados vuelven al scheduler. */
+  readProgress() {
+    const e = estadoCanal(this.root);
+    const vistos = new Set(e.consumidos[this.rol] || []);
+    const resultados = [];
+    for (const m of leerCola(this.root, this.rol)) {
+      if (vistos.has(m.event_id)) continue;
+      if (m.kind === 'ACK') {
+        const a = tm.ack(this.root, { delivery_id: m.delivery_id, owner_id: m.owner_id || this.owner_id, host_session_id: m.host_session_id });
+        if (a.status === 'ACKED') e.acks[m.delivery_id] = { session_id: m.host_session_id, task_id: a.task_id || null };
+      } else if (m.kind === 'RESULT') {
+        resultados.push(Object.assign({}, m, { owner_id: m.owner_id || this.owner_id }));
+      }
+      vistos.add(m.event_id);
+    }
+    e.consumidos[this.rol] = [...vistos];
+    guardarEstado(this.root, e);
+    return resultados;
+  }
+
+  /** Lo llama el scheduler tras verificar: un DONE_VERIFIED de una tarea aceptada por la sesión prueba el ida y vuelta. */
+  alVerificar(res, v) {
+    if (!v || v.status !== 'DONE_VERIFIED') return;
+    const e = estadoCanal(this.root);
+    const ack = Object.entries(e.acks).find(([, a]) => a.task_id === res.task_id);
+    if (!ack) return;
+    e.roundtrip = { task_id: res.task_id, delivery_id: ack[0], session_id: ack[1].session_id, at: new Date().toISOString() };
+    guardarEstado(this.root, e);
+  }
+
+  /** Para la vigilancia (C02): acepta solo hasta lo que la sesión confirmó haber leído. */
+  entregarEventos(eventos) {
+    tm.regenerarVistas(this.root);
+    const hasta = Math.max(0, ...leerCola(this.root, this.rol).filter((m) => m.kind === 'VISTO').map((m) => Number(m.hasta_seq) || 0));
+    const aceptados = eventos.filter((ev) => ev.seq <= hasta);
+    if (!aceptados.length) return { aceptado: false, motivo: 'SESION_AUN_NO_LEYO' };
+    return { aceptado: true, hasta_seq: aceptados[aceptados.length - 1].seq };
+  }
+
+  cancelOwnedTask() { return { status: 'MANUAL', nota: 'la cancelación llega a la sesión por el canal' }; }
+  resume() { return { status: 'OK' }; }
+  health() { const c = this.capabilities(); return { status: c.status, transport: c.transport, motivo: c.motivo || null }; }
+}
+
+/**
+ * Activación inicial: prepara archivos y explica qué falta. No migra la base:
+ * eso es `teams: activar` con aprobación explícita, y se muestra aparte.
+ */
+function preparar(root, { mecanica = 'INVERTIDA' } = {}) {
+  const e = tm.estado(root);
+  const roles = mecanica === 'INVERTIDA' ? { director: 'claude-code', builder: 'cursor' } : { director: 'cursor', builder: 'claude-code' };
+  const instr = `# Roles TEAMS por canal MD (${mecanica})\n\n`
+    + `- Director: ${roles.director}. Constructor: ${roles.builder}.\n`
+    + '- Constructor, en cada pase: `node .agentic/grafo/teams-md-session.cjs canal --rol=builder` → aceptar con `ack` → implementar → `resultado` → `visto`.\n'
+    + '- Director: `akdd teams run` consume la cola del constructor y verifica.\n'
+    + '- Tras compactar el chat: `node .agentic/grafo/teams-md-session.cjs retomar --rol=<rol> --session=<id>`.\n'
+    + '- El canal no despierta a nadie: cada sesión lo lee en su siguiente pase.\n';
+  escribirAtomico(path.join(dirLegion(root), 'ROLES-MD.md'), instr);
+  const primerLote = e.inicializado ? e.tareas.filter((t) => t.state === 'READY').map((t) => t.id) : [];
+  return {
+    status: 'PREPARADO', archivos: ['.legion/ROLES-MD.md'], roles,
+    migracion: e.inicializado ? { requerida: false } : { requerida: true, como: 'teams: activar (crea las tablas de TEAMS en la base con respaldo; pide aprobación explícita)' },
+    primer_lote: primerLote, aviso: primerLote.length ? null : 'sin tareas listas: falta un plan con `teams: plan <objetivo>`',
+  };
+}
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const opt = Object.fromEntries(args.filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : true]; }));
+  const cmd = args.find((a) => !a.startsWith('--')) || 'estado';
+  const root = process.cwd();
+  let r;
+  if (cmd === 'registrar') r = registrar(root, { rol: opt.rol, host: opt.host, session_id: opt.session });
+  else if (cmd === 'latido') r = latido(root, { rol: opt.rol, session_id: opt.session });
+  else if (cmd === 'canal') r = leerCanal(root, { rol: opt.rol || 'builder' });
+  else if (cmd === 'ack') r = ackear(root, { rol: opt.rol || 'builder', session_id: opt.session, owner_id: opt.owner, delivery_id: opt.delivery });
+  else if (cmd === 'resultado') r = entregar(root, { rol: opt.rol || 'builder', resultado: JSON.parse(fs.readFileSync(path.resolve(root, opt.archivo), 'utf8')) });
+  else if (cmd === 'visto') r = visto(root, { rol: opt.rol || 'builder', hasta_seq: opt.seq });
+  else if (cmd === 'retomar') r = retomar(root, { rol: opt.rol || 'builder', session_id: opt.session });
+  else if (cmd === 'preparar') r = preparar(root, { mecanica: opt.mecanica });
+  else r = new AdapterMdSesion(root, { rol: opt.rol || 'builder' }).capabilities();
+  console.log(JSON.stringify(r, null, 2));
+}
+
+module.exports = { AdapterMdSesion, registrar, latido, leerCanal, ackear, entregar, visto, retomar, preparar, sesiones, VIGENCIA_SESION_MS };

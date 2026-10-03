@@ -16,6 +16,13 @@
 
 const fs   = require('fs');
 const path = require('path');
+const { openReadOnly, openWrite } = require('./db-adapter.cjs');
+
+function conLectura(dbPath, fn) {
+  const db = openReadOnly(dbPath);
+  try { return fn(db); }
+  finally { try { db.close(); } catch { /* el error de la consulta manda */ } }
+}
 
 const CHECKS = [
   // ── Core ──────────────────────────────────────────────────────────────────
@@ -64,12 +71,12 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-        const missing = ['ast_symbols','ast_edges','knowledge_docs'].filter(t => !tables.includes(t));
-        if (missing.length > 0) return { ok: false, msg: `Tablas faltantes: ${missing.join(', ')} — ejecutar: node .agentic/grafo/grafo.cjs sync` };
-        return { ok: true, msg: 'ast_symbols ✓ ast_edges ✓ knowledge_docs ✓' };
+        return conLectura(dbPath, (db) => {
+          const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+          const missing = ['ast_symbols','ast_edges','knowledge_docs'].filter(t => !tables.includes(t));
+          if (missing.length > 0) return { ok: false, msg: `Tablas faltantes: ${missing.join(', ')} — ejecutar: node .agentic/grafo/grafo.cjs sync` };
+          return { ok: true, msg: 'ast_symbols ✓ ast_edges ✓ knowledge_docs ✓' };
+        });
       } catch (e) { return { ok: false, msg: e.message }; }
     },
     fix: 'node .agentic/grafo/grafo.cjs sync',
@@ -82,11 +89,11 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const cols = db.prepare("PRAGMA table_info(nodos)").all().map(c => c.name);
-        if (!cols.includes('vigencia_tipo')) return { ok: false, msg: 'Falta vigencia_tipo — ejecutar: node .agentic/grafo/memory-audit.cjs migrate' };
-        return { ok: true, msg: 'vigencia_tipo presente' };
+        return conLectura(dbPath, (db) => {
+          const cols = db.prepare("PRAGMA table_info(nodos)").all().map(c => c.name);
+          if (!cols.includes('vigencia_tipo')) return { ok: false, msg: 'Falta vigencia_tipo — ejecutar: node .agentic/grafo/memory-audit.cjs migrate' };
+          return { ok: true, msg: 'vigencia_tipo presente' };
+        });
       } catch (e) { return { ok: false, msg: e.message }; }
     },
     fix: 'node .agentic/grafo/memory-audit.cjs migrate',
@@ -100,12 +107,12 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const count = db.prepare("SELECT COUNT(*) as n FROM ast_symbols").get()?.n ?? 0;
-        if (count === 0) return { ok: false, msg: 'AST no indexado — ejecutar: node .agentic/grafo/ast-indexer.cjs index' };
-        const files = db.prepare("SELECT COUNT(DISTINCT file) as n FROM ast_symbols").get()?.n ?? 0;
-        return { ok: true, msg: `${count} símbolos en ${files} archivos` };
+        return conLectura(dbPath, (db) => {
+          const count = db.prepare("SELECT COUNT(*) as n FROM ast_symbols").get()?.n ?? 0;
+          if (count === 0) return { ok: false, msg: 'AST no indexado — ejecutar: node .agentic/grafo/ast-indexer.cjs index' };
+          const files = db.prepare("SELECT COUNT(DISTINCT file) as n FROM ast_symbols").get()?.n ?? 0;
+          return { ok: true, msg: `${count} símbolos en ${files} archivos` };
+        });
       } catch { return { ok: false, msg: 'Tabla ast_symbols no existe — ejecutar: node .agentic/grafo/grafo.cjs sync && node .agentic/grafo/ast-indexer.cjs index' }; }
     },
     fix: 'node .agentic/grafo/ast-indexer.cjs index',
@@ -119,15 +126,15 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const count = db.prepare("SELECT COUNT(*) as n FROM knowledge_docs").get()?.n ?? 0;
-        if (count === 0) {
-          const hasADRDir = fs.existsSync(path.join(root, 'docs/adr'));
-          if (!hasADRDir) return { ok: false, msg: 'Sin ADRs. Crear docs/adr/ y ejecutar: node .agentic/grafo/adr-ingestor.cjs ingest' };
-          return { ok: false, msg: 'docs/adr/ existe pero no ingestado — ejecutar: node .agentic/grafo/adr-ingestor.cjs ingest' };
-        }
-        return { ok: true, msg: `${count} docs ingestados` };
+        return conLectura(dbPath, (db) => {
+          const count = db.prepare("SELECT COUNT(*) as n FROM knowledge_docs").get()?.n ?? 0;
+          if (count === 0) {
+            const hasADRDir = fs.existsSync(path.join(root, 'docs/adr'));
+            if (!hasADRDir) return { ok: false, msg: 'Sin ADRs. Crear docs/adr/ y ejecutar: node .agentic/grafo/adr-ingestor.cjs ingest' };
+            return { ok: false, msg: 'docs/adr/ existe pero no ingestado — ejecutar: node .agentic/grafo/adr-ingestor.cjs ingest' };
+          }
+          return { ok: true, msg: `${count} docs ingestados` };
+        });
       } catch { return { ok: false, msg: 'Tabla knowledge_docs no disponible' }; }
     },
     fix: 'node .agentic/grafo/adr-ingestor.cjs ingest && node .agentic/grafo/knowledge-ingestor.cjs ingest',
@@ -141,13 +148,13 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const total = db.prepare("SELECT COUNT(*) as n FROM nodos WHERE estado='ACTIVO'").get()?.n ?? 0;
-        const alta  = db.prepare("SELECT COUNT(*) as n FROM nodos WHERE confianza='ALTA' AND estado='ACTIVO'").get()?.n ?? 0;
-        if (total === 0) return { ok: false, msg: 'Sin memoria — ejecutar al menos un ciclo aa:' };
-        const ratio = Math.round((alta / total) * 100);
-        return { ok: ratio >= 10, msg: `${total} nodos activos, ${alta} ALTA (${ratio}%)` };
+        return conLectura(dbPath, (db) => {
+          const total = db.prepare("SELECT COUNT(*) as n FROM nodos WHERE estado='ACTIVO'").get()?.n ?? 0;
+          const alta  = db.prepare("SELECT COUNT(*) as n FROM nodos WHERE confianza='ALTA' AND estado='ACTIVO'").get()?.n ?? 0;
+          if (total === 0) return { ok: false, msg: 'Sin memoria — ejecutar al menos un ciclo aa:' };
+          const ratio = Math.round((alta / total) * 100);
+          return { ok: ratio >= 10, msg: `${total} nodos activos, ${alta} ALTA (${ratio}%)` };
+        });
       } catch { return { ok: false, msg: 'Error leyendo nodos' }; }
     },
     fix: null,
@@ -160,11 +167,11 @@ const CHECKS = [
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: true, msg: 'N/A' };
       try {
-        let db;
-        try { db = new (require('better-sqlite3'))(dbPath); } catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
-        const sin_consolidar = db.prepare("SELECT COUNT(*) as n FROM episodios WHERE consolidado=0").get()?.n ?? 0;
-        if (sin_consolidar > 50) return { ok: false, msg: `${sin_consolidar} episodios sin consolidar — ejecutar: node .agentic/grafo/grafo.cjs consolidar` };
-        return { ok: true, msg: `${sin_consolidar} episodios sin consolidar` };
+        return conLectura(dbPath, (db) => {
+          const sin_consolidar = db.prepare("SELECT COUNT(*) as n FROM episodios WHERE consolidado=0").get()?.n ?? 0;
+          if (sin_consolidar > 50) return { ok: false, msg: `${sin_consolidar} episodios sin consolidar — ejecutar: node .agentic/grafo/grafo.cjs consolidar` };
+          return { ok: true, msg: `${sin_consolidar} episodios sin consolidar` };
+        });
       } catch { return { ok: true, msg: 'N/A' }; }
     },
     fix: 'node .agentic/grafo/grafo.cjs consolidar',
@@ -177,10 +184,44 @@ const CHECKS = [
     check: (root) => {
       const p = path.join(root, '.agentic/grafo/harness.cjs');
       if (!fs.existsSync(p)) return { ok: false, msg: 'harness.cjs no encontrado — copiar desde el ZIP v3' };
-      try { require(p); return { ok: true, msg: 'harness.cjs cargado correctamente' }; }
-      catch (e) { return { ok: false, msg: `Error en harness.cjs: ${e.message}` }; }
+      try { require(p); } catch (e) { return { ok: false, msg: `Error en harness.cjs: ${e.message}` }; }
+      /* Que cargue no prueba que algo lo use: presente y cableado son cosas distintas. */
+      try {
+        const c = require('./capabilities.cjs').analizar(root, { modulos: ['harness.cjs'] }).modulos[0];
+        if (c.wired !== true) return { ok: false, msg: 'harness.cjs carga pero nada en runtime lo invoca (wired:false)' };
+        return { ok: true, msg: `harness.cjs cargado y cableado (vía ${c.via})` };
+      } catch { return { ok: true, msg: 'harness.cjs cargado (cableado sin verificar)' }; }
     },
     fix: null,
+  },
+  {
+    /* H26: lo que instaló Agentix (registro de .agentic/_update/owned.json)
+       comparado con lo que hay en disco. Cambiado = personalizado o deriva;
+       faltante = alguien lo borró. */
+    id: 'framework_drift',
+    nombre: 'Framework instalado sin deriva',
+    categoria: 'harness',
+    check: (root) => {
+      const f = path.join(root, '.agentic', '_update', 'owned.json');
+      if (!fs.existsSync(f)) return { ok: true, msg: 'N/A (instalado antes del registro — se crea en el próximo akdd update)' };
+      let owned;
+      try { owned = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return { ok: false, msg: 'owned.json ilegible' }; }
+      const crypto = require('crypto');
+      const cambiados = [];
+      const faltantes = [];
+      for (const [rel, h] of Object.entries(owned.archivos || {})) {
+        const abs = path.join(root, rel);
+        if (!fs.existsSync(abs)) { faltantes.push(rel); continue; }
+        if (crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex') !== h) cambiados.push(rel);
+      }
+      const v = owned.version || 'unknown';
+      if (!cambiados.length && !faltantes.length) return { ok: true, msg: `${Object.keys(owned.archivos || {}).length} archivo(s) del framework ${v} intactos` };
+      const partes = [];
+      if (cambiados.length) partes.push(`${cambiados.length} cambiado(s): ${cambiados.slice(0, 5).join(', ')}${cambiados.length > 5 ? '…' : ''}`);
+      if (faltantes.length) partes.push(`${faltantes.length} faltante(s): ${faltantes.slice(0, 5).join(', ')}${faltantes.length > 5 ? '…' : ''}`);
+      return { ok: false, msg: `deriva respecto a ${v} — ${partes.join(' · ')}` };
+    },
+    fix: 'akdd update (los cambiados se conservan como personalizados; los faltantes se reponen)',
   },
   {
     id: 'tdd_gate',
@@ -206,13 +247,19 @@ const CHECKS = [
     check: (root) => {
       const dbPath = path.join(root, '.agentic/memoria.db');
       if (!fs.existsSync(dbPath)) return { ok: true, msg: 'N/A (sin DB aún)' };
-      let db;
-      try { db = new (require('better-sqlite3'))(dbPath, { readonly: true }); }
-      catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { readOnly: true }); } catch { return { ok: true, msg: 'N/A (sin driver)' }; } }
-      const one = (sql) => { try { return db.prepare(sql).get(); } catch { return null; } };
-      const ciclos    = (one('SELECT COUNT(*) n FROM ciclos') || {}).n || 0;
-      const behaviors = (one("SELECT COUNT(*) n FROM protected_behaviors WHERE status='active'") || {}).n || 0;
-      try { db.close(); } catch {}
+      let ciclos = 0;
+      let behaviors = 0;
+      try {
+        const counts = conLectura(dbPath, (db) => {
+          const one = (sql) => { try { return db.prepare(sql).get(); } catch { return null; } };
+          return {
+            ciclos: (one('SELECT COUNT(*) n FROM ciclos') || {}).n || 0,
+            behaviors: (one("SELECT COUNT(*) n FROM protected_behaviors WHERE status='active'") || {}).n || 0,
+          };
+        });
+        ciclos = counts.ciclos;
+        behaviors = counts.behaviors;
+      } catch { return { ok: true, msg: 'N/A (sin driver)' }; }
 
       if (behaviors > 0) return { ok: true, msg: `${behaviors} behavior(s) protegido(s) tras ${ciclos} ciclo(s)` };
       if (ciclos < 3)    return { ok: true, msg: `${ciclos} ciclo(s), aún sin contratos (normal al arrancar)` };
@@ -375,9 +422,7 @@ function autoFix(projectRoot) {
   try {
     const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
     if (fs.existsSync(dbPath)) {
-      let db;
-      try { db = new (require('better-sqlite3'))(dbPath); }
-      catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); }
+      const db = openWrite(dbPath);
       const sc = require('./schema-columns.cjs');
       const antes = sc.checkMissingColumns(db);
       const r = sc.ensureAllColumns(db);

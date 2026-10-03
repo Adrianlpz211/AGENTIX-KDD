@@ -386,7 +386,7 @@ if (require.main === module) {
       const trails = getRecentTrails(db, n);
       console.log(`\nÚltimos ${n} ciclos:\n`);
       trails.forEach(c => {
-        const result = c.estado === 'COMPLETADO' ? '✅' : '🛑';
+        const result = require('./estado-ciclo.cjs').icono(c.estado);
         console.log(`  ${result} [${c.ciclo_id}] ${c.tarea?.substring(0, 60)} → ${c.modulo}`);
       });
       console.log(`\nDetalle: node .agentic/grafo/decision-trail.cjs ciclo <ciclo_id>`);
@@ -405,7 +405,7 @@ if (require.main === module) {
       const timeline = getModuleTimeline(db, modulo);
       console.log(`\nTimeline de '${modulo}' (${timeline.length} ciclos):\n`);
       timeline.forEach(c => {
-        const ok = c.estado === 'COMPLETADO' ? '✅' : '🛑';
+        const ok = require('./estado-ciclo.cjs').icono(c.estado);
         console.log(`  ${ok} ${c.fecha_inicio?.substring(0, 10)} [${c.ciclo_id}] ${c.tarea?.substring(0, 60)}`);
       });
       break;

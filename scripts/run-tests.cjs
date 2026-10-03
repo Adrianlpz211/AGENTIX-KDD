@@ -24,6 +24,7 @@
  *
  *   npm test                    todos
  *   npm test -- error-cure      solo los que contengan ese texto
+ *   npm test -- test/x.test.cjs ese archivo (así llama el TDD gate)
  */
 
 const fs = require('fs');
@@ -35,22 +36,95 @@ const DIR = path.join(RAIZ, 'test');
 
 const filtro = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 
-const archivos = fs.readdirSync(DIR)
-  .filter((f) => f.endsWith('.test.cjs'))
-  .filter((f) => !filtro.length || filtro.some((q) => f.includes(q)))
-  .sort()
+const suite = fs.readdirSync(DIR).filter((f) => f.endsWith('.test.cjs')).sort();
+
+/* Una ruta elige ese archivo exacto; un texto suelto, los que lo contengan.
+   Una ruta fuera de esta suite no la puede correr este runner: se dice, no se
+   da por pasada. */
+const elegidos = new Set();
+const fueraDeSuite = [];
+for (const q of filtro) {
+  if (/[\\/]/.test(q)) {
+    const rel = path.relative(RAIZ, path.resolve(RAIZ, q));
+    if (path.dirname(rel) === 'test' && suite.includes(path.basename(rel))) elegidos.add(path.basename(rel));
+    else fueraDeSuite.push(q);
+  } else {
+    for (const f of suite) if (f.includes(q)) elegidos.add(f);
+  }
+}
+
+const archivos = suite
+  .filter((f) => !filtro.length || elegidos.has(f))
   .map((f) => path.join('test', f));
+
+const avisarFuera = () => {
+  if (!fueraDeSuite.length) return;
+  console.log(`\n  No ejecutados (${fueraDeSuite.length}): no son de la suite test/*.test.cjs de este repo`);
+  for (const f of fueraDeSuite) console.log('   · ' + f);
+};
 
 if (!archivos.length) {
   console.error('  Sin tests que correr' + (filtro.length ? ` para: ${filtro.join(', ')}` : '') + '.');
+  avisarFuera();
   process.exit(1);
 }
 
 console.log(`  ${archivos.length} archivo(s) de test · Node ${process.version}\n`);
 
-const r = spawnSync(process.execPath, ['--test', ...archivos], {
+/* Un segundo reportero (junit) deja el resultado POR ARCHIVO: es la evidencia
+   de "verificado" que lee capabilities.cjs. La salida en pantalla no cambia. */
+const CACHE = path.join(RAIZ, '.agentic', '_cache');
+/* Fuera del repo: mientras corre la suite está abierto, y hay tests que
+   empaquetan el repo entero. */
+const JUNIT = path.join(require('os').tmpdir(), `akdd-test-run-${process.pid}.junit.xml`);
+const r = spawnSync(process.execPath, ['--test',
+  '--test-reporter=spec', '--test-reporter-destination=stdout',
+  '--test-reporter=junit', '--test-reporter-destination=' + JUNIT,
+  ...archivos], {
   cwd: RAIZ,
-  stdio: 'inherit',
+  stdio: ['inherit', 'pipe', 'pipe'],
+  encoding: 'utf8',
+  maxBuffer: 256 * 1024 * 1024,
 });
+process.stdout.write(r.stdout || '');
+process.stderr.write(r.stderr || '');
+registrarCorrida();
+
+function registrarCorrida() {
+  try {
+    const xml = fs.readFileSync(JUNIT, 'utf8');
+    const porArchivo = {};
+    for (const m of xml.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)) {
+      const f = (m[1].match(/\bfile="([^"]+)"/) || [])[1];
+      if (!f) continue;
+      const rel = path.relative(RAIZ, f).split(path.sep).join('/');
+      const e = porArchivo[rel] || (porArchivo[rel] = { pass: 0, fail: 0, skip: 0 });
+      const cuerpo = m[3] || '';
+      if (/<failure\b/.test(cuerpo)) e.fail++;
+      else if (/<skipped\b/.test(cuerpo)) e.skip++;
+      else e.pass++;
+    }
+    if (!fs.existsSync(CACHE)) fs.mkdirSync(CACHE);
+    fs.writeFileSync(path.join(CACHE, 'test-run.json'), JSON.stringify({
+      ts: new Date().toISOString(),
+      node: process.version,
+      status: r.status,
+      filtro,
+      archivos: porArchivo,
+    }, null, 2));
+  } catch { /* sin evidencia por archivo: capabilities lo mostrará como no verificado */ }
+  try { fs.rmSync(JUNIT, { force: true }); } catch { /* temporal */ }
+}
+
+/* Lo que se omitió, con su motivo, al final y a la vista: un skip silencioso
+   se lee como un verde. */
+const omitidos = [...new Set(String(r.stdout || '').split(/\r?\n/)
+  .map((l) => l.trim().match(/^#\s*SKIP\b.*$|^﹟?\s*\S*\s*.*\s#\s*SKIP\b.*$/))
+  .filter(Boolean).map((m) => m[0]))];
+if (omitidos.length) {
+  console.log(`\n  Omitidos (${omitidos.length}), con su motivo:`);
+  for (const o of omitidos) console.log('   · ' + o);
+}
+avisarFuera();
 
 process.exit(r.status === null ? 1 : r.status);

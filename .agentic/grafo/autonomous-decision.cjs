@@ -49,7 +49,7 @@ const DECISIONS = {
   DEFER:              'DEFER',
 };
 
-const BLAST_LEVELS = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+const BLAST_LEVELS = { LOW: 0, UNKNOWN: 1, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
 
 const DEFERRED_QUEUE_PATH = '.agentic/deferred_queue.json';
 
@@ -392,48 +392,24 @@ function crossModuleCheck(db, errorSignatures, currentFiles) {
 
 // ─── BLAST RADIUS CHECK ───────────────────────────────────────────────────────
 
-function getBlastLevel(db, targetFiles) {
-  if (!db) return { level: 'LOW', level_int: 0, contracts_at_risk: 0, protected: 0 };
-
-  let contractsAtRisk = 0;
-  let protectedAtRisk = 0;
-
+/* Mismo cierre transitivo que el Preservation Gate (blast-radius.cjs): ruta
+   exacta, no subcadena. Sin base o con índice parcial el nivel es UNKNOWN,
+   nunca LOW. */
+function getBlastLevel(db, targetFiles, projectRoot) {
+  const sinDato = (reason) => ({ level: 'UNKNOWN', level_int: BLAST_LEVELS.UNKNOWN, contracts_at_risk: 0, protected: 0, complete: false, reason });
+  if (!db) return sinDato('NO_DB');
+  let allContracts;
   try {
-    const allContracts = db.prepare(
-      "SELECT * FROM verified_contracts WHERE status IN ('protected','verified')"
-    ).all();
-
-    // Dedup por id de contrato: un mismo contrato no debe contarse varias veces
-    // aunque coincida con varios archivos del changeset (antes inflaba el blast).
-    const atRiskIds = new Set();
-    const protectedIds = new Set();
-    targetFiles.forEach(file => {
-      const basename = path.basename(file);
-      allContracts.forEach(c => {
-        const testFile = c.test_file || '';
-        const isAtRisk = testFile.includes(basename) ||
-          (c.module && file.toLowerCase().includes(c.module.toLowerCase()));
-        if (isAtRisk) {
-          atRiskIds.add(c.id);
-          if (c.status === 'protected') protectedIds.add(c.id);
-        }
-      });
-    });
-    contractsAtRisk = atRiskIds.size;
-    protectedAtRisk = protectedIds.size;
-  } catch {}
-
-  const level = contractsAtRisk === 0   ? 'LOW'
-    : contractsAtRisk <= 3              ? 'LOW'
-    : contractsAtRisk <= 10             ? 'MEDIUM'
-    : contractsAtRisk <= 20             ? 'HIGH'
-    : 'CRITICAL';
-
+    allContracts = db.prepare("SELECT * FROM verified_contracts WHERE status IN ('protected','verified')").all();
+  } catch { return sinDato('CONTRACTS_QUERY_FAILED'); }
+  const a = require('./blast-radius.cjs').analizar(db, projectRoot || process.cwd(), targetFiles, { contracts: allContracts });
   return {
-    level,
-    level_int: BLAST_LEVELS[level],
-    contracts_at_risk: contractsAtRisk,
-    protected: protectedAtRisk,
+    level: a.severity,
+    level_int: BLAST_LEVELS[a.severity],
+    contracts_at_risk: a.contracts.length,
+    protected: a.contracts.filter((c) => c.status === 'protected').length,
+    complete: a.complete,
+    coverage: a.coverage,
   };
 }
 
@@ -499,7 +475,7 @@ function analyze(params = {}) {
 
   // ── 1. BLAST RADIUS ────────────────────────────────────────────────────────
   if (files.length > 0) {
-    result.blast = getBlastLevel(db, files);
+    result.blast = getBlastLevel(db, files, projectRoot);
 
     if (result.blast.protected > 0) {
       // Hay contratos PROTECTED en riesgo → STOP
@@ -520,6 +496,9 @@ function analyze(params = {}) {
         `Blast radius HIGH: ${result.blast.contracts_at_risk} contracts at risk. ` +
         `Proceed with caution. Run akdd contracts gate after changes.`
       );
+    } else if (result.blast.level === 'UNKNOWN' && result.decision === DECISIONS.IMPLEMENT) {
+      result.decision = DECISIONS.WARN;
+      result.reasons.push('Blast radius UNKNOWN: AST index partial, stale or missing — low risk is not proven. Reindex (akdd ast) or run the full suite.');
     }
   }
 

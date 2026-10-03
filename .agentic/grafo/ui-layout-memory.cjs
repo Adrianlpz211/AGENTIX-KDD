@@ -79,16 +79,15 @@ const ES_TEST = /(^|[\/])(test|tests|spec|__tests__|e2e|__mocks__|fixtures?)[\/]
 function openDB(projectRoot, { write = false } = {}) {
   const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) return null;
-  try {
-    const BS3 = require('better-sqlite3');
-    return write ? new BS3(dbPath) : new BS3(dbPath, { readonly: true });
-  } catch {}
-  try {
-    const { DatabaseSync } = require('node:sqlite');
-    return new DatabaseSync(dbPath, write ? {} : { readOnly: true });
-  } catch {}
-  return null;
+  const adapter = require(path.join(__dirname, 'db-adapter.cjs'));
+  return safe(() => (write ? adapter.openWrite(dbPath) : adapter.openReadOnly(dbPath)), null);
 }
+
+/* Base confiable: lo que una persona decidió (`record`, o filas v1 sin origen)
+   o lo que se aprobó con evidencia. Lo capturado solo es candidato: nunca
+   reemplaza la base confiable. */
+const ORIGEN_CONFIABLE = ['manual', 'aprobado'];
+const esConfiable = (origen) => origen == null || ORIGEN_CONFIABLE.includes(origen);
 
 /**
  * Crea la tabla y añade las columnas nuevas si faltan.
@@ -111,7 +110,7 @@ function ensureSchema(db) {
   }, false);
   if (!ok) return false;
   /* Columnas añadidas en la v2. ALTER falla si ya existen: se ignora. */
-  for (const col of ['origen TEXT', 'archivo TEXT']) {
+  for (const col of ['origen TEXT', 'archivo TEXT', 'scope TEXT', 'route TEXT', 'viewport TEXT', 'theme TEXT', 'project_id TEXT']) {
     safe(() => db.exec(`ALTER TABLE ui_layout_decisions ADD COLUMN ${col}`));
   }
   return true;
@@ -372,12 +371,52 @@ function extraerTokensTailwind(contenido) {
 
 /* ── memoria ────────────────────────────────────────────────────────────────── */
 
-function currentDecision(db, elementId, property) {
-  return safe(() => db.prepare(
+function claveAmbito(ctx = {}) {
+  return {
+    route: ctx.route || ctx.ruta || null,
+    scope: ctx.scope || ctx.componente || null,
+    viewport: ctx.viewport || null,
+    theme: ctx.theme || ctx.tema || null,
+    project_id: ctx.project_id || null,
+  };
+}
+
+function filaDelAmbito(fila, ctx) {
+  const a = claveAmbito(ctx);
+  if (a.route && fila.route && fila.route !== a.route) return false;
+  if (a.scope && fila.scope && fila.scope !== a.scope) return false;
+  if (a.viewport && fila.viewport && fila.viewport !== a.viewport) return false;
+  if (a.theme && fila.theme && fila.theme !== a.theme) return false;
+  if (a.project_id && fila.project_id && fila.project_id !== a.project_id) return false;
+  return true;
+}
+
+function esLegacyAmbiguo(filas) {
+  const dim = (k) => new Set(filas.map((f) => f[k] || '').filter(Boolean));
+  return dim('route').size > 1 || dim('scope').size > 1 || dim('viewport').size > 1
+    || dim('theme').size > 1 || dim('project_id').size > 1;
+}
+
+function currentDecision(db, elementId, property, ctx = {}) {
+  const filas = safe(() => db.prepare(
+    `SELECT value, reason, decided_at, scope, route, viewport, theme, project_id FROM ui_layout_decisions
+     WHERE element_id = ? AND property = ? AND superseded = 0
+     ORDER BY id DESC`
+  ).all(normSel(elementId), property)) || safe(() => db.prepare(
     `SELECT value, reason, decided_at FROM ui_layout_decisions
      WHERE element_id = ? AND property = ? AND superseded = 0
-     ORDER BY id DESC LIMIT 1`
-  ).get(normSel(elementId), property));
+     ORDER BY id DESC`
+  ).all(normSel(elementId), property)) || [];
+  const delAmbito = filas.filter((f) => filaDelAmbito(f, ctx));
+  if (!delAmbito.length) return null;
+  const contextoIncompleto = !ctx.route && !ctx.scope && !ctx.viewport && !ctx.theme && !ctx.project_id;
+  if (contextoIncompleto && esLegacyAmbiguo(filas)) {
+    return { ambiguo: true, reason_code: 'LEGACY_AMBIGUO', candidatos: filas.length, status: 'UNVERIFIED' };
+  }
+  if (delAmbito.length > 1 && esLegacyAmbiguo(delAmbito) && !(ctx.viewport && ctx.theme && ctx.project_id && ctx.route)) {
+    return { ambiguo: true, reason_code: 'LEGACY_AMBIGUO', candidatos: delAmbito.length, status: 'UNVERIFIED' };
+  }
+  return delAmbito[0];
 }
 
 function history(db, elementId, property) {
@@ -388,18 +427,44 @@ function history(db, elementId, property) {
   ).all(normSel(elementId), property)) || [];
 }
 
-/** Registra una decisión; marca la anterior (mismo selector+prop) como superada. */
-function escribirDecision(db, { elementId, property, value, reason, origen, archivo }) {
+function baseConfiable(db, elementId, property, ctx = {}) {
+  const filas = safe(() => db.prepare(
+    `SELECT value, reason, origen, decided_at, scope, route, viewport, theme, project_id FROM ui_layout_decisions
+     WHERE element_id = ? AND property = ? AND superseded = 0
+     ORDER BY id DESC`
+  ).all(normSel(elementId), property)) || safe(() => db.prepare(
+    `SELECT value, reason, origen, decided_at FROM ui_layout_decisions
+     WHERE element_id = ? AND property = ? AND superseded = 0
+     ORDER BY id DESC`
+  ).all(normSel(elementId), property)) || [];
+  const delAmbito = filas.filter((f) => filaDelAmbito(f, ctx));
+  if (!ctx.route && !ctx.scope && esLegacyAmbiguo(filas)) return null;
+  return delAmbito.find((f) => esConfiable(f.origen)) || null;
+}
+
+/**
+ * Registra una decisión y marca la anterior (mismo selector+prop) como superada.
+ * Una captura automática solo supera candidatos; la base confiable queda intacta.
+ */
+function escribirDecision(db, { elementId, property, value, reason, origen, archivo, route, scope, viewport, theme, project_id }) {
   const sel = normSel(elementId);
-  safe(() => db.prepare(
-    `UPDATE ui_layout_decisions SET superseded = 1
+  const reemplazaConfiable = esConfiable(origen || 'manual');
+  const ctx = { route, scope, viewport, theme, project_id };
+  const vigentes = safe(() => db.prepare(
+    `SELECT id, route, scope, viewport, theme, project_id, origen FROM ui_layout_decisions
       WHERE element_id = ? AND property = ? AND superseded = 0`
-  ).run(sel, property));
+  ).all(sel, property), []) || [];
+  for (const f of vigentes) {
+    if (!filaDelAmbito(f, ctx)) continue;
+    if (!reemplazaConfiable && esConfiable(f.origen)) continue;
+    safe(() => db.prepare(`UPDATE ui_layout_decisions SET superseded = 1 WHERE id = ?`).run(f.id));
+  }
   return safe(() => {
     db.prepare(
-      `INSERT INTO ui_layout_decisions (element_id, property, value, reason, origen, archivo)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(sel, property, String(value), reason || null, origen || 'manual', archivo || null);
+      `INSERT INTO ui_layout_decisions (element_id, property, value, reason, origen, archivo, scope, route, viewport, theme, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(sel, property, String(value), reason || null, origen || 'manual', archivo || null,
+      scope || null, route || null, viewport || null, theme || null, project_id || null);
     return true;
   }, false);
 }
@@ -412,6 +477,40 @@ function recordDecision(projectRoot, { elementId, property, value, reason }) {
   try {
     const ok = escribirDecision(db, { elementId, property, value, reason, origen: 'manual' });
     return { ok, reason: ok ? null : 'no se pudo escribir' };
+  } finally { safe(() => db.close()); }
+}
+
+/**
+ * Candidato → base confiable. Exige evidencia PASS del sujeto (una corrida que
+ * verificó la vista) o una decisión con aprobador y motivo.
+ */
+function aprobarDecision(projectRoot, { elementId, property, evidencia = null, aprobador = '', motivo = '' }) {
+  const conEvidencia = !!(evidencia && evidencia.status === 'PASS' && evidencia.execution_id && evidencia.subject_hash);
+  const conDecision = !!(String(aprobador).trim() && String(motivo).trim());
+  if (!conEvidencia && !conDecision) return { ok: false, reason: 'SIN_EVIDENCIA_NI_DECISION' };
+  const db = openDB(projectRoot, { write: true });
+  if (!db) return { ok: false, reason: 'sin memoria.db' };
+  try {
+    if (!tablaExiste(db)) return { ok: false, reason: 'SIN_TABLA' };
+    const sel = normSel(elementId);
+    const cand = safe(() => db.prepare(
+      `SELECT id, value, reason, origen FROM ui_layout_decisions
+        WHERE element_id = ? AND property = ? AND superseded = 0 ORDER BY id DESC`
+    ).all(sel, property), []).find((f) => !esConfiable(f.origen));
+    if (!cand) return { ok: false, reason: 'NO_HAY_CANDIDATO' };
+    const nota = conEvidencia ? `aprobado por ejecución ${evidencia.execution_id}` : `aprobado por ${aprobador}: ${motivo}`;
+    safe(() => db.prepare(
+      `UPDATE ui_layout_decisions SET superseded = 1 WHERE element_id = ? AND property = ? AND superseded = 0 AND id <> ?`
+    ).run(sel, property, cand.id));
+    safe(() => db.prepare(`UPDATE ui_layout_decisions SET origen = 'aprobado', reason = ? WHERE id = ?`)
+      .run(`${cand.reason || ''} · ${nota}`.replace(/^ · /, ''), cand.id));
+    safe(() => require(path.join(__dirname, 'gate-telemetry.cjs')).recordGateEvent(db, {
+      gate: 'ui-layout', verdict: 'APROBADO', source: 'mechanical',
+      detalle: { elementId: sel, property, value: cand.value, origen_previo: cand.origen,
+        execution_id: conEvidencia ? evidencia.execution_id : null, subject_hash: conEvidencia ? evidencia.subject_hash : null,
+        aprobador: conDecision ? aprobador : null },
+    }));
+    return { ok: true, value: cand.value };
   } finally { safe(() => db.close()); }
 }
 
@@ -477,9 +576,13 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
     .filter((f) => ES_FRONT.test(f) && !ES_TEST.test(f));
   if (!lista.length) return { findings: [], capturados: 0, revisados: 0, scanned: false, reason: 'sin archivos de front' };
 
-  const db = openDB(projectRoot, { write: true });
+  const db = openDB(projectRoot, { write: capturar });
   if (!db) return { findings: [], capturados: 0, revisados: 0, scanned: false, reason: 'sin memoria.db' };
-  if (!ensureSchema(db)) { safe(() => db.close()); return { findings: [], capturados: 0, revisados: 0, scanned: false, reason: 'memoria.db de solo lectura' }; }
+  if (capturar && !ensureSchema(db)) { safe(() => db.close()); return { findings: [], capturados: 0, revisados: 0, scanned: false, reason: 'memoria.db de solo lectura' }; }
+  if (!capturar && !tablaExiste(db)) {
+    safe(() => db.close());
+    return { findings: [], capturados: 0, revisados: 0, scanned: false, status: 'UNVERIFIED', reason: 'sin memoria de diseño todavía: no verificado' };
+  }
 
   const razon = motivo || motivoDelCommit(projectRoot);
   const findings = [];
@@ -583,6 +686,16 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
     /* (b) Lo que cambió de valor. */
     for (const [, cur] of actuales) {
       const previa = currentDecision(db, cur.selector, cur.prop);
+      const base = baseConfiable(db, cur.selector, cur.prop);
+      // Un valor sin aprobar no reemplaza la base: se reporta hasta que alguien lo apruebe.
+      const difiere = base && normVal(base.value) !== normVal(cur.valor);
+      if (difiere) {
+        findings.push({
+          elementId: cur.selector, property: cur.prop, nuevoValor: cur.valor,
+          decidido: base.value, razon: base.reason, esReversion: false, ausente: false,
+          difiereDeBase: true, archivo: rel,
+        });
+      }
 
       if (!previa) { pendientes.push({ cur, rel }); continue; }
       if (normVal(previa.value) === normVal(cur.valor)) continue;
@@ -590,7 +703,7 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
       const pasados = history(db, cur.selector, cur.prop);
       const eraViejo = pasados.find((h) => normVal(h.value) === normVal(cur.valor));
 
-      if (eraViejo) {
+      if (eraViejo && !difiere) {
         /* La señal fuerte: vuelve a un valor que YA se había abandonado. */
         findings.push({
           elementId: cur.selector, property: cur.prop, nuevoValor: cur.valor,
@@ -619,7 +732,7 @@ function guard(projectRoot, { files = null, capturar = true, motivo = null } = {
       const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
       findings.forEach((f) => gt.recordGateEvent(db, {
         gate: 'ui-layout',
-        verdict: f.conflicto ? 'WARN_CONFLICTO' : f.esReversion ? 'WARN_REVERSION' : 'WARN',
+        verdict: f.conflicto ? 'WARN_CONFLICTO' : f.esReversion ? 'WARN_REVERSION' : f.difiereDeBase ? 'WARN_DIFIERE_BASE' : 'WARN',
         source: 'mechanical',
         file: f.archivo,
         detalle: { elementId: f.elementId, property: f.property, nuevo: f.nuevoValor, decidido: f.decidido },
@@ -670,6 +783,8 @@ function formatear(res) {
   for (const f of regresiones.slice(0, 20)) {
     if (f.esReversion) {
       L.push(`  🔴 ${f.elementId} ${f.property}: vuelve a "${f.nuevoValor}", un valor que YA se había abandonado (se decidió "${f.decidido}"). Casi siempre es sin querer.`);
+    } else if (f.difiereDeBase) {
+      L.push(`  🟡 ${f.elementId} ${f.property}: "${f.nuevoValor}" en ${f.archivo} no coincide con la base aprobada "${f.decidido}". Queda como candidato hasta que alguien lo apruebe (approve).`);
     } else {
       L.push(`  🟠 ${f.elementId}: la propiedad "${f.property}" desapareció (valor decidido: "${f.decidido}") en ${f.archivo}. ¿Se movió a otra clase o se perdió?`);
     }
@@ -714,7 +829,7 @@ if (require.main === module) {
         : safe(() => db.prepare('SELECT * FROM ui_layout_decisions WHERE superseded = 0 ORDER BY element_id, property LIMIT 500').all(), []);
       if (!rows.length) console.log('UI LAYOUT MEMORY — sin decisiones registradas todavía.');
       rows.forEach((r) => console.log(
-        `${r.element_id} ${r.property} = ${r.value}${r.superseded ? ' (superada)' : ''}` +
+        `${r.element_id} ${r.property} = ${r.value}${r.superseded ? ' (superada)' : esConfiable(r.origen) ? ' [base]' : ' [candidato]'}` +
         `${r.archivo ? '  · ' + r.archivo : ''}  — "${(r.reason || '').slice(0, 60)}"`));
       safe(() => db.close());
     } else {
@@ -723,12 +838,19 @@ if (require.main === module) {
     process.exit(0);
   }
 
-  console.log('Uso: node ui-layout-memory.cjs <guard|list|record> [--files=a,b]');
+  if (cmd === 'approve') {
+    const r = aprobarDecision(root, { elementId: opts.id, property: opts.prop, aprobador: opts.aprobador, motivo: opts.motivo });
+    console.log(r.ok ? `✅ Base aprobada: ${normSel(opts.id)} ${opts.prop} = ${r.value}` : `⚠️  ${r.reason}`);
+    process.exit(r.ok ? 0 : 1);
+  }
+
+  console.log('Uso: node ui-layout-memory.cjs <guard|check|list|record|approve --id= --prop= --aprobador= --motivo=> [--files=a,b]');
   process.exit(0);
 }
 
 module.exports = {
-  recordDecision, scanDiff, guard, formatear, currentDecision, history,
+  recordDecision, aprobarDecision, baseConfiable, scanDiff, guard, formatear, currentDecision, history,
+  escribirDecision, filaDelAmbito, claveAmbito,
   ensureSchema, extraerValores, extraerTokensTailwind, normSel, claveDe,
   frontRecientes, PROPS,
 };

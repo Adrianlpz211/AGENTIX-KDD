@@ -74,26 +74,7 @@ const safe = (fn, fallback = null) => { try { return fn(); } catch { return fall
  * Si los archivos cambian, el hash cambia → SOSPECHOSO.
  */
 function computeContextHash(archivosAplica, projectRoot) {
-  if (!archivosAplica || archivosAplica.length === 0) return null;
-
-  const hasher = crypto.createHash('sha256');
-  let anyFound = false;
-
-  archivosAplica.forEach(filePath => {
-    const fullPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(projectRoot, filePath);
-
-    if (fs.existsSync(fullPath)) {
-      try {
-        const stat = fs.statSync(fullPath);
-        hasher.update(`${filePath}:${stat.size}:${stat.mtimeMs}`);
-        anyFound = true;
-      } catch {}
-    }
-  });
-
-  return anyFound ? hasher.digest('hex').substring(0, 16) : null;
+  return require('./memory-hash.cjs').contextHash(archivosAplica, projectRoot || process.cwd()).hash;
 }
 
 // ─── TEMPORAL DECAY ──────────────────────────────────────────────────────────
@@ -201,8 +182,16 @@ function validateEntry(db, nodeId, projectRoot) {
   try { archivos = JSON.parse(node.archivos_aplica || '[]'); } catch {}
 
   if (archivos.length > 0) {
-    const currentHash = computeContextHash(archivos, projectRoot);
-    if (currentHash && node.hash_contexto && currentHash !== node.hash_contexto) {
+    const cmp = require('./memory-hash.cjs').compararContexto(node.hash_contexto, archivos, projectRoot);
+    const currentHash = cmp.actual.hash;
+    result.context_status = cmp.estado;
+    if (cmp.estado === 'DELETED') {
+      result.issues.push({
+        type: 'stale_context',
+        message: `Archivo(s) referenciados ya no existen: ${cmp.actual.faltantes.join(', ')}`,
+        files: cmp.actual.faltantes,
+      });
+    } else if (cmp.estado === 'CAMBIADO') {
       // PIEZA 1 (aditivo — change-classifier): computeContextHash usa size+mtime,
       // así que hasta re-guardar un archivo idéntico o cambiar un comentario dispara
       // esta alerta. Antes de marcar SOSPECHOSO, preguntar al clasificador si TODOS
@@ -226,7 +215,9 @@ function validateEntry(db, nodeId, projectRoot) {
   }
 
   // 3. Determinar estado
-  if (daysSinceValidation > OBSOLETE_DAYS && result.decay < OBSOLETE_DECAY) {
+  const protegido = require('./memoria-vigente.cjs').esProtegido(node);
+  if (protegido) result.protegido = true;
+  if (daysSinceValidation > OBSOLETE_DAYS && result.decay < OBSOLETE_DECAY && !protegido) {
     result.status = 'OBSOLETO';
     result.issues.push({ type: 'obsolete', message: `Not validated in ${Math.round(daysSinceValidation)} days and decay < 10%` });
   } else if (daysSinceValidation > SUSPECT_DAYS || result.issues.some(i => i.type === 'stale_context')) {

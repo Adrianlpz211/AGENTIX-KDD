@@ -105,7 +105,7 @@ function mensajeDelCambio(root, { staged }) {
 /**
  * @returns {veredicto:'PASS'|'WARN'|'STOP', esArreglo, produccion, tests, motivo}
  */
-function revisar(root, { staged = false, commit = false, files = null, tipo = null } = {}) {
+function revisar(root, { staged = false, commit = false, files = null, tipo = null, mensaje = null } = {}) {
   const lista = archivos(root, { staged, commit, files });
   const { tests, produccion } = clasificar(lista);
 
@@ -121,9 +121,11 @@ function revisar(root, { staged = false, commit = false, files = null, tipo = nu
      dos hacía que un repo cuyo commit anterior decía "fix" frenara TODA
      funcionalidad nueva. Un freno falso es lo que lleva a desactivar el
      control, y con él se pierde el freno que sí importa. */
+  /* `mensaje` lo pasa el hook commit-msg con el texto de ESTE commit; el
+     COMMIT_EDITMSG que queda en disco es el del commit anterior. */
   const esArreglo = tipo
     ? PISTAS_ARREGLO.test(String(tipo))
-    : PISTAS_ARREGLO.test(mensajeDelCambio(root, { staged }));
+    : PISTAS_ARREGLO.test(mensaje != null ? String(mensaje) : mensajeDelCambio(root, { staged }));
 
   return {
     veredicto: esArreglo ? 'STOP' : 'WARN',

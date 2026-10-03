@@ -25,6 +25,18 @@ vendor/
 *.ROTO*
 .agentic/_instance_id
 .agentic/_tarea_en_curso.json
+.agentic/_ciclo_actual.json
+.agentic/_tdd_ultimo.json
+.agentic/_tdd_state.json
+.agentic/_pipeline/
+.agentic/_cache/
+.agentic/_effort/
+.agentic/_context/
+.agentic/_teams/
+.agentic/_restore/
+.agentic/_whatsapp/
+.agentic/_hooks-host.json
+.agentic/checkpoint.md
 
 # ── Estado generado del propio repo ─────────────────────────────────────────
 # Lo escribe el motor en cada ciclo y se regenera solo: no es fuente, y
@@ -56,3 +68,35 @@ INFORME-*.md
 SESION-RESUMEN.md
 PLAN-7-PIEZAS.md
 PLAN-CLICKUP-BRIDGE.md
+
+# Bibliotecas de distribución del dashboard (no estado del proyecto)
+!.agentic/grafo/vendor/
+!.agentic/grafo/vendor/**
+.agentic/_executions/
+.agentic/_hooks-eventos.jsonl
+
+# ── 3.20: hooks de host instalados en ESTA máquina (ruta absoluta dentro) ──
+# host-guard los escribe con la ruta del checkout; son configuración local,
+# misma clase de fuga que launch.json. Se regeneran con akdd host-hooks install.
+.claude/settings.json
+.codex/
+
+# ── 3.20: trazas, salidas de la barrera de release y capturas del navegador ─
+# telemetria/ son trazas por ciclo de esta máquina. release-*/ trae el tarball
+# (1.5 MB) y un verification.json con rutas temporales locales; el workflow lo
+# sube como artifact, no viaja por Git. *-actual/ y *-baseline/ son PNG de
+# comparación; la referencia real vive en test/fixtures/dashboard-baseline/.
+.agentic/telemetria/
+_output/release-*/
+_output/*-actual/
+_output/*-baseline/
+
+# Bitácora de la sesión de actualización (rutas de escritorio dentro) — misma
+# regla que life-logbook-*.md: documento de sesión, no fuente.
+.agentic/actualizacion-agentix.md
+
+# Cola del post-commit (H21): SHAs pendientes y ACK por commit — estado de máquina
+.agentic/_hooks/
+
+# Mismo caso que en .npmignore: estado escrito en un .agentic anidado
+**/.agentic/_hooks-eventos.jsonl

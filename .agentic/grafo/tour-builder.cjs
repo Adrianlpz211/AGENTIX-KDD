@@ -42,8 +42,8 @@ function resolveDbPath(projectRoot) {
 function openDB(projectRoot) {
   const dbPath = resolveDbPath(projectRoot);
   if (!fs.existsSync(dbPath)) return null;
-  try { return new (require('better-sqlite3'))(dbPath, { readonly: true }); }
-  catch { try { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(dbPath); } catch { return null; } }
+  try { return require('./db-adapter.cjs').openReadOnly(dbPath); }
+  catch { return null; }
 }
 
 const safe = (fn, fallback = null) => { try { return fn(); } catch { return fallback; } };
@@ -168,7 +168,7 @@ function summarizeModule(files, codeSummaries, projectRoot) {
 
 // ─── BUILD ────────────────────────────────────────────────────────────────────
 
-function build(projectRoot, area = null, limit = 40) {
+function build(projectRoot, area = null, limit = 40, opts = {}) {
   projectRoot = projectRoot || process.cwd();
   const db = openDB(projectRoot);
   if (!db) return { error: 'DB unavailable' };
@@ -267,6 +267,7 @@ function build(projectRoot, area = null, limit = 40) {
     backTruncated: orderedBack.length > limit,
   };
 
+  if (opts.write === false) return { ok: true, tour, outPath: null };
   const outPath = path.join(projectRoot, '.agentic', 'tour.json');
   try { fs.writeFileSync(outPath, JSON.stringify(tour, null, 2), 'utf8'); }
   catch (e) { return { error: `no se pudo escribir ${outPath}: ${e.message}` }; }

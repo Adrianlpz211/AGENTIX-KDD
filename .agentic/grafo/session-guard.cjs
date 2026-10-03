@@ -159,7 +159,9 @@ function generateCheckpoint(projectRoot) {
   lines.push(`---`);
   lines.push(`*Generado automáticamente por Session Guard · ${dateStr} ${timeStr}*`);
 
-  const checkpointContent = lines.join('\n');
+  // El checkpoint se pega en chats nuevos: un secreto escrito en una tarea no viaja con él.
+  let checkpointContent = lines.join('\n');
+  try { checkpointContent = require('./telemetry.cjs').redactar(checkpointContent); } catch { /* sin redactor no hay checkpoint */ db.close(); return null; }
   const checkpointPath = path.join(projectRoot, CHECKPOINT_PATH);
 
   try {

@@ -39,27 +39,34 @@ function resolveDbPath(projectRoot) {
   return candidates[0];
 }
 
-function openDB(projectRoot) {
+/* Leer abre en solo lectura y nunca crea la tabla: solo `write` la prepara. */
+function openDB(projectRoot, { write = false } = {}) {
   const dbPath = resolveDbPath(projectRoot);
+  const adapter = require('./db-adapter.cjs');
   let db;
-  try { db = new (require('better-sqlite3'))(dbPath); }
-  catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); } catch { return null; } }
-  try {
-    db.exec(`CREATE TABLE IF NOT EXISTS code_summaries (
-      file           TEXT NOT NULL,
-      symbol         TEXT NOT NULL DEFAULT '',
-      summary        TEXT NOT NULL,
-      lang           TEXT DEFAULT 'es',
-      structural_sig TEXT,
-      content_hash   TEXT,
-      generated_at   TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (file, symbol)
-    )`);
-  } catch {}
+  try { db = write ? adapter.openWrite(dbPath) : adapter.openReadOnly(dbPath); }
+  catch { return null; }
+  if (write) {
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS code_summaries (
+        file           TEXT NOT NULL,
+        symbol         TEXT NOT NULL DEFAULT '',
+        summary        TEXT NOT NULL,
+        lang           TEXT DEFAULT 'es',
+        structural_sig TEXT,
+        content_hash   TEXT,
+        generated_at   TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (file, symbol)
+      )`);
+    } catch { safe(() => db.close()); return null; }
+  }
   return db;
 }
 
 const safe = (fn, fallback = null) => { try { return fn(); } catch { return fallback; } };
+
+const tieneTabla = (db, nombre) =>
+  !!safe(() => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(nombre));
 
 // Normaliza separadores: el índice AST guarda "src\ai\factory.ts" en Windows,
 // pero el agente puede escribir "src/ai/factory.ts" — misma clave siempre.
@@ -87,7 +94,7 @@ function writeSummary(fileAndSymbol, summary, projectRoot) {
   const fp = currentFingerprint(file, projectRoot);
   if (!fp) return { ok: false, reason: `archivo no encontrado: ${file}` };
 
-  const db = openDB(projectRoot);
+  const db = openDB(projectRoot, { write: true });
   if (!db) return { ok: false, reason: 'DB unavailable' };
 
   const ok = safe(() => {
@@ -115,11 +122,10 @@ function writeSummary(fileAndSymbol, summary, projectRoot) {
 function summaryState(row, projectRoot) {
   const fp = currentFingerprint(row.file, projectRoot);
   if (!fp) return 'stale';                          // archivo borrado/ilegible
-  if (row.structural_sig && fp.structuralSig) {
-    return row.structural_sig === fp.structuralSig ? 'fresh' : 'stale';
-  }
-  // Sin firma estructural (archivo sin extractor): validez por contenido exacto
-  return row.content_hash === fp.contentHash ? 'fresh' : 'stale';
+  // D20: misma firma estructural con cuerpo distinto deja el resumen viejo.
+  // Sin huella de cuerpo o de estructura no se declara vigente.
+  if (!row.structural_sig || !row.content_hash || !fp.structuralSig || !fp.contentHash) return 'stale';
+  return (row.structural_sig === fp.structuralSig && row.content_hash === fp.contentHash) ? 'fresh' : 'stale';
 }
 
 /** Devuelve el summary de archivo si sigue vigente; null si no hay o está viejo. */
@@ -127,12 +133,31 @@ function getFresh(file, projectRoot) {
   projectRoot = projectRoot || process.cwd();
   const db = openDB(projectRoot);
   if (!db) return null;
-  const row = safe(() => db.prepare(
-    `SELECT * FROM code_summaries WHERE file = ? AND symbol = ''`
-  ).get(normFile(file)));
-  safe(() => db.close());
+  let row;
+  try {
+    row = safe(() => db.prepare(
+      `SELECT * FROM code_summaries WHERE file = ? AND symbol = ''`
+    ).get(normFile(file)));
+  } finally { safe(() => db.close()); }
   if (!row) return null;
   return summaryState(row, projectRoot) === 'fresh' ? row.summary : null;
+}
+
+/**
+ * Lo mismo que getFresh, pero en sobre: dice por qué no hay resumen. Una base
+ * sin la tabla es una instalación anterior (EMPTY_LEGACY), no un proyecto sin
+ * resúmenes, y no se crea nada para averiguarlo.
+ */
+function leerResumen(file, projectRoot) {
+  projectRoot = projectRoot || process.cwd();
+  const datos = require('./dashboard-datos.cjs');
+  return datos.conLectura(resolveDbPath(projectRoot), (db) => {
+    if (!datos.tieneTabla(db, 'code_summaries')) return datos.sobre('UNAVAILABLE', null, 'EMPTY_LEGACY');
+    const row = db.get("SELECT * FROM code_summaries WHERE file = ? AND symbol = ''", normFile(file));
+    if (!row) return datos.sobre('EMPTY', null, 'SIN_RESUMEN');
+    const estado = summaryState(row, projectRoot);
+    return datos.sobre('OK', { summary: row.summary, estado }, estado === 'fresh' ? null : 'DESACTUALIZADO');
+  });
 }
 
 // ─── PENDING (qué describir) ──────────────────────────────────────────────────
@@ -142,21 +167,26 @@ function pending(projectRoot, area = null, limit = 20) {
   const db = openDB(projectRoot);
   if (!db) return { error: 'DB unavailable' };
 
-  let files = (safe(() => db.prepare(`SELECT DISTINCT file FROM ast_symbols ORDER BY file`).all()) || [])
-    .map(r => r.file);
-  if (area) files = files.filter(f => f.toLowerCase().includes(String(area).toLowerCase()));
-
-  const rows = safe(() => db.prepare(`SELECT * FROM code_summaries WHERE symbol = ''`).all()) || [];
-  const byFile = new Map(rows.map(r => [r.file, r]));
-
   const result = { missing: [], stale: [], fresh: 0 };
-  for (const f of files) {
-    const row = byFile.get(f);
-    if (!row) { result.missing.push(f); continue; }
-    if (summaryState(row, projectRoot) === 'fresh') result.fresh++;
-    else result.stale.push(f);
-  }
-  safe(() => db.close());
+  try {
+    /* Sin índice no hay lista de archivos: "0 pendientes" sería mentira. */
+    if (!tieneTabla(db, 'ast_symbols')) return { error: 'SIN_INDICE_AST: corre `akdd ast` antes de pedir pendientes' };
+    let files = (safe(() => db.prepare(`SELECT DISTINCT file FROM ast_symbols ORDER BY file`).all()) || [])
+      .map(r => r.file);
+    if (area) files = files.filter(f => f.toLowerCase().includes(String(area).toLowerCase()));
+
+    const rows = tieneTabla(db, 'code_summaries')
+      ? (safe(() => db.prepare(`SELECT * FROM code_summaries WHERE symbol = ''`).all()) || [])
+      : [];
+    const byFile = new Map(rows.map(r => [r.file, r]));
+
+    for (const f of files) {
+      const row = byFile.get(f);
+      if (!row) { result.missing.push(f); continue; }
+      if (summaryState(row, projectRoot) === 'fresh') result.fresh++;
+      else result.stale.push(f);
+    }
+  } finally { safe(() => db.close()); }
   result.toDescribe = [...result.missing, ...result.stale].slice(0, limit);
   return result;
 }
@@ -192,8 +222,10 @@ if (require.main === module) {
     }
     case 'get': {
       const db = openDB(projectRoot);
-      const rows = safe(() => db.prepare(`SELECT * FROM code_summaries WHERE file = ?`).all(normFile(args[0]))) || [];
-      safe(() => db.close());
+      if (!db) { console.log('❌ DB unavailable'); break; }
+      let rows = [];
+      try { rows = safe(() => db.prepare(`SELECT * FROM code_summaries WHERE file = ?`).all(normFile(args[0]))) || []; }
+      finally { safe(() => db.close()); }
       if (!rows.length) { console.log('(sin descripciones para ese archivo)'); break; }
       rows.forEach(r => {
         const state = summaryState(r, projectRoot);
@@ -205,10 +237,13 @@ if (require.main === module) {
     }
     case 'status': {
       const db = openDB(projectRoot);
-      const total = safe(() => db.prepare(`SELECT COUNT(*) n FROM code_summaries`).get().n, 0);
-      const files = safe(() => db.prepare(`SELECT COUNT(DISTINCT file) n FROM code_summaries`).get().n, 0);
-      safe(() => db.close());
-      console.log(`\n  code_summaries: ${total} descripciones sobre ${files} archivo(s)\n`);
+      if (!db) { console.log('❌ DB unavailable'); break; }
+      try {
+        if (!tieneTabla(db, 'code_summaries')) { console.log('\n  code_summaries: sin tabla todavía (nada escrito)\n'); break; }
+        const total = safe(() => db.prepare(`SELECT COUNT(*) n FROM code_summaries`).get().n, 0);
+        const files = safe(() => db.prepare(`SELECT COUNT(DISTINCT file) n FROM code_summaries`).get().n, 0);
+        console.log(`\n  code_summaries: ${total} descripciones sobre ${files} archivo(s)\n`);
+      } finally { safe(() => db.close()); }
       break;
     }
     default:
@@ -216,4 +251,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { writeSummary, getFresh, pending };
+module.exports = { writeSummary, getFresh, leerResumen, pending, summaryState };

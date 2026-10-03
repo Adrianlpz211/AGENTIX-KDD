@@ -78,9 +78,9 @@ html,body{height:100%;overflow:hidden;background:#07090d;color:#c8d0d8;font-fami
 <div class="hdr">
   <div class="logo">Agentix <span>/ Graph</span></div>
   <div class="tabs">
-    <div class="tab on"  onclick="showTab('kdd')">KDD Memory</div>
-    <div class="tab"     onclick="showTab('code')">Code Structure</div>
-    <div class="tab"     onclick="showTab('combined')">Combined</div>
+    <div class="tab on"  role="button" tabindex="0" onclick="showTab('kdd')">KDD Memory</div>
+    <div class="tab"     role="button" tabindex="0" onclick="showTab('code')">Code Structure</div>
+    <div class="tab"     role="button" tabindex="0" onclick="showTab('combined')">Combined</div>
   </div>
   <div class="hdr-right">
     <div class="badge" id="hdr-badge">cargando...</div>
@@ -113,7 +113,7 @@ html,body{height:100%;overflow:hidden;background:#07090d;color:#c8d0d8;font-fami
 
   <!-- ── TAB 2: Code Structure ───────────────────────────────────────────── -->
   <div class="panel" id="tab-code">
-    <iframe src="http://localhost:9749" title="Code Structure — codebase-memory-mcp"></iframe>
+    <iframe data-code-frame title="Code Structure — codebase-memory-mcp"></iframe>
   </div>
 
   <!-- ── TAB 3: Combined ─────────────────────────────────────────────────── -->
@@ -126,7 +126,7 @@ html,body{height:100%;overflow:hidden;background:#07090d;color:#c8d0d8;font-fami
       <div class="split-divider"></div>
       <div class="split-half">
         <div class="split-label">Code Structure</div>
-        <iframe src="http://localhost:9749"></iframe>
+        <iframe data-code-frame title="Code Structure — codebase-memory-mcp"></iframe>
       </div>
     </div>
   </div>
@@ -136,7 +136,7 @@ html,body{height:100%;overflow:hidden;background:#07090d;color:#c8d0d8;font-fami
 <div id="tip"><div id="tip-name"></div><div id="tip-meta"></div></div>
 
 <!-- force-graph CDN -->
-<script src="https://unpkg.com/force-graph@1.43.5/dist/force-graph.min.js"></script>
+<script src="/vendor/force-graph.min.js"></script>
 <script>
 // ── Node visual config ────────────────────────────────────────────────────────
 const CFG = {
@@ -150,6 +150,9 @@ const CFG = {
 };
 const DFLT = { color: '#445566', glow: 'rgba(60,80,100,0.25)', label: 'Otro' };
 function cfg(tipo) { return CFG[tipo] || DFLT; }
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' })[c]);
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let allData = { nodes: [], links: [] };
@@ -162,6 +165,8 @@ function nodeCanvasObj(node, ctx, scale) {
   const c  = cfg(node.tipo);
   const r  = Math.sqrt(node.val || 3) * 2.8;
   const x  = node.x, y = node.y;
+  // Antes del primer paso de la simulación un nodo aún no tiene posición.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
   // outer glow
   const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 2.5);
@@ -212,8 +217,8 @@ function buildGraph(mountId, data) {
         tip.style.display = 'block';
         document.getElementById('tip-name').textContent = node.label || node.id;
         document.getElementById('tip-meta').innerHTML =
-          `Tipo: <b>${node.tipo}</b> &nbsp;·&nbsp; Área: ${node.area||'—'}<br>` +
-          `Confianza: ${node.confianza||'—'} &nbsp;·&nbsp; Accesos: ${node.accesos||0}`;
+          `Tipo: <b>${esc(node.tipo)}</b> &nbsp;·&nbsp; Área: ${esc(node.area||'—')}<br>` +
+          `Confianza: ${esc(node.confianza||'—')} &nbsp;·&nbsp; Accesos: ${esc(node.accesos||0)}`;
       } else {
         tip.style.display = 'none';
       }
@@ -249,10 +254,33 @@ function renderLegend(data) {
   st.innerHTML = `
     <div class="stat"><span class="stat-k">Nodos</span><span class="stat-v">${data.nodes.length}</span></div>
     <div class="stat"><span class="stat-k">Relaciones</span><span class="stat-v">${data.links.length}</span></div>
-    ${Object.entries(counts).map(([t,n])=>`<div class="stat"><span class="stat-k">${CFG[t]?.label||t}</span><span class="stat-v">${n}</span></div>`).join('')}
+    ${Object.entries(counts).map(([t,n])=>`<div class="stat"><span class="stat-k">${esc(CFG[t]?.label||t)}</span><span class="stat-v">${n}</span></div>`).join('')}
   `;
 
-  document.getElementById('hdr-badge').textContent = `${data.nodes.length} nodos · ${data.links.length} edges`;
+  // Lo recortado se dice; lo que no se pudo leer queda como desconocido, no como cero.
+  const cov = data.coverage || {};
+  const recortes = Object.entries(cov).filter(([, c]) => c && c.truncated).map(([k, c]) => `${k} ${c.shown} de ${c.total}`);
+  const badge = document.getElementById('hdr-badge');
+  badge.textContent = `${data.nodes.length} nodos · ${data.links.length} edges` + (recortes.length ? ' · recortado' : '');
+  badge.title = [
+    ...Object.entries(cov).map(([k, c]) => `${k}: ${c.shown} de ${c.total}${c.limit ? ' (límite ' + c.limit + ')' : ''}${c.excluded && c.excluded.obsoletos ? ' · ' + c.excluded.obsoletos + ' obsoletos ocultos' : ''}`),
+    ...(data.errors || []).map(e => `${e.seccion}: sin dato (${e.reason_code})`),
+  ].join('\n');
+}
+
+// Code Structure: la URL sale de la instancia real que reporta el servidor.
+function conectarCodeStructure() {
+  const frames = document.querySelectorAll('iframe[data-code-frame]');
+  const sinConexion = (texto) => frames.forEach(f => {
+    f.srcdoc = '<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#07090d;color:#3a4a5a;font:13px system-ui,sans-serif;text-align:center;padding:0 24px">' + esc(texto) + '</body>';
+  });
+  fetch('/api/instance.json')
+    .then(r => r.json())
+    .then(i => {
+      if (i && i.code && i.code.url) frames.forEach(f => { f.src = i.code.url; });
+      else sinConexion('Code Structure sin conexión: codebase-memory-mcp no responde' + (i && i.code && i.code.intentada ? ' en ' + i.code.intentada : '') + '.');
+    })
+    .catch(() => sinConexion('Code Structure sin conexión: no se pudo consultar la instancia.'));
 }
 
 // ── Filter helpers ────────────────────────────────────────────────────────────
@@ -283,20 +311,27 @@ function applySearch(q) {
 // ── Node detail ───────────────────────────────────────────────────────────────
 function showDetail(node) {
   const c = cfg(node.tipo);
-  const chip = `<span class="detail-chip" style="background:${c.color}22;color:${c.color};border:1px solid ${c.color}44">${CFG[node.tipo]?.label||node.tipo}</span>`;
+  const chip = `<span class="detail-chip" style="background:${c.color}22;color:${c.color};border:1px solid ${c.color}44">${esc(CFG[node.tipo]?.label||node.tipo)}</span>`;
   document.getElementById('detail').innerHTML = `
-    <div class="detail-title">${node.label||node.id}</div>
+    <div class="detail-title">${esc(node.label||node.id)}</div>
     ${chip}
     <div style="height:10px"></div>
-    <div class="detail-row"><span class="detail-key">Área</span><span class="detail-val">${node.area||'—'}</span></div>
-    <div class="detail-row"><span class="detail-key">Confianza</span><span class="detail-val">${node.confianza||'—'}</span></div>
-    <div class="detail-row"><span class="detail-key">Estado</span><span class="detail-val">${node.estado||'—'}</span></div>
-    <div class="detail-row"><span class="detail-key">Aplicado</span><span class="detail-val">${node.aplicado||0}</span></div>
-    <div class="detail-row"><span class="detail-key">Accesos</span><span class="detail-val">${node.accesos||0}</span></div>
+    <div class="detail-row"><span class="detail-key">Área</span><span class="detail-val">${esc(node.area||'—')}</span></div>
+    <div class="detail-row"><span class="detail-key">Confianza</span><span class="detail-val">${esc(node.confianza||'—')}</span></div>
+    <div class="detail-row"><span class="detail-key">Estado</span><span class="detail-val">${esc(node.estado||'—')}</span></div>
+    <div class="detail-row"><span class="detail-key">Aplicado</span><span class="detail-val">${esc(node.aplicado||0)}</span></div>
+    <div class="detail-row"><span class="detail-key">Accesos</span><span class="detail-val">${esc(node.accesos||0)}</span></div>
   `;
 }
 
 // ── Tab switch ────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', ev => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains('tab')) return;
+  ev.preventDefault();
+  el.click();
+});
 function showTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => {
     t.classList.toggle('on', ['kdd','code','combined'][i] === name);
@@ -314,6 +349,7 @@ function showTab(name) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+conectarCodeStructure();
 fetch('/api/graph.json')
   .then(r => r.json())
   .then(data => {

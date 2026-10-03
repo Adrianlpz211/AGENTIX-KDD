@@ -10,162 +10,18 @@ const { inferirAreaDesdeTexto } = require('./area-detector.cjs');
 // Intenta better-sqlite3 (rápido, nativo). Si falla, usa sql.js (puro JS, sin compilar).
 // El usuario no hace nada — funciona en cualquier Windows/Mac/Linux automáticamente.
 
-let dbAdapter = null; // 'better-sqlite3' | 'sqljs'
+let dbAdapter = null; // 'better-sqlite3' | 'node-sqlite' | 'sqljs'
+const dbAccess = require('./db-adapter.cjs');
 
-function getDB(dbPath) {
-  // Intentar better-sqlite3 primero (nativo, rápido)
-  if (dbAdapter !== 'node-sqlite' && dbAdapter !== 'sqljs') {
-    try {
-      const BS3 = require('better-sqlite3');
-      const db = new BS3(dbPath);
-      db.pragma('journal_mode = DELETE');
-      db.pragma('synchronous = FULL');
-      dbAdapter = 'better-sqlite3';
-      return { db, type: 'better-sqlite3' };
-    } catch(e) {}
-  }
-
-  // Fallback 1: node:sqlite — integrado en Node.js 22+
-  if (dbAdapter !== 'sqljs') {
-    try {
-      const { DatabaseSync } = require('node:sqlite');
-      const db = new DatabaseSync(dbPath);
-      dbAdapter = 'node-sqlite';
-      return { db, type: 'node-sqlite' };
-    } catch(e) {}
-  }
-
-  // Fallback 2: sql.js — puro JS, cualquier Node version
-  const projectRoot = path.join(__dirname, '..', '..');
-  const searchPaths = [
-    path.join(projectRoot, 'node_modules', 'sql.js', 'dist', 'sql-wasm.js'),
-    path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.js'),
-  ];
-
-  for (const sqlPath of searchPaths) {
-    if (fs.existsSync(sqlPath)) {
-      try {
-        // sql.js sync workaround usando Worker
-        const SQL = require(sqlPath);
-        let DbClass = null;
-        if (SQL && SQL.Database) DbClass = SQL.Database;
-        else if (typeof SQL === 'function') {
-          // Intentar llamar sync
-          let resolved = null;
-          SQL({}).then(s => { resolved = s; }).catch(() => {});
-          // Esperar máximo 3 segundos
-          const start = Date.now();
-          while (!resolved && Date.now() - start < 3000) {
-            require('child_process').spawnSync('node', ['-e', ''], { timeout: 10 });
-          }
-          if (resolved && resolved.Database) DbClass = resolved.Database;
-        }
-        if (DbClass) {
-          let buffer = null;
-          if (fs.existsSync(dbPath)) buffer = fs.readFileSync(dbPath);
-          const db = buffer ? new DbClass(buffer) : new DbClass();
-          dbAdapter = 'sqljs';
-          return { db, type: 'sqljs', path: dbPath };
-        }
-      } catch(e) {}
-    }
-  }
-
-  throw new Error(
-    'No se pudo inicializar el grafo SQLite.\n' +
-    '  Tu versión de Node.js: ' + process.version + '\n' +
-    '  Opciones:\n' +
-    '  1. Usa Node.js 22+ (ya incluye SQLite integrado)\n' +
-    '  2. Corre: npm install sql.js\n' +
-    '  3. Instala Visual Studio Build Tools para better-sqlite3'
-  );
-}
-
-// Wrapper unificado que abstrae las diferencias entre better-sqlite3 y sql.js
-function createAdapter(dbPath) {
-  const { db, type, path: sqlPath } = getDB(dbPath);
-
-  if (type === 'better-sqlite3') {
-    return {
-      exec: (sql) => { try { db.exec(sql); } catch(e) {} },
-      all:  (sql, ...params) => { try { return db.prepare(sql).all(...params.flat()); } catch(e) { return []; } },
-      get:  (sql, ...params) => { try { return db.prepare(sql).get(...params.flat()); } catch(e) { return null; } },
-      run:  (sql, ...params) => { try { db.prepare(sql).run(...params.flat()); } catch(e) {} },
-      transaction: (fn) => db.transaction(fn),
-      pragma: (p) => { try { db.pragma(p); } catch(e) {} },
-      close: () => { try { db.close(); } catch(e) {} },
-      prepare: (sql) => db.prepare(sql),
-      type: 'better-sqlite3'
-    };
-  }
-
-  if (type === 'node-sqlite') {
-    // node:sqlite API — similar a better-sqlite3
-    return {
-      exec: (sql) => { try { db.exec(sql); } catch(e) {} },
-      all:  (sql, ...params) => { try { return db.prepare(sql).all(...params.flat()); } catch(e) { return []; } },
-      get:  (sql, ...params) => { try { return db.prepare(sql).get(...params.flat()); } catch(e) { return null; } },
-      run:  (sql, ...params) => { try { db.prepare(sql).run(...params.flat()); } catch(e) {} },
-      transaction: (fn) => (...args) => { try { fn(...args); } catch(e) {} },
-      pragma: () => {},
-      close: () => { try { db.close(); } catch(e) {} },
-      prepare: (sql) => db.prepare(sql),
-      type: 'node-sqlite'
-    };
-  }
-    // sql.js API — puro JS, necesita guardar el archivo manualmente
-    const saveDB = () => {
-      try {
-        const data = db.export();
-        fs.writeFileSync(sqlPath, Buffer.from(data));
-      } catch(e) {}
-    };
-
-    const runSQL = (sql, params) => {
-      try { db.run(sql, params || []); } catch(e) {}
-    };
-
-    const execSQL = (sql) => {
-      try { db.exec(sql); } catch(e) {}
-    };
-
-    const allSQL = (sql, ...params) => {
-      try {
-        const stmt = db.prepare(sql);
-        const rows = [];
-        const flatParams = params.flat();
-        if (flatParams.length) stmt.bind(flatParams);
-        while (stmt.step()) {
-          const row = stmt.getAsObject();
-          rows.push(row);
-        }
-        stmt.free();
-        return rows;
-      } catch(e) { return []; }
-    };
-
-    const getSQL = (sql, ...params) => {
-      const rows = allSQL(sql, ...params);
-      return rows[0] || null;
-    };
-
-    return {
-      exec: execSQL,
-      all: allSQL,
-      get: getSQL,
-      run: (sql, ...params) => { runSQL(sql, params.flat()); saveDB(); },
-      transaction: (fn) => (...args) => { fn(...args); saveDB(); },
-      pragma: () => {}, // no-op en sql.js
-      close: () => saveDB(),
-      // shim de statement para consumidores que usan db.prepare(sql).run/get/all
-      prepare: (sql) => ({
-        run: (...params) => { runSQL(sql, params.flat()); saveDB(); },
-        get: (...params) => getSQL(sql, ...params),
-        all: (...params) => allSQL(sql, ...params),
-      }),
-      type: 'sqljs',
-      save: saveDB
-    };
+function createAdapter(dbPath, options) {
+  const opts = options || {};
+  const adapter = dbAccess.open(dbPath, {
+    readOnly: !!opts.readOnly,
+    legacySwallow: opts.readOnly ? false : opts.legacySwallow !== false,
+    busyTimeout: opts.busyTimeout,
+  });
+  dbAdapter = adapter.type;
+  return adapter;
 }
 
 const ROOT        = path.join(__dirname, '..', '..');
@@ -291,6 +147,8 @@ function migrateDB(db) {
     "CREATE INDEX IF NOT EXISTS idx_prediction_fecha ON prediction_log(fecha)",
   ];
   indicesV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
+  try { migrateV3_1(db); } catch (e) {}
+  try { migrateV3_2(db); } catch (e) {}
 }
 
 // ─── SNAPSHOT ─────────────────────────────────────────────────────────────────
@@ -602,6 +460,7 @@ Razón: ${ep.razon_resultado || 'ver episodio original'}`;
   let realCount = null;
   try { realCount = (db.get('SELECT COUNT(*) n FROM nodos') || {}).n; } catch {}
   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch(e) {}
+  try { syncProjectSettings(db); } catch (e) {}
   db.close();
 
   if (total > 0 && realCount != null && realCount === 0) {
@@ -670,9 +529,12 @@ function stats() {
   try {
     const total = (db.get('SELECT COUNT(*) as n FROM ciclos') || {}).n || 0;
     if (total > 0) {
-      const comp  = (db.get("SELECT COUNT(*) as n FROM ciclos WHERE estado='COMPLETADO'") || {}).n || 0;
-      const stops = (db.get("SELECT COUNT(*) as n FROM ciclos WHERE estado='STOP'") || {}).n || 0;
-      cicloStats = { total, comp, stops, goal: Math.round(comp/total*100) };
+      const ec = require('./estado-ciclo.cjs');
+      const filas = db.all('SELECT ciclo_id, estado, stops_count FROM ciclos');
+      let eventos = [];
+      try { eventos = db.all("SELECT id, event_id, incident_id, cycle_id FROM gate_events WHERE verdict = 'STOP'"); } catch (e) {}
+      const cierre = ec.resumenCierre(filas);
+      cicloStats = { total, comp: cierre.cerrados, pendientes: cierre.por_clase.CON_PENDIENTES, stops: ec.incidentesStop(filas, eventos).total, goal: cierre.tasa_cierre };
     }
   } catch(e) {}
   db.close();
@@ -683,7 +545,7 @@ function stats() {
   if (porTipo.length)  { console.log('\n  Por tipo:');      porTipo.forEach(r => console.log(`    ${r.tipo}: ${r.n}`)); }
   if (porConf.length)  { console.log('\n  Por confianza:'); porConf.forEach(r => console.log(`    ${r.confianza}: ${r.n}`)); }
   if (altas.length)    { console.log('\n  Reglas ALTA (permanentes):'); altas.forEach(r => console.log(`    [${r.tipo}] ${r.titulo} (${r.area})`)); }
-  if (cicloStats)      { console.log(`\n  Ciclos: ${cicloStats.total} | Completados: ${cicloStats.comp} | STOPs: ${cicloStats.stops} | Goal Attainment: ${cicloStats.goal}%`); }
+  if (cicloStats)      { console.log(`\n  Ciclos: ${cicloStats.total} | Cerrados íntegros: ${cicloStats.comp} | Con pendientes: ${cicloStats.pendientes} | STOP únicos: ${cicloStats.stops} | Goal Attainment: ${cicloStats.goal}%`); }
   if (totalNodos === 0) console.log('\n  Sin datos — usa aa: para empezar.');
   console.log('');
 }
@@ -694,14 +556,21 @@ function metricas() {
     const db = initDB();
     const ciclos = db.all('SELECT * FROM ciclos ORDER BY fecha_inicio DESC');
     if (!ciclos.length) { db.close(); return { total: 0, mensaje: 'Sin ciclos aun' }; }
+    const ec = require('./estado-ciclo.cjs');
+    let eventosStop = [];
+    try { eventosStop = db.all("SELECT id, event_id, incident_id, cycle_id FROM gate_events WHERE verdict = 'STOP'"); } catch (e) {}
     const total       = ciclos.length;
-    const completados = ciclos.filter(c => c.estado==='COMPLETADO').length;
-    const stops       = ciclos.filter(c => c.estado==='STOP').length;
-    const goal        = Math.round(completados/total*100);
-    const autonomy    = Math.round((total-stops)/total*100);
+    const cierre      = ec.resumenCierre(ciclos);
+    const completados = cierre.cerrados;
+    const incidentes  = ec.incidentesStop(ciclos, eventosStop);
+    const stops       = incidentes.total;
+    const goal        = cierre.tasa_cierre;
+    const autonomia   = ec.autonomia(ciclos, eventosStop);
+    const autonomy    = autonomia.ratio;
+    const tests       = ec.tasaTests(ciclos);
     const totalFases  = ciclos.reduce((s,c)=>s+(c.fases_total||0),0);
     const fasesOK     = ciclos.reduce((s,c)=>s+(c.fases_completadas||0),0);
-    const handoff     = totalFases>0?Math.round(fasesOK/totalFases*100):0;
+    const handoff     = totalFases>0?Math.round(fasesOK/totalFases*100):null;
     const blockers    = ciclos.reduce((s,c)=>s+(c.review_blockers||0),0);
     const drift       = (blockers/total).toFixed(2);
     const guardrails  = ciclos.filter(c=>c.context_guard==='STOP').length;
@@ -710,15 +579,15 @@ function metricas() {
       try{pats+=JSON.parse(c.patrones_aplicados||'[]').length;}catch(e){}
       try{errs+=JSON.parse(c.errores_evitados||'[]').length;}catch(e){}
     });
-    const tGen = ciclos.reduce((s,c)=>s+(c.tests_generados||0),0);
-    const tOK  = ciclos.reduce((s,c)=>s+(c.tests_pasando||0),0);
+    const tGen = tests.ejecutadas;
+    const tOK  = tests.aprobadas;
     // Éxito por tipo de tarea
     const tipoMap = {};
     ciclos.forEach(c=>{
       const t = c.tipo_tarea||'feature';
       if(!tipoMap[t]) tipoMap[t]={total:0,ok:0};
       tipoMap[t].total++;
-      if(c.estado==='COMPLETADO') tipoMap[t].ok++;
+      if(ec.esCierreIntegro(c.estado)) tipoMap[t].ok++;
     });
     const exito_por_tipo = Object.entries(tipoMap).map(([tipo,v])=>({
       tipo, total:v.total, ok:v.ok, rate:Math.round(v.ok/v.total*100)
@@ -744,8 +613,9 @@ function metricas() {
       handoff_integrity: handoff, drift_index: drift,
       guardrail_violations: guardrails,
       patrones_aplicados: pats, errores_evitados: errs,
-      test_rate: tGen>0?Math.round(tOK/tGen*100):0,
+      test_rate: tests.tasa,
       tests_generados: tGen, tests_pasando: tOK,
+      cierre, incidentes, autonomia, tests,
       exito_por_tipo, evolucion_memoria: evolucion,
       ciclos_recientes: ciclos.slice(0,15),
       motor: dbAdapter
@@ -757,16 +627,25 @@ function metricas() {
 function registrarCiclo(datos) {
   try {
     const db = initDB();
-    const ciclo_id = crypto.randomUUID
+    const ciclo_id = datos.ciclo_id || (crypto.randomUUID
       ? crypto.randomUUID()
-      : Date.now().toString(36)+Math.random().toString(36).slice(2);
+      : Date.now().toString(36)+Math.random().toString(36).slice(2));
+    const enCurso = datos.estado === 'EN_CURSO';
+    if (datos.ciclo_id) {
+      const ya = db.get('SELECT estado FROM ciclos WHERE ciclo_id = ?', ciclo_id);
+      if (ya) {
+        db.close();
+        // Retomar un ciclo que quedó abierto; uno ya cerrado no se reabre.
+        return ya.estado === 'EN_CURSO' ? ciclo_id : null;
+      }
+    }
     const snap = snapshotMemoria(db);
     db.run(`INSERT INTO ciclos (ciclo_id,tarea,tipo_tarea,modulo,area,estado,context_guard,
       fases_total,fases_completadas,patrones_aplicados,errores_evitados,decisiones_usadas,
       memory_trace,tests_generados,tests_pasando,review_blockers,review_required,stops_count,
       sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,post_cycle_ran,fecha_inicio,fecha_fin)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-              COALESCE(?, datetime('now')), datetime('now'))`,
+              COALESCE(?, datetime('now')), ${enCurso ? 'NULL' : "datetime('now')"})`,
       ciclo_id,
       datos.tarea||'',
       datos.tipo_tarea||'feature',
@@ -784,7 +663,7 @@ function registrarCiclo(datos) {
       datos.tests_pasando||0,
       datos.review_blockers||0,
       datos.review_required||0,
-      datos.stops_count||0,
+      datos.stops_count === undefined ? 0 : datos.stops_count,
       datos.sync_grafo?1:0,
       datos.duracion_ms||0,
       snap?JSON.stringify(snap):null,
@@ -811,6 +690,39 @@ function registrarCiclo(datos) {
     db.close();
     return ciclo_id;
   } catch(e) { return null; }
+}
+
+const ESTADOS_CIERRE = ['COMPLETADO_VERIFICADO', 'COMPLETADO_CON_PENDIENTES', 'FALLIDO', 'BLOQUEADO'];
+
+/**
+ * Cierra un ciclo abierto con EN_CURSO, después de los gates. Un ciclo que
+ * quedó EN_CURSO porque el proceso murió a mitad sigue ahí para retomarlo.
+ */
+function cerrarCiclo(cicloId, datos) {
+  const d = datos || {};
+  if (!ESTADOS_CIERRE.includes(d.estado)) {
+    return { status: 'ERROR', reason_code: 'ESTADO_INVALIDO' };
+  }
+  try {
+    const db = initDB();
+    try {
+      const r = db.run(`UPDATE ciclos SET estado = ?, tests_pasando = COALESCE(?, tests_pasando),
+          tests_generados = COALESCE(?, tests_generados), stops_count = ?, fecha_fin = datetime('now')
+        WHERE ciclo_id = ? AND estado = 'EN_CURSO'`,
+        d.estado,
+        d.tests_pasando === undefined ? null : d.tests_pasando,
+        d.tests_generados === undefined ? null : d.tests_generados,
+        d.stops_count === undefined ? null : d.stops_count,
+        cicloId);
+      if (db.type==='sqljs' && db.save) db.save();
+      const cambios = r && typeof r.changes === 'number' ? r.changes : null;
+      return cambios === 0 ? { status: 'SKIP', reason_code: 'NO_ABIERTO' } : { status: 'PASS' };
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    return { status: 'ERROR', reason_code: 'DB', error: e.message };
+  }
 }
 
 // ─── EMBEDDINGS SEMÁNTICOS (opcional) ─────────────────────────────────────────
@@ -897,15 +809,8 @@ if (require.main === module) {
   const arg2 = process.argv[4];
 
   switch(cmd) {
-    case 'sync':     sincronizar(); _autoIndexEmbeddings();
-                     // sincronizar() es la referencia local sin envolver — los hooks de
-                     // abajo ("Hook into existing exports") solo parchan
-                     // module.exports.sincronizar, que este switch nunca llama. Sin esta
-                     // llamada directa, Creative Engine nunca corre en un sync real
-                     // (confirmado: la tabla creative_suggestions nunca se crea).
-                     try { _autoRunCreativeEngine(`sync-${Date.now()}`); } catch {}
-                     try { require('./install-hooks.cjs').installHooks({ quiet: true }); } catch {}
-                     break;
+    case 'migrate': console.log(JSON.stringify(migrarFramework())); break;
+    case 'sync':     syncCompleto({ via: 'cli' }); break;
     case 'sync-stats':
       sincronizar();
       stats();
@@ -1342,7 +1247,7 @@ Razón: Inferido del código — verificar con el equipo\n`;
   } catch(e) {}
 }
 
-module.exports = { sincronizar, consultar, stats, metricas, registrarCiclo, buscarSemantico, snapshotMemoria, analizarProyecto, promoverPatronesEstructurales };
+module.exports = { sincronizar, consultar, stats, metricas, registrarCiclo, cerrarCiclo, ESTADOS_CIERRE, buscarSemantico, snapshotMemoria, analizarProyecto, promoverPatronesEstructurales };
 
 // ─── CoALA v3: MEMORIA EPISÓDICA ──────────────────────────────────────────
 function registrarEpisodio(datos) {
@@ -1485,7 +1390,8 @@ function aplicarDecay() {
   try {
     const db = initDB();
     const ahora = Date.now();
-    const nodos = db.all("SELECT id, ultimo_acceso, aplicado, confianza FROM nodos WHERE estado='ACTIVO'");
+    const nodos = db.all("SELECT id, tipo, contenido, ultimo_acceso, fecha_creacion, aplicado, confianza FROM nodos WHERE estado='ACTIVO'");
+    const vig = require('./memoria-vigente.cjs');
     
     nodos.forEach(n => {
       const diasSinUso = (ahora - new Date(n.ultimo_acceso || n.fecha_creacion || ahora).getTime()) / (1000 * 60 * 60 * 24);
@@ -1494,7 +1400,7 @@ function aplicarDecay() {
       
       // Si decay < 0.3 y confianza BAJA → marcar como OBSOLETO
       let nuevoEstado = 'ACTIVO';
-      if (nuevoDecay < 0.3 && n.confianza === 'BAJA' && n.aplicado === 0) nuevoEstado = 'OBSOLETO';
+      if (nuevoDecay < 0.3 && n.confianza === 'BAJA' && n.aplicado === 0 && vig.edadPuedeDesactivar(n)) nuevoEstado = 'OBSOLETO';
       
       try {
         db.run('UPDATE nodos SET decay_score=?, estado=? WHERE id=?', nuevoDecay, nuevoEstado, n.id);
@@ -1971,19 +1877,7 @@ function migrateV3_1(db) {
   try { db.exec("ALTER TABLE ciclos ADD COLUMN knowledge_loaded INTEGER DEFAULT 0"); } catch(e) {}
 }
 
-// Auto-run migrateV3_1 when grafo.cjs is first loaded
-(function autoMigrateV3_1() {
-  try {
-    const _dbForMigration = initDB();
-    migrateV3_1(_dbForMigration);
-    if (_dbForMigration.save) _dbForMigration.save();
-    _dbForMigration.close();
-  } catch(e) {
-    // Silent — migration runs opportunistically
-  }
-})();
-
-// Export migrateV3_1
+// Export migrateV3_1. No corre al importar: solo initDB/migrate explícitos.
 const _exportsV31 = module.exports || {};
 module.exports = { ..._exportsV31, migrateV3_1 };
 
@@ -2001,16 +1895,6 @@ function migrateV3_2(db) {
     db.exec("UPDATE nodos SET vigencia_tipo='HISTORICO' WHERE estado='CONSOLIDADO' AND vigencia_tipo='VIGENTE'");
   } catch {}
 }
-
-// Auto-run
-(function autoMigrateV3_2() {
-  try {
-    const _db = initDB();
-    migrateV3_2(_db);
-    if (_db.save) _db.save();
-    _db.close();
-  } catch {}
-})();
 
 const _exportsV32 = module.exports || {};
 module.exports = { ..._exportsV32, migrateV3_2 };
@@ -2032,7 +1916,7 @@ function _autoRunCurator() {
     } catch {}
     const totalCycles = db.get("SELECT COUNT(*) as n FROM ciclos")?.n || 0;
     if (totalCycles - lastCuration >= 10) {
-      const { runCuration } = require(require('path').join(_grafoPath, 'mem-curator.cjs'));
+      const { runCuration } = require(require('path').join(__dirname, 'mem-curator.cjs'));
       runCuration(process.cwd());
       try {
         db.run("INSERT OR REPLACE INTO metadata (clave, valor) VALUES ('last_curator_cycle', ?)", String(totalCycles));
@@ -2047,7 +1931,7 @@ function _autoRunCurator() {
 
 function _autoGenerateLlms() {
   try {
-    const { generateAll } = require(require('path').join(_grafoPath, 'llms-generator.cjs'));
+    const { generateAll } = require(require('path').join(__dirname, 'llms-generator.cjs'));
     generateAll(process.cwd());
   } catch {}
 }
@@ -2213,10 +2097,8 @@ module.exports = { ..._kdmExports };
 // Guarda CONFIGURADO, nombre, stack y test command en memoria.db
 // Fuente de verdad secundaria cuando config.md falla o se pisa durante update
 
-(function migrateProjectSettings() {
+function syncProjectSettings(_db) {
   try {
-    const _db = initDB();
-
     // Crear tabla project_settings si no existe
     _db.exec(`
       CREATE TABLE IF NOT EXISTS project_settings (
@@ -2289,11 +2171,72 @@ module.exports = { ..._kdmExports };
     }
 
     if (_db.save) _db.save();
-    _db.close();
   } catch(e) {
     // Silent — best effort
   }
-})();
+}
 
 const _ps36Exports = module.exports || {};
 module.exports = { ..._ps36Exports };
+
+module.exports.openReadOnly = dbAccess.openReadOnly;
+module.exports.openWrite = dbAccess.openWrite;
+module.exports.initializeDatabase = dbAccess.initialize;
+module.exports.migrateDatabase = dbAccess.migrate;
+
+// ─── Contrato único de sync ──────────────────────────────────────────────────
+// CLI (`grafo.cjs sync`, post-cycle, akdd sync) y motor (MCP, require) corrían
+// conjuntos distintos: el CLI no curaba ni generaba llms; el motor no indexaba
+// embeddings. Ahora ambos llaman a syncCompleto(): mismos pasos, mismo orden,
+// informe por paso. Las envolturas de arriba quedan sustituidas por esta.
+// Función declarada (no const): el CLI de la línea ~795 corre antes de llegar aquí.
+function pasosSync() {
+  return ['grafo', 'fts', 'curator', 'llms', 'contratos', 'creative', 'checkpoint', 'diferidos', 'git-hooks', 'embeddings'];
+}
+
+function syncCompleto({ via = 'motor' } = {}) {
+  const pasos = [];
+  const correr = (paso, fn) => {
+    const t = Date.now();
+    try { const r = fn(); pasos.push({ paso, ok: true, ms: Date.now() - t }); return r; } catch (e) { pasos.push({ paso, ok: false, ms: Date.now() - t, error: String(e && e.message || e) }); return null; }
+  };
+  const result = correr('grafo', () => sincronizar());
+  const cicloId = `sync-${Date.now()}`;
+  correr('fts', _autoKDDMemorySync);
+  correr('curator', _autoRunCurator);
+  correr('llms', _autoGenerateLlms);
+  correr('contratos', () => _autoRunContractGuard(cicloId, null));
+  correr('creative', () => _autoRunCreativeEngine(cicloId));
+  correr('checkpoint', _autoSessionGuard);
+  correr('diferidos', _autoFlushDeferred);
+  correr('git-hooks', () => require('./install-hooks.cjs').installHooks({ quiet: true }));
+  const t = Date.now();
+  const embeddings = _autoIndexEmbeddings()
+    .then(() => { pasos.push({ paso: 'embeddings', ok: true, ms: Date.now() - t }); })
+    .catch((e) => { pasos.push({ paso: 'embeddings', ok: false, ms: Date.now() - t, error: String(e && e.message || e) }); });
+  const informe = embeddings.then(() => {
+    const rep = { via, ts: new Date().toISOString(), pasos };
+    if (process.env.AKDD_SYNC_REPORT) {
+      try { fs.mkdirSync(path.dirname(process.env.AKDD_SYNC_REPORT), { recursive: true }); fs.writeFileSync(process.env.AKDD_SYNC_REPORT, JSON.stringify(rep, null, 2)); } catch {}
+    }
+    return rep;
+  });
+  return { result, pasos, informe };
+}
+
+module.exports.sincronizar = function () { return syncCompleto({ via: 'motor' }).result; };
+module.exports.syncCompleto = syncCompleto;
+module.exports.pasosSync = pasosSync;
+
+/** Migración explícita con respaldo y transacción; nunca ejecutada al importar. */
+function migrarFramework() {
+  return dbAccess.migrate(DB_PATH, { run(db) {
+    db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+    migrateDB(db);
+    const columns = new Set(db.all('PRAGMA table_info(nodos)').map(c => c.name));
+    for (const c of ['vigencia_tipo', 'hash_contexto', 'archivos_aplica']) if (!columns.has(c)) throw Error('MIGRACION_INCOMPLETA: ' + c);
+    if (db.get('PRAGMA integrity_check').integrity_check !== 'ok') throw Error('DB_INTEGRITY_FAILED');
+    return { status: 'MIGRATED', memory_preserved: true };
+  } });
+}
+module.exports.migrarFramework = migrarFramework;

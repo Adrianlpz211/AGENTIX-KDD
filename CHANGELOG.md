@@ -1,5 +1,66 @@
 # Changelog — Agentic KDD
 
+## [3.20.0] — 2026-10-03
+
+**Versión del blindaje.** La pregunta detrás de cada cambio: *¿se puede
+falsificar un verde?* Donde sí, se cerró.
+
+### Cierre con evidencia
+Un gate ya no aprueba desde un booleano. PASS exige el artefacto de ejecución
+del sujeto exacto (`.agentic/_executions/`, `gate-result`). Un id inventado, un
+runner sin aserciones, un replay de la misma ejecución o código que cambió
+después de la corrida dan `UNVERIFIED`. TEAMS, TDD, preservación y navegador
+comparten esa puerta.
+
+### Actualizar sin perder nada
+`akdd update` toma el motor del paquete instalado (GitHub solo con `--ref`).
+Transacción con journal y respaldo por archivo, reversión si falla a mitad,
+`--rollback`. Memoria, config, conocimiento, PLAN y código quedan fuera; lo
+declarado en `.agentic/protected_files` también. El esquema de `memoria.db`
+nunca migra solo: `akdd update --migrate` con respaldo SQLite coherente (WAL
+incluido), transacción e integridad. Probado contra el `agentic-kdd@3.19.0`
+publicado: base intacta byte a byte durante el update, idempotente, rollback,
+migración sin perder filas, MCP por stdio.
+
+### Esfuerzo proporcional
+`effort-router`: LOW/MEDIUM/HIGH = máx(dificultad, riesgo). Mínimos (alcance,
+archivos protegidos, seguridad, leases) imposibles de quitar. Paquete de
+contexto por tarea. Benchmark proxy: LOW −90 % bytes y −54 % pasos.
+
+### Preservación más fina
+Contrato por test individual, escenarios de front, manifiesto de archivos
+protegidos, radio de impacto por aristas del AST (cobertura incompleta =
+`UNKNOWN`, nunca `LOW`).
+
+### Hooks de git sobre el índice
+El pre-commit lee lo staged. Bloquea secretos y quitar casos de un test
+protegido. Hook `commit-msg` nuevo para el canario. Post-commit encola por SHA.
+`install-hooks` respeta `core.hooksPath` y no pisa hooks ajenos.
+
+### TEAMS, restauración, WhatsApp
+Director (Claude Code) + constructor (Cursor) con planes, dependencias, leases,
+fencing y cola humana. Puntos de restauración en refs privadas de Git con vista
+previa y hash actual. Avisos por WhatsApp opt-in. Lógica verificada; host vivo
+pendiente.
+
+### MCP global que sí funciona
+`akdd mcp --global` escribía en `.../Cursor/User/globalStorage/mcp.json`, que
+Cursor no lee, y apuntaba al motor de un proyecto concreto. Ahora copia un
+lanzador a `~/.agentix/`, lo registra en `~/.cursor/mcp.json` (conservando los
+demás servidores) y en Claude Code con scope user. El lanzador arranca el
+servidor y la memoria del proyecto abierto. El servidor ya no responde a las
+notificaciones JSON-RPC y contesta `ping`.
+
+### Publicación
+Workflow manual con publicación de confianza de npm (OIDC) que publica el
+tarball cuyo SHA registró `npm run release:check`. Se retiró `publish.yml`
+(tag + `NPM_TOKEN` + job de un `packages/mcp` inexistente).
+
+### Correcciones de la verificación final
+GNU tar sale con 1 por "file changed as we read it" con el archivo completo: la
+barrera se ponía roja por eso. `createTarGz` lo tolera y los tests que empaquetan
+el repo excluyen el estado volátil.
+
 ## [3.19.0] — 2026-09-03
 
 **Versión de las promesas cumplidas.** Nada de lo que hay aquí es funcionalidad

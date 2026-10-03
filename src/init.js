@@ -1,85 +1,110 @@
 'use strict';
 const { mcpSetup } = require('./mcp-setup');
-const { extractTarGz } = require('./tar-extract');
+const { nodo, herramienta } = require('./run-safe');
+const txm = require('./update-tx');
+const manifest = require('./managed-manifest');
 
 const fs = require('fs-extra');
+const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
 const chalk = require('chalk');
 const ora = require('ora');
 const inquirer = require('inquirer');
 
 const GITHUB_REPO = 'Adrianlpz211/AGENTIX-KDD';
-const TEMP_DIR = path.join(require('os').tmpdir(), 'agentic-kdd-download');
+const REPO_URL = `https://github.com/${GITHUB_REPO}`;
 
-// ── Descargar desde GitHub ──────────────────────────────────────
-async function downloadFromGitHub(spinner) {
-  const tmpFile = path.join(require('os').tmpdir(), 'agentic-kdd.tar.gz');
+// ── Descargar: la misma ruta fijada y validada que update ───────
+function descargarFramework({ ref, archivo } = {}) {
+  if (!ref && !archivo) return { ...txm.prepararBundle(path.join(__dirname, '..')), commit: null };
+  ref = ref || 'main';
+  let descarga = null;
+  let commit = null;
   try {
-    execSync(`curl -sL "https://github.com/${GITHUB_REPO}/archive/refs/heads/main.tar.gz" -o "${tmpFile}"`, { stdio: 'pipe' });
-    fs.ensureDirSync(TEMP_DIR);
-    extractTarGz(tmpFile, TEMP_DIR);
-    fs.removeSync(tmpFile);
-    return TEMP_DIR;
+    if (!archivo) {
+      commit = txm.resolverRef(REPO_URL, ref);
+      descarga = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-download-'));
+      archivo = path.join(descarga, `${commit}.tar.gz`);
+      herramienta('curl', ['-sfL', `${REPO_URL}/archive/${commit}.tar.gz`, '-o', archivo]);
+    }
+    const sha256 = txm.hashArchivo(archivo);
+    const staging = txm.prepararStaging(archivo);
+    const valido = txm.validarStaging(staging);
+    if (!valido.ok) {
+      fs.removeSync(staging);
+      throw new Error('La versión descargada no es válida:\n    ' + valido.problemas.slice(0, 10).join('\n    '));
+    }
+    return { staging, commit, sha256, version: valido.version };
   } catch (err) {
-    throw new Error('No se pudo descargar desde GitHub. Verifica tu conexión.');
+    if (err.code === 'ARCHIVO_HOSTIL' || /no es válida/.test(err.message)) throw err;
+    throw new Error('No se pudo descargar desde GitHub (' + err.message + '). Verifica tu conexión.');
+  } finally {
+    if (descarga) fs.removeSync(descarga);
   }
 }
 
 // ── Copiar archivos al proyecto ─────────────────────────────────
-// Carpetas/archivos de docs/ que son evidencia interna del arena de benchmark
-// (seeds completos con node_modules, resultados de rondas, DBs de prueba) —
-// NUNCA deben terminar en el proyecto de un cliente. Bug real encontrado el
-// 18/07/2026: `docs` se copiaba completo (44MB, incluía los 4 seeds del arena)
-// a CADA instalación nueva vía `akdd init`. `akdd update` no tenía este bug
-// (no copia `docs` en absoluto) — solo afectaba la instalación inicial.
-const DOCS_EXCLUDE = new Set(['benchmarks', 'benchmarks$dest', 'superpowers']);
-
-function copyDocsFiltered(sourcePath, projectPath) {
-  const src = path.join(sourcePath, 'docs');
-  const dest = path.join(projectPath, 'docs');
-  if (!fs.existsSync(src)) return;
-  fs.ensureDirSync(dest);
-  for (const entry of fs.readdirSync(src)) {
-    if (DOCS_EXCLUDE.has(entry)) continue;
-    fs.copySync(path.join(src, entry), path.join(dest, entry), { overwrite: true });
-  }
-}
-
+// Solo lo que está en src/managed-manifest.js — la misma lista que mantiene
+// update. La memoria, specs, conocimiento, PLAN.md y docs/ del repo de Agentix
+// NO viajan: son del repo de Agentix. El proyecto recibe semillas genéricas
+// (templates/seed) y solo si no tiene ya las suyas.
+//
+// Si el proyecto ya tenía un archivo con el mismo nombre (su propio CLAUDE.md,
+// sus .cursorrules) se respalda como <archivo>.agentix-backup antes de
+// escribir, y el texto de su CLAUDE.md pasa a .agentic/INSTRUCCIONES-PROYECTO.md
+// para que se vuelva a pegar debajo del marcador.
 function copyAgenticFiles(sourcePath, projectPath) {
-  const rootFiles = ['CLAUDE.md', '_LOCKS.md', '.cursorrules', 'dashboard.cjs', '.cursor', '.audit'];
-  for (const file of rootFiles) {
-    const src  = path.join(sourcePath, file);
-    const dest = path.join(projectPath, file);
-    if (fs.existsSync(src)) fs.copySync(src, dest, { overwrite: true });
-  }
-  copyDocsFiltered(sourcePath, projectPath);
-
-  const agSrc  = path.join(sourcePath, '.agentic');
-  const agDest = path.join(projectPath, '.agentic');
-
-  if (fs.existsSync(agSrc)) {
-    fs.copySync(path.join(agSrc, 'agentes'), path.join(agDest, 'agentes'), { overwrite: true });
-    fs.copySync(path.join(agSrc, 'grafo'),   path.join(agDest, 'grafo'),   { overwrite: true });
-
-    const onlyCreate = ['memoria', 'specs', 'conocimiento'];
-    for (const dir of onlyCreate) {
-      const dest = path.join(agDest, dir);
-      if (!fs.existsSync(dest)) {
-        const src = path.join(agSrc, dir);
-        if (fs.existsSync(src)) fs.copySync(src, dest);
-        else fs.ensureDirSync(dest);
+  const respaldados = [];
+  const hashes = {};
+  const instrucciones = path.join(projectPath, '.agentic', 'INSTRUCCIONES-PROYECTO.md');
+  for (const rel of manifest.archivos(sourcePath)) {
+    const src = path.join(sourcePath, rel);
+    const dest = path.join(projectPath, rel);
+    if (fs.existsSync(dest)) {
+      if (txm.hashArchivo(dest) === txm.hashArchivo(src)) { hashes[rel] = txm.hashArchivo(dest); continue; }
+      fs.copySync(dest, dest + '.agentix-backup', { overwrite: false, errorOnExist: false });
+      respaldados.push(rel);
+      if (rel === 'CLAUDE.md' && !fs.existsSync(instrucciones)) {
+        const propio = fs.readFileSync(dest, 'utf8').trim();
+        if (propio) {
+          fs.ensureDirSync(path.dirname(instrucciones));
+          fs.writeFileSync(instrucciones, '# Instrucciones del proyecto\n#\n# Este archivo es tuyo. Agentix NO lo escribe nunca.\n'
+            + '# `akdd update` lo lee y lo pega al final de CLAUDE.md en cada actualización.\n\n' + propio + '\n');
+        }
       }
     }
-
-    const planDest = path.join(agDest, 'PLAN.md');
-    if (!fs.existsSync(planDest)) {
-      const planSrc = path.join(agSrc, 'PLAN.md');
-      if (fs.existsSync(planSrc)) fs.copySync(planSrc, planDest);
-    }
+    fs.ensureDirSync(path.dirname(dest));
+    fs.copyFileSync(src, dest);
+    hashes[rel] = txm.hashArchivo(dest);
   }
 
+  if (fs.existsSync(instrucciones) && hashes['CLAUDE.md']) {
+    const propio = fs.readFileSync(instrucciones, 'utf8').trim();
+    if (propio) fs.appendFileSync(path.join(projectPath, 'CLAUDE.md'), '\n' + propio + '\n');
+  }
+
+  sembrar(sourcePath, projectPath);
   fs.ensureDirSync(path.join(projectPath, '_output'));
+  return { hashes, respaldados };
+}
+
+/** Semillas genéricas: solo se crean, nunca sustituyen lo que el proyecto ya tiene. */
+function sembrar(sourcePath, projectPath) {
+  const seed = [path.join(sourcePath, 'templates', 'seed'), path.join(__dirname, '..', 'templates', 'seed')]
+    .find((p) => fs.existsSync(p));
+  const agDest = path.join(projectPath, '.agentic');
+  for (const dir of ['memoria', 'specs', 'conocimiento']) fs.ensureDirSync(path.join(agDest, dir));
+  if (!seed) return;
+  const pila = [seed];
+  while (pila.length) {
+    const d = pila.pop();
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { pila.push(p); continue; }
+      const dest = path.join(projectPath, path.relative(seed, p));
+      if (!fs.existsSync(dest)) { fs.ensureDirSync(path.dirname(dest)); fs.copyFileSync(p, dest); }
+    }
+  }
 }
 
 // ── Detectar stack ──────────────────────────────────────────────
@@ -187,9 +212,13 @@ function consolidarDocs(projectPath) {
  *   akdd init --yes --con-docs           ademas consolida la documentacion
  */
 function leerBanderas(argv) {
-  const f = { desatendido: false, nombre: null, nuevo: null, docs: null };
+  const f = { desatendido: false, nombre: null, nuevo: null, docs: null, ref: undefined, archivo: undefined, deps: false, browser: false };
   for (const a of argv) {
     if (a === '--yes' || a === '-y' || a === '--si') f.desatendido = true;
+    else if (a.startsWith('--ref=')) f.ref = a.slice(6);
+    else if (a.startsWith('--from=')) f.archivo = path.resolve(a.slice(7));
+    else if (a === '--deps') f.deps = true;
+    else if (a === '--browser') f.browser = true;
     else if (a.startsWith('--name=') || a.startsWith('--nombre=')) f.nombre = a.split('=').slice(1).join('=');
     else if (a === '--nuevo' || a === '--new') { f.nuevo = true; f.desatendido = true; }
     else if (a === '--existente' || a === '--existing') { f.nuevo = false; f.desatendido = true; }
@@ -253,52 +282,41 @@ async function init() {
 
   // ── INSTALAR — crear carpetas PRIMERO antes de preguntar docs ──
   const spinner = ora({ text: 'Descargando Agentic KDD...', color: 'magenta' }).start();
-  let sourcePath;
+  let fuente = null;
   try {
-    sourcePath = await downloadFromGitHub(spinner);
+    fuente = descargarFramework({ ref: banderas.ref, archivo: banderas.archivo });
     spinner.text = 'Instalando archivos...';
-    copyAgenticFiles(sourcePath, projectPath);
-    fs.removeSync(TEMP_DIR);
-
-    // Instalar git hooks (registro automático de contratos) — best-effort, no aborta init
-    try {
-      require('child_process').execSync(
-        `node "${path.join(projectPath, '.agentic', 'grafo', 'install-hooks.cjs')}" --quiet`,
-        { stdio: 'pipe', cwd: projectPath }
-      );
-    } catch (e) { /* hook best-effort */ }
-
-    // Instalar better-sqlite3 para el grafo SQLite
-    spinner.text = 'Instalando dependencias del grafo...';
-    try {
-      require('child_process').execSync('npm install better-sqlite3 --save', {
-        stdio: 'pipe', cwd: projectPath
-      });
-      spinner.succeed(chalk.green('Archivos instalados + better-sqlite3'));
-    } catch(e) {
-      spinner.warn(chalk.yellow('Archivos instalados (sin better-sqlite3)'));
-      console.log(chalk.gray('\n  El grafo usará node:sqlite integrado en Node.js 22+'));
-      console.log(chalk.gray('  Para máximo rendimiento instala las build tools:'));
-      console.log(chalk.gray('  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n'));
+    const copia = copyAgenticFiles(fuente.staging, projectPath);
+    txm.registrarOwned(projectPath, copia.hashes, { version: fuente.version, commit: fuente.commit, sha256: fuente.sha256 });
+    spinner.succeed(chalk.green(`Archivos instalados — ${fuente.version || 'unknown'}${fuente.commit ? ' @ ' + fuente.commit.slice(0, 12) : ''}`));
+    if (copia.respaldados.length) {
+      console.log(chalk.yellow(`  ✋ Ya existían y se respaldaron como <archivo>.agentix-backup: ${copia.respaldados.join(', ')}`));
     }
 
-    // Instalar playwright-core para el Browser Gate (usa Chrome/Edge ya
-    // instalados vía channel — no descarga ningún navegador propio)
-    spinner.text = 'Instalando Browser Gate...';
+    // Hooks: no pisa hooks ajenos (los reporta como conflicto)
     try {
-      require('child_process').execSync('npm install playwright-core --save-dev', {
-        stdio: 'pipe', cwd: projectPath
-      });
-      spinner.succeed(chalk.green('Browser Gate instalado (usa tu Chrome/Edge)'));
-    } catch (e) {
-      spinner.warn(chalk.yellow('Browser Gate no disponible (sin playwright-core)'));
-      console.log(chalk.gray('  Instálalo manualmente: npm install playwright-core --save-dev\n'));
+      nodo(path.join(projectPath, '.agentic', 'grafo', 'install-hooks.cjs'), ['--quiet'], { cwd: projectPath });
+    } catch (e) { /* el estado de los hooks se ve con akdd health */ }
+
+    // Dependencias: nunca sin pedirlas. Sin better-sqlite3 el motor usa node:sqlite.
+    if (banderas.deps) {
+      try { herramienta('npm', ['install', 'better-sqlite3', '--save'], { cwd: projectPath }); console.log(chalk.green('  ✓ better-sqlite3')); }
+      catch (e) { console.log(chalk.yellow('  ⚠ better-sqlite3 no se pudo instalar — se usa node:sqlite')); }
+    }
+    if (banderas.browser) {
+      try { herramienta('npm', ['install', 'playwright-core', '--save-dev'], { cwd: projectPath }); console.log(chalk.green('  ✓ playwright-core (Browser Gate con tu Chrome/Edge)')); }
+      catch (e) { console.log(chalk.yellow('  ⚠ playwright-core no se pudo instalar')); }
+    }
+    if (!banderas.deps || !banderas.browser) {
+      console.log(chalk.gray('  · Opcionales sin instalar: ' + [!banderas.deps && 'better-sqlite3 (--deps)', !banderas.browser && 'playwright-core (--browser)'].filter(Boolean).join(', ')));
     }
   } catch (err) {
     spinner.fail(chalk.red('Error en la instalación'));
     console.error(chalk.red('\n  ' + err.message + '\n'));
+    if (fuente) fs.removeSync(fuente.staging);
     process.exit(1);
   }
+  fs.removeSync(fuente.staging);
 
   // ── Agregar dev:kdd al package.json si es proyecto Node ────
   const pkgPath = path.join(projectPath, 'package.json');
@@ -378,13 +396,13 @@ Estado: Pendiente aa: configurar
       console.log(chalk.gray('  (puedes correrlo luego con: akdd onboard)'));
     }
     try {
-      execSync(`node "${path.join(grafoDir, 'ast-indexer.cjs')}" index`, { stdio: 'pipe', cwd: projectPath, timeout: 120000 });
+      nodo(path.join(grafoDir, 'ast-indexer.cjs'), ['index'], { cwd: projectPath, timeout: 120000 });
       console.log(chalk.green('  ✓ Mapa de código indexado (akdd ast)'));
     } catch (e) {
       console.log(chalk.gray('  (puedes generar el mapa de código luego con: akdd ast)'));
     }
     try {
-      execSync(`node "${path.join(grafoDir, 'grafo.cjs')}" sync`, { stdio: 'pipe', cwd: projectPath, timeout: 30000 });
+      nodo(path.join(grafoDir, 'grafo.cjs'), ['sync'], { cwd: projectPath, timeout: 30000 });
       console.log(chalk.green('  ✓ Grafo de conocimiento sincronizado (akdd sync)'));
     } catch (e) {
       console.log(chalk.gray('  (puedes sincronizar el grafo luego con: akdd sync)'));
@@ -423,4 +441,4 @@ Estado: Pendiente aa: configurar
   console.log(chalk.dim('  ─────────────────────────────────────────────\n'));
 }
 
-module.exports = { init, leerBanderas };
+module.exports = { init, leerBanderas, copyAgenticFiles, sembrar, descargarFramework };

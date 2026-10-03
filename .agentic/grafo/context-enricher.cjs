@@ -54,10 +54,14 @@ async function enrich(task) {
   //    no reinventa búsqueda.
   try {
     const kddMemory = require(path.join(__dirname, 'kdd-memory.cjs'));
-    const recallResult = await kddMemory.recall(task, { topK: 6 }, ROOT);
+    const recallResult = await kddMemory.recall(task, { topK: 6, presupuestoTokens: 900, via: 'enricher' }, ROOT);
     brief.contexto = (recallResult.results || []).map(r => ({
-      tipo: r.tipo, titulo: r.titulo, area: r.area, confianza: r.confianza,
+      id: r.id, tipo: r.tipo, titulo: r.titulo, area: r.area, confianza: r.confianza,
+      ...(r.verificar ? { verificar: true } : {}),
     }));
+    if (recallResult.presupuesto && recallResult.presupuesto.truncado) {
+      brief.avisos.push(`📦 Memoria recortada al presupuesto (${recallResult.presupuesto.omitidos} entradas más; pedir con recall id o más presupuesto).`);
+    }
   } catch { /* recall es un plus, no un requisito */ }
 
   const db = openDB();
@@ -273,13 +277,19 @@ async function enrich(task) {
  * medicion no puede costar el trabajo.
  */
 function marcarArranque(task) {
+  let ciclo = null;
   try {
+    ciclo = require(path.join(__dirname, 'ciclo-actual.cjs')).iniciar(process.cwd(), { tarea: task });
+  } catch { /* sin id de ciclo los eventos quedan sin atribuir, no se inventa */ }
+  try {
+    if (!fs.existsSync(DB_PATH)) return;
     const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
     let db = null;
     try { db = new (require('better-sqlite3'))(DB_PATH); }
     catch { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(DB_PATH); }
     gt.recordGateEvent(db, {
       gate: 'reloj', verdict: 'CICLO_INICIO', source: 'mechanical',
+      cycle_id: ciclo && ciclo.cycle_id,
       detalle: { tarea: String(task || '').slice(0, 160) },
     });
     try { db.close(); } catch {}
@@ -308,7 +318,7 @@ function printBrief(brief) {
   }
   if (brief.contexto.length) {
     lines.push('**Contexto relevante encontrado en memoria:**');
-    brief.contexto.forEach(c => lines.push(`- [${c.tipo}/${c.confianza}] ${c.titulo} (${c.area})`));
+    brief.contexto.forEach(c => lines.push(`- [${c.tipo}/${c.confianza}] ${c.id !== undefined ? '#' + c.id + ' ' : ''}${c.titulo} (${c.area})${c.verificar ? ' — SOSPECHOSO, verificar antes de aplicar' : ''}`));
     lines.push('');
   }
   if (brief.curas && brief.curas.length) {

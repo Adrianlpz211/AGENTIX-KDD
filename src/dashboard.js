@@ -3,7 +3,6 @@
 const path = require('path');
 const fs = require('fs-extra');
 const chalk = require('chalk');
-const { execSync } = require('child_process');
 
 async function dashboard() {
   const projectPath = process.cwd();
@@ -17,15 +16,9 @@ async function dashboard() {
     return;
   }
 
-  // Sync graph
+  // Abrir el tablero solo lee: la sincronización es un comando aparte.
   const grafoPath = fs.existsSync(grafoCjs) ? grafoCjs : grafoJs;
-  if (fs.existsSync(grafoPath)) {
-    try {
-      process.stdout.write(chalk.gray('  Syncing knowledge graph... '));
-      execSync(`node "${grafoPath}" sync`, { stdio: 'pipe', cwd: projectPath });
-      console.log(chalk.green('✓'));
-    } catch (e) {}
-  }
+  if (fs.existsSync(grafoPath)) console.log(chalk.gray('  Solo lectura. Para reindexar: node ' + path.relative(projectPath, grafoPath) + ' sync'));
 
   // Check for local dashboard first
   const localCjs = path.join(projectPath, 'dashboard.cjs');
