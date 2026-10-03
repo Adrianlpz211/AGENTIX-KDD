@@ -104,7 +104,7 @@ test('D02: el tablero muestra 4 STOP únicos, no la suma de contadores y eventos
 });
 
 test('D01/D02/D03: tablero, metrics.cjs y grafo.cjs metricas dan el mismo cierre, STOP y tasa', async () => {
-  const dir = tmp('canal'); crearFixture(dir);
+  const dir = tmp('canal'); crearFixture(dir, { esquemaCompleto: true }); // este test ejecuta el MOTOR (grafo.cjs metricas): un proyecto ya actualizado
   conDb(dir, (db) => { eventosStop(db); ciclo(db, { ciclo_id: 'c4', estado: 'STOP', tests_generados: 1, tests_pasando: 10, fecha_inicio: '2026-09-04T09:00:00Z', fecha_fin: '2026-09-04T10:00:00Z' }); });
   const metrics = require(path.join(REPO, '.agentic', 'grafo', 'metrics.cjs'));
   const db = new DatabaseSync(dbDe(dir), { readOnly: true });

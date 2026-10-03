@@ -435,6 +435,8 @@ if (require.main === module) {
   const cmd = process.argv[2] || 'stats';
   const dbPath = path.join(process.cwd(), '.agentic', 'memoria.db');
   if (!fs.existsSync(dbPath)) { console.log('Sin memoria.db — corre akdd init/sync primero.'); process.exit(0); }
+  try { require('./update-guard.cjs').assertWritable(dbPath); }
+  catch (e) { if (e && e.code === 'UPDATE_IN_PROGRESS') { console.error('⏸ ' + e.message); process.exit(75); } }
   let db;
   try { db = new (require('better-sqlite3'))(dbPath); }
   catch { db = new (require('node:sqlite').DatabaseSync)(dbPath); }

@@ -66,7 +66,7 @@ function cargarMotor(dirStaging) {
 function nuevoResultado(opts, projectPath) {
   return {
     schema_version: 1, status: null, ok: false, exit_code: 1, mode: opts.check ? 'check' : 'update',
-    op_id: opts.__opId || crypto.randomUUID(), project: projectPath,
+    op_id: opts.__opId || (ahora().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex')), project: projectPath,
     versions: { from: null, to: null }, source: null, started_at: ahora(), finished_at: null, duration_ms: null,
     plan: null, schema: null, backup: null, integrity: null, preservation: null, files: null, instructions: null,
     functional: null, recovery: null, hooks: null, warnings: [], errors: [], not_verified: [], coverage: { verified: [], not_executed: [] },
@@ -154,7 +154,7 @@ function planear(ctx) {
     return plan;
   }
   const motor = ctx.motor;
-  const sel = ctx.driverSel || (ctx.driverSel = motor.adapter.selectDriverForUpdate());
+  const sel = ctx.driverSel || (ctx.driverSel = motor.adapter.selectDriverForUpdate(opts.__driverCandidates));
   if (!sel.driver) {
     bloqueos.push({ code: 'DRIVER_NO_APTO', message: 'ningún conector SQLite supera las pruebas requeridas (lectura sin modificación, transacciones, bloqueo, respaldo con WAL, BLOB, INTEGER de 64 bits, multiproceso). ' +
       'Use Node >= 22.13 (node:sqlite) o instale better-sqlite3 compatible con su Node. Detalle: ' + sel.intentos.map((i) => `${i.driver}: ${i.failed[0] || 'no disponible'}`).join(' | ') });
@@ -281,6 +281,7 @@ function recuperar(ctx, causa) {
     try {
       txm.marcarFase(ctx.journal, 'APLICANDO', 'recuperación: revertir archivos', 'journal.revertir');
       const rev = txm.revertir(projectPath, ctx.journal.archivo);
+      txm.recargar(ctx.journal); // sin esto, marcarFase pisaría el estado 'revertido' con el 'aplicando' de la copia en memoria
       info.files = { reverted: rev.revertidos, conflicts: rev.conflictos };
       if (!rev.ok) ok = false;
     } catch (e) { info.files = { error: e.message }; ok = false; }

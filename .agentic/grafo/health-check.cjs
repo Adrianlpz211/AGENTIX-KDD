@@ -64,6 +64,26 @@ const CHECKS = [
   },
   // ── Schema ────────────────────────────────────────────────────────────────
   {
+    id: 'schema_catalogo',
+    nombre: 'Esquema de memoria.db vs catálogo',
+    categoria: 'schema',
+    check: (root) => {
+      const dbPath = path.join(root, '.agentic/memoria.db');
+      if (!fs.existsSync(dbPath)) return { ok: false, msg: 'DB no existe' };
+      try {
+        return conLectura(dbPath, (db) => {
+          const sc = require('./schema-catalog.cjs');
+          const wrap = { all: (q, ...p) => db.prepare(q).all(...p.flat()), get: (q, ...p) => db.prepare(q).get(...p.flat()) };
+          const r = sc.inspect(wrap);
+          if (r.status === 'COMPLETE') return { ok: true, msg: `nivel ${r.detected_level === null ? 'sin registro' : r.detected_level} · ${r.satisfied} unidades · ${r.registry_entries} migraciones registradas` };
+          if (r.status === 'NEWER_SCHEMA') return { ok: false, msg: 'esquema más nuevo que este motor — actualizar la CLI' };
+          return { ok: false, msg: `${r.status}: ${(r.pending.map((p) => p.id).slice(0, 3).join(', ') || r.conflicts.map((c) => c.message).join('; '))}` };
+        });
+      } catch (e) { return { ok: false, msg: e.message }; }
+    },
+    fix: 'akdd update',
+  },
+  {
     id: 'schema_v3',
     nombre: 'Schema v3.1 migrado',
     categoria: 'schema',
@@ -419,20 +439,25 @@ function autoFix(projectRoot) {
   // para un proyecto ya dañado por el bug de columnas dispersas — no hace
   // falta que health-check tenga un check específico para cada combinación
   // posible de columna faltante, cubre todas de una vez.
+  // 3.20.1 — reparación de esquema por el catálogo: respaldo coherente + UNA transacción
+  // + verificación. Nada de ALTER suelto con catch vacío.
   try {
     const dbPath = path.join(projectRoot, '.agentic', 'memoria.db');
     if (fs.existsSync(dbPath)) {
-      const db = openWrite(dbPath);
-      const sc = require('./schema-columns.cjs');
-      const antes = sc.checkMissingColumns(db);
-      const r = sc.ensureAllColumns(db);
-      try { db.close(); } catch {}
-      if (antes.length > 0) {
-        console.log(`\n[HEALTH-CHECK] Reparando schema — ${antes.length} columna(s) faltante(s): ${antes.join(', ')}`);
-        console.log(`  ✅ Aplicadas (${r.aplicadas}/${r.total} revisadas)\n`);
+      const dba = require('./db-adapter.cjs');
+      const sc = require('./schema-catalog.cjs');
+      const ro = dba.openReadOnly(dbPath);
+      let r;
+      try { r = sc.inspect(ro); } finally { ro.close(); }
+      if (r.status === 'PENDING') {
+        console.log(`\n[HEALTH-CHECK] Reparando esquema — ${r.pending.length} migración(es) pendiente(s)`);
+        const m = dba.migrate(dbPath, { run(db) { const a = sc.apply(db, { actor: 'health --fix' }); return { applied: a.applied.length, adopted: a.adopted.length }; } });
+        console.log(`  ✅ Migrado (respaldo coherente: ${m.backupPath})\n`);
+      } else if (r.status !== 'COMPLETE') {
+        console.log('\n[HEALTH-CHECK] Esquema ' + r.status + ': requiere revisión humana (' + (r.conflicts.map((c) => c.message).join('; ') || 'ver el plan con la opción --check de akdd') + ')');
       }
     }
-  } catch (e) { /* fail-soft — el resto del autoFix sigue igual */ }
+  } catch (e) { console.log('\n[HEALTH-CHECK] No se pudo reparar el esquema: ' + e.message); }
 
   const { results } = runHealthCheck(projectRoot);
   const failed = results.filter(r => !r.ok && r.fix);

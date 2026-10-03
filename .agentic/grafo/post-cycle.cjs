@@ -1399,6 +1399,9 @@ async function main() {
 }
 
 if (require.main === module) {
+  // 3.20.1 — con un akdd update vivo no se escribe: se pospone (código 75 = reintentar luego).
+  try { require('./update-guard.cjs').assertWritable(DB_PATH); }
+  catch (e) { if (e && e.code === 'UPDATE_IN_PROGRESS') { console.error('⏸ post-cycle pospuesto: ' + e.message); process.exit(75); } }
   main().catch(e => { console.error('❌ post-cycle falló:', e.message); process.exit(1); });
 }
 

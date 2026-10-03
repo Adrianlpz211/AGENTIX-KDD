@@ -189,6 +189,13 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       return { status: lista.length ? 'OK' : 'EMPTY', coverage, data: pagina.map((e) => Object.assign({}, e, { ts: iso(e.ts) })) };
     } },
     capabilities: { params: ['project_id'], fn: () => ({ status: 'OK', data: { integraciones: integraciones(projectPath) } }) },
+    // 3.20.1 — actualización y memoria: versión, esquema, última verificación, conservación, respaldo y acciones. Solo lectura.
+    update: { params: ['project_id', 'cursor', 'limit'], fn: (q) => {
+      try {
+        const r = require('./update-estado.cjs').leer(projectPath, { cursor: q.cursor, limit: q.limit });
+        return { status: r.status, data: r.data, coverage: r.coverage };
+      } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
     incidents: { params: ['project_id', 'cursor', 'limit'], fn: (q) => {
       const r = datos.filas(dbPath, { e: operativa.CONSULTAS.eventosOperativos }, Object.assign({ snapshot: true }, opts));
       if (r.status !== 'OK' || (r.faltan || []).includes('gate_events')) return { status: 'UNAVAILABLE', data: null, reason_code: r.reason_code || 'TABLA_AUSENTE' };

@@ -280,7 +280,7 @@ function ejecutarOp(db, op, ctx) {
       const expr = c.dynamicDefault.expr;
       const presentes = new Set(columnasDe(db, op.table).map((x) => x.name));
       const origen = (c.dynamicDefault.relleno || RELLENO_BASE).filter((x) => presentes.has(x) && x !== op.column);
-      const sin = db.get(`SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name=${"'" + op.table.replace(/'/g, "''") + "'"} AND sql LIKE '%WITHOUT ROWID%'`);
+      const sin = db.get("SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name = ? AND sql LIKE '%WITHOUT ROWID%'", [op.table]);
       if (sin) throw err('SIN_ROWID', `${op.table} es WITHOUT ROWID: el default dinámico de ${op.column} no se puede reproducir con un trigger`);
       db.exec(`ALTER TABLE ${q(op.table)} ADD COLUMN ${q(op.column)} ${c.type || ''}`.trim());
       const candidatos = origen.map((x) => `NULLIF(${q(x)}, '')`).concat([expr]);

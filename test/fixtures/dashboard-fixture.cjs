@@ -38,8 +38,21 @@ function insertar(db, tabla, fila) {
   db.prepare(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`).run(...k.map((x) => fila[x]));
 }
 
+/**
+ * Las tablas de este fixture son una versión reducida. Un proyecto real llega a
+ * tener el esquema COMPLETO porque `akdd update` lo migra con el catálogo; el
+ * motor (desde 3.20.1) ya no migra en silencio al abrir. Se completa igual que
+ * lo haría un update: el catálogo, estricto, sin tocar los datos.
+ */
+function completarEsquema(dbPath) {
+  const dba = require('../../.agentic/grafo/db-adapter.cjs');
+  const sc = require('../../.agentic/grafo/schema-catalog.cjs');
+  const db = dba.openWrite(dbPath, { updateOwner: true });
+  try { sc.apply(db, { version: 'fixture' }); } finally { db.close(); }
+}
+
 /** Crea el proyecto en `dir`. Devuelve su hash de contenido (fixture_hash). */
-function crearFixture(dir, { payload = false } = {}) {
+function crearFixture(dir, { payload = false, esquemaCompleto = false } = {}) {
   const { DatabaseSync } = require('node:sqlite');
   const ag = path.join(dir, '.agentic');
   fs.mkdirSync(path.join(ag, 'memoria'), { recursive: true });
@@ -85,6 +98,8 @@ function crearFixture(dir, { payload = false } = {}) {
   [['src/pedidos.js', 'src/pagos.js', 'IMPORTS'], ['src/pagos.js', 'src/auth.js', 'CALLS'], ['public/app.js', 'src/pedidos.js', 'IMPORTS'], ...(payload ? [[RARO, 'src/pagos.js', 'IMPORTS']] : [])].forEach(([a, b, kind]) => insertar(db, 'ast_edges', { from_file: a, to_file: b, kind, weight: 1 }));
   [['tdd', 'STOP', 'src/pagos.js'], ['regression', 'WARN', 'src/pedidos.js']].forEach(([gate, verdict, file], i) => insertar(db, 'gate_events', { ts: `2026-09-0${i + 1}T09:30:00.000Z`, gate, verdict, file, detalle: P(i, 'detalle'), source: 'mechanical', event_id: 'e' + i }));
   db.close();
+  // Solo cuando una prueba ejecuta el MOTOR sobre el fixture (el tablero lee con un adaptador de solo lectura y tolera tablas ausentes).
+  if (esquemaCompleto) completarEsquema(path.join(ag, 'memoria.db'));
 
   const h = crypto.createHash('sha256');
   for (const f of ['config.md', 'memoria/patrones.md', 'memoria/decisiones.md', 'memoria/errores.md']) h.update(fs.readFileSync(path.join(ag, f)));

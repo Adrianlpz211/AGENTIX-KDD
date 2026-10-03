@@ -64,6 +64,8 @@ const INSTANCE_ID = OWNER_ID;
 // ── DB setup ─────────────────────────────────────────────────────────────────
 
 function openDB() {
+  try { require('./update-guard.cjs').assertWritable(DB_PATH); }
+  catch (e) { if (e && e.code === 'UPDATE_IN_PROGRESS') throw e; /* motor sin guard */ }
   const projNodeModules = path.join(ROOT, 'node_modules');
   if (!module.paths.includes(projNodeModules)) module.paths.unshift(projNodeModules);
   let db;

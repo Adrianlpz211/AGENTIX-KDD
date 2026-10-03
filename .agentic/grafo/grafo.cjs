@@ -39,116 +39,45 @@ const MEMORIA_PATH= process.env.AGENTIC_MEMORIA_PATH_OVERRIDE || path.join(ROOT,
 
 // ─── INIT ──────────────────────────────────────────────────────────────────────
 function initDB() {
+  const existia = fs.existsSync(DB_PATH);
   const adapter = createAdapter(DB_PATH);
-  // Usar exec directo — más confiable que split por ;
-  // porque el schema tiene comentarios -- inline dentro de CREATE TABLE
-  try {
-    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-    adapter.exec(schema);
-  } catch(e) {
-    // Si falla el schema completo, intentar statement por statement
-    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-    // Remover comentarios inline antes de hacer split
-    const clean = schema.replace(/--[^\n]*/g, '').replace(/\n\s*\n/g, '\n');
-    clean.split(';').map(s => s.trim()).filter(s => s.length > 5).forEach(s => {
-      try { adapter.exec(s + ';'); } catch(e) {}
-    });
-  }
-  migrateDB(adapter);
+  prepararEsquema(adapter, existia);
   return adapter;
 }
 
+function versionDelMotor() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'framework.json'), 'utf8')).version || null; } catch { return null; }
+}
+
+/**
+ * Esquema de memoria.db (3.20.1):
+ *   · Base NUEVA: se crea completa (schema.sql + catálogo). Crear no es migrar datos de nadie.
+ *   · Base EXISTENTE: solo se COMPRUEBA contra el catálogo. Un motor que abre para
+ *     trabajar NO migra en silencio (antes cada sync lanzaba ALTER TABLE y se tragaba
+ *     el error: así se perdió el KDD Memory de un cliente). Si falta esquema se detiene
+ *     con un mensaje claro: la migración la hace `akdd update` (con respaldo y verificación).
+ */
+function prepararEsquema(db, existia) {
+  const sc = require('./schema-catalog.cjs');
+  if (!existia) {
+    // Dentro de una transacción los errores NO se silencian: o queda completa o no queda.
+    db.transaction(() => { db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8')); })();
+    sc.apply(db, { version: versionDelMotor(), actor: 'grafo.cjs init' });
+    return;
+  }
+  const r = sc.inspect(db);
+  if (r.status === 'COMPLETE') return;
+  const e = new Error(r.status === 'NEWER_SCHEMA'
+    ? 'SCHEMA_NEWER: memoria.db tiene un esquema más nuevo que este motor. Actualiza la CLI (npm install -g agentic-kdd).'
+    : 'SCHEMA_PENDING: memoria.db necesita migraciones de esquema (' + r.pending.slice(0, 4).map((p) => p.id).join(', ') + (r.pending.length > 4 ? ', …' : '') + '). Ejecuta: akdd update');
+  e.code = r.status === 'NEWER_SCHEMA' ? 'SCHEMA_NEWER' : 'SCHEMA_PENDING';
+  e.inspection = r;
+  throw e;
+}
+
+/** Compatibilidad: antes eran ~150 líneas de ALTER con catch vacío. Ahora es el catálogo, estricto. */
 function migrateDB(db) {
-  // v3.16.8 — arreglo de RAÍZ: en vez de que cada script mantenga su propia
-  // lista dispersa de ALTER TABLE (la causa estructural del bug de
-  // biocaresoft-saas), schema-columns.cjs es la fuente única de verdad de
-  // TODAS las columnas conocidas del motor. Se corre PRIMERO acá porque
-  // migrateDB() es el camino más transitado (cada `sync`, cada `aa:`).
-  try { require('./schema-columns.cjs').ensureAllColumns(db); } catch {}
-
-  const alteraciones = [
-    "ALTER TABLE nodos ADD COLUMN ultima_validacion TEXT DEFAULT (datetime('now'))",
-    // v3.16.7 — bug GLOBAL encontrado en biocaresoft-saas (2026-07-21): sincronizar()
-    // INSERTA en archivos_aplica/hash_contexto, pero esas columnas SOLO las creaba
-    // knowledge-validator.cjs (que corre dentro del post-cycle). En un proyecto
-    // fresco donde `akdd sync` corre ANTES del primer post-cycle, el INSERT tronaba
-    // "no column named archivos_aplica", el adaptador se lo tragaba, y sync reportaba
-    // "N nodos nuevos" con 0 persistidos — dashboard vacío para siempre. El módulo
-    // que ESCRIBE la columna debe garantizar que existe, sin depender de otro.
-    "ALTER TABLE nodos ADD COLUMN archivos_aplica TEXT DEFAULT '[]'",
-    "ALTER TABLE nodos ADD COLUMN hash_contexto TEXT",
-    "ALTER TABLE ciclos ADD COLUMN tipo_tarea TEXT DEFAULT 'feature'",
-    "ALTER TABLE ciclos ADD COLUMN memory_trace TEXT DEFAULT '[]'",
-    "ALTER TABLE ciclos ADD COLUMN snapshot_inicio TEXT",
-    "ALTER TABLE ciclos ADD COLUMN snapshot_fin TEXT",
-    "ALTER TABLE fases ADD COLUMN duracion_ms INTEGER DEFAULT 0",
-    "ALTER TABLE fases ADD COLUMN tokens_aprox INTEGER DEFAULT 0",
-  ];
-  alteraciones.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  const indices = [
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_nodos_unique ON nodos(tipo, titulo)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_area_tipo ON nodos(area, tipo)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_area_confianza ON nodos(area, confianza)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_tipo_confianza ON nodos(tipo, confianza)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_tipo_estado ON nodos(tipo, estado)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_area_tipo_estado ON nodos(area, tipo, estado)",
-    "CREATE INDEX IF NOT EXISTS idx_nodos_confianza_aplicado ON nodos(confianza, aplicado)",
-    "CREATE INDEX IF NOT EXISTS idx_ciclos_estado ON ciclos(estado)",
-    "CREATE INDEX IF NOT EXISTS idx_ciclos_modulo ON ciclos(modulo)",
-    "CREATE INDEX IF NOT EXISTS idx_ciclos_fecha ON ciclos(fecha_inicio)",
-    "CREATE INDEX IF NOT EXISTS idx_fases_ciclo ON fases(ciclo_id)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_unique ON relaciones(desde_id, tipo, hacia_id)",
-  ];
-  indices.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  // v2.2 — nuevas tablas (seguro llamar múltiples veces)
-  const tablasV22 = [
-    `CREATE TABLE IF NOT EXISTS git_context_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sesion_id TEXT NOT NULL,
-      rama TEXT, commit_hash TEXT,
-      archivos_modificados TEXT DEFAULT '[]',
-      riesgos_detectados TEXT DEFAULT '[]',
-      predicciones TEXT DEFAULT '[]',
-      tiene_riesgos_altos INTEGER DEFAULT 0,
-      fecha TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS cicd_reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      episodio_id TEXT, plataforma TEXT DEFAULT 'github',
-      workflow TEXT, rama TEXT, commit_hash TEXT, actor TEXT, repo TEXT,
-      run_id TEXT, run_url TEXT,
-      tests_pasando INTEGER DEFAULT 0, tests_fallando INTEGER DEFAULT 0,
-      archivos_tocados TEXT DEFAULT '[]', errores_tests TEXT DEFAULT '[]',
-      es_exito INTEGER DEFAULT 0,
-      fecha TEXT DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS prediction_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      tarea TEXT, modulo TEXT, archivos TEXT DEFAULT '[]',
-      nivel_predicho TEXT, alertas TEXT DEFAULT '[]', precondiciones TEXT DEFAULT '[]',
-      fue_correcto INTEGER, ciclo_id TEXT,
-      fecha TEXT DEFAULT (datetime('now'))
-    )`,
-  ];
-  tablasV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  // v2.2 — embedding en episodios
-  const migracionesV22 = [
-    "ALTER TABLE episodios ADD COLUMN embedding TEXT",
-  ];
-  migracionesV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  // v2.2 — índices nuevas tablas
-  const indicesV22 = [
-    "CREATE INDEX IF NOT EXISTS idx_git_context_fecha ON git_context_log(fecha)",
-    "CREATE INDEX IF NOT EXISTS idx_cicd_rama ON cicd_reports(rama)",
-    "CREATE INDEX IF NOT EXISTS idx_prediction_fecha ON prediction_log(fecha)",
-  ];
-  indicesV22.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-  try { migrateV3_1(db); } catch (e) {}
-  try { migrateV3_2(db); } catch (e) {}
+  return require('./schema-catalog.cjs').apply(db, { version: versionDelMotor(), actor: 'grafo.cjs migrate' });
 }
 
 // ─── SNAPSHOT ─────────────────────────────────────────────────────────────────
@@ -1785,97 +1714,8 @@ if (_args[0] === 'predecir') {
 // Agentic KDD v3.1 — Nuevas tablas y columnas para Fases 1-3
 // Esta función se llama automáticamente en la siguiente ejecución.
 
-function migrateV3_1(db) {
-  // Columnas bi-temporales en relaciones_semanticas
-  const biTemporalMigrations = [
-    "ALTER TABLE relaciones_semanticas ADD COLUMN valid_at TEXT DEFAULT (datetime('now'))",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN invalid_at TEXT",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN expired_at TEXT",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN episode_id TEXT",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN confidence TEXT DEFAULT 'MEDIA'",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN context TEXT",
-    "ALTER TABLE relaciones_semanticas ADD COLUMN source TEXT DEFAULT 'agent'",
-  ];
-  biTemporalMigrations.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  // Índices bi-temporales
-  const biTemporalIndices = [
-    "CREATE INDEX IF NOT EXISTS idx_rel_sem_valid ON relaciones_semanticas(valid_at)",
-    "CREATE INDEX IF NOT EXISTS idx_rel_sem_invalid ON relaciones_semanticas(invalid_at)",
-    "CREATE INDEX IF NOT EXISTS idx_rel_sem_type ON relaciones_semanticas(tipo)",
-  ];
-  biTemporalIndices.forEach(sql => { try { db.exec(sql); } catch(e) {} });
-
-  // Tabla AST Symbols
-  const astSymbolsSQL = `
-    CREATE TABLE IF NOT EXISTS ast_symbols (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      file         TEXT NOT NULL,
-      language     TEXT NOT NULL,
-      symbol_name  TEXT NOT NULL,
-      kind         TEXT NOT NULL,
-      line_start   INTEGER DEFAULT 0,
-      line_end     INTEGER DEFAULT 0,
-      exported     INTEGER DEFAULT 0,
-      signature    TEXT,
-      pagerank     REAL DEFAULT 0.0,
-      last_indexed TEXT DEFAULT (datetime('now')),
-      content_hash TEXT
-    )`;
-  try { db.exec(astSymbolsSQL); } catch(e) {}
-  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_ast_sym_uniq ON ast_symbols(file, symbol_name, kind)"); } catch(e) {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_ast_sym_file ON ast_symbols(file)"); } catch(e) {}
-
-  // Tabla AST Edges
-  const astEdgesSQL = `
-    CREATE TABLE IF NOT EXISTS ast_edges (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      from_file    TEXT NOT NULL,
-      to_file      TEXT,
-      from_symbol  TEXT,
-      to_symbol    TEXT,
-      kind         TEXT NOT NULL,
-      weight       REAL DEFAULT 1.0,
-      pagerank_src REAL DEFAULT 0.0,
-      last_indexed TEXT DEFAULT (datetime('now'))
-    )`;
-  try { db.exec(astEdgesSQL); } catch(e) {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_ast_edge_from ON ast_edges(from_file)"); } catch(e) {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_ast_edge_to ON ast_edges(to_file)"); } catch(e) {}
-
-  // Tabla Knowledge Docs (ADRs, gotchas, convenciones)
-  const knowledgeDocsSQL = `
-    CREATE TABLE IF NOT EXISTS knowledge_docs (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc_id          TEXT NOT NULL UNIQUE,
-      tipo            TEXT NOT NULL,
-      titulo          TEXT NOT NULL,
-      status          TEXT DEFAULT 'accepted',
-      fecha           TEXT,
-      decision_makers TEXT DEFAULT '[]',
-      afecta          TEXT DEFAULT '[]',
-      frontmatter     TEXT DEFAULT '{}',
-      contenido       TEXT,
-      context         TEXT,
-      decision        TEXT,
-      consequences    TEXT,
-      options         TEXT DEFAULT '[]',
-      file_path       TEXT,
-      last_indexed    TEXT DEFAULT (datetime('now')),
-      content_hash    TEXT
-    )`;
-  try { db.exec(knowledgeDocsSQL); } catch(e) {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_kdocs_tipo ON knowledge_docs(tipo)"); } catch(e) {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_kdocs_status ON knowledge_docs(status)"); } catch(e) {}
-
-  // campo gate_result en fases (para harness tracking)
-  try { db.exec("ALTER TABLE fases ADD COLUMN gate_result TEXT"); } catch(e) {}
-  try { db.exec("ALTER TABLE fases ADD COLUMN harness_passed INTEGER DEFAULT 0"); } catch(e) {}
-
-  // campo ast_indexed en ciclos
-  try { db.exec("ALTER TABLE ciclos ADD COLUMN ast_indexed INTEGER DEFAULT 0"); } catch(e) {}
-  try { db.exec("ALTER TABLE ciclos ADD COLUMN knowledge_loaded INTEGER DEFAULT 0"); } catch(e) {}
-}
+/** @deprecated 3.20.1 — la fuente de verdad es schema-catalog.cjs. Se conserva por compatibilidad de exportación. */
+function migrateV3_1(db) { return migrateDB(db); }
 
 // Export migrateV3_1. No corre al importar: solo initDB/migrate explícitos.
 const _exportsV31 = module.exports || {};
@@ -1885,16 +1725,8 @@ module.exports = { ..._exportsV31, migrateV3_1 };
 // ─── v3.2: Vigencia de Memoria + Verdad Vigente ────────────────────────────
 // Cierra el Gap #1: límite claro entre memoria vigente, histórica y evidencia
 
-function migrateV3_2(db) {
-  // Columna vigencia_tipo en nodos
-  try { db.exec("ALTER TABLE nodos ADD COLUMN vigencia_tipo TEXT DEFAULT 'VIGENTE'"); } catch {}
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodos_vigencia ON nodos(vigencia_tipo)"); } catch {}
-  // Inferir vigencia_tipo para registros existentes
-  try {
-    db.exec("UPDATE nodos SET vigencia_tipo='OBSOLETO' WHERE estado='OBSOLETO' AND vigencia_tipo='VIGENTE'");
-    db.exec("UPDATE nodos SET vigencia_tipo='HISTORICO' WHERE estado='CONSOLIDADO' AND vigencia_tipo='VIGENTE'");
-  } catch {}
-}
+/** @deprecated 3.20.1 — ver schema-catalog.cjs (incluye la inferencia de vigencia_tipo). */
+function migrateV3_2(db) { return migrateDB(db); }
 
 const _exportsV32 = module.exports || {};
 module.exports = { ..._exportsV32, migrateV3_2 };
@@ -2231,12 +2063,9 @@ module.exports.pasosSync = pasosSync;
 /** Migración explícita con respaldo y transacción; nunca ejecutada al importar. */
 function migrarFramework() {
   return dbAccess.migrate(DB_PATH, { run(db) {
-    db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
-    migrateDB(db);
-    const columns = new Set(db.all('PRAGMA table_info(nodos)').map(c => c.name));
-    for (const c of ['vigencia_tipo', 'hash_contexto', 'archivos_aplica']) if (!columns.has(c)) throw Error('MIGRACION_INCOMPLETA: ' + c);
+    const r = migrateDB(db);
     if (db.get('PRAGMA integrity_check').integrity_check !== 'ok') throw Error('DB_INTEGRITY_FAILED');
-    return { status: 'MIGRATED', memory_preserved: true };
+    return { status: 'MIGRATED', memory_preserved: true, applied: r.applied.length, adopted: r.adopted.length };
   } });
 }
 module.exports.migrarFramework = migrarFramework;

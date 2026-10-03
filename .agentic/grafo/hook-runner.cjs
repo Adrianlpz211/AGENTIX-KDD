@@ -231,6 +231,12 @@ function ejecutarPostCycle(root, item) {
 function drenar(root, opciones) {
   const o = opciones || {};
   const ejecutar = o.ejecutar || ejecutarPostCycle;
+  // 3.20.1 — un akdd update vivo tiene la exclusión de escritores: los commits siguen en la cola y se procesan después.
+  try {
+    const g = require('./update-guard.cjs');
+    const e = g.estado(root);
+    if (e.held && !(e.holder && process.env.AKDD_UPDATE_TOKEN === e.holder.token)) return { ok: true, busy: true, update_in_progress: true, processed: [] };
+  } catch { /* motor sin update-guard */ }
   const lockPath = path.join(dirHooks(root), 'drain.lock');
   fs.mkdirSync(dirHooks(root), { recursive: true });
   let fd;

@@ -155,6 +155,12 @@ class Vigilancia {
    * Promise, el pase sigue ocupado hasta que se resuelva (devuelve esa espera).
    */
   revisar(origen) {
+    // 3.20.1 — con un akdd update vivo no se entrega nada; el siguiente ciclo del vigilante lo retoma.
+    try {
+      const g = require('./update-guard.cjs');
+      const e = g.estado(this.root);
+      if (e.held && !(e.holder && process.env.AKDD_UPDATE_TOKEN === e.holder.token)) { this.pendiente = true; return this.enCurso; }
+    } catch { /* motor sin update-guard */ }
     if (this.procesando) { this.pendiente = true; return this.enCurso; }
     this.procesando = true;
     const fin = () => { this.procesando = false; this.enCurso = null; };

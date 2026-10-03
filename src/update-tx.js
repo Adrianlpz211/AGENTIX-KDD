@@ -169,7 +169,8 @@ function resolverRef(repoUrl, ref) {
 // ── Journal ─────────────────────────────────────────────────────────────────
 
 function abrirJournal(projectPath, meta) {
-  const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex');
+  // El id de la operación (cronológico, para que ordenar por nombre dé el orden real) es también la carpeta del journal.
+  const id = (meta && meta.op_id) || (new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex'));
   const dir = path.join(dirUpdate(projectPath), 'tx', id);
   fs.mkdirSync(path.join(dir, 'backup'), { recursive: true });
   const j = { id, dir, archivo: path.join(dir, 'journal.json'), datos: { estado: 'aplicando', fase: 'PREPARADO', historial: [], inicio: new Date().toISOString(), ...meta, entradas: [] } };
@@ -183,6 +184,12 @@ function abrirJournal(projectPath, meta) {
  * Se anota ANTES de cada paso qué se hará y cómo recuperarlo; el resultado se
  * anota al terminar. Tras una interrupción el journal dice dónde quedó.
  */
+/** Relee el journal del disco: revertir() lo reescribe y la copia en memoria quedaría desactualizada. */
+function recargar(j) {
+  const d = leerJSON(j.archivo, null);
+  if (d) j.datos = d;
+  return j;
+}
 function marcarFase(j, fase, intent, recovery) {
   j.datos.fase = fase;
   j.datos.historial.push({ fase, at: new Date().toISOString(), intent: intent || null, recovery: recovery || null, hecho: false });
@@ -400,6 +407,6 @@ function codigo(code, msg) { const e = new Error(msg); e.code = code; return e; 
 
 module.exports = {
   prepararBundle, prepararStaging, validarStaging, revisarTar, revisarArbol, entradaHostil, rutaTrasStrip,
-  resolverRef, abrirJournal, marcarFase, pasoHecho, respaldar, revertir, cerrarJournal, recuperarPendientes, podar,
+  resolverRef, abrirJournal, recargar, marcarFase, pasoHecho, respaldar, revertir, cerrarJournal, recuperarPendientes, podar,
   aplicar, registrarOwned, ownedPath, dirUpdate, hashArchivo, sha256,
 };

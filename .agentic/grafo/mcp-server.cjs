@@ -489,6 +489,20 @@ const TOOLS = [
 
 // ─── MCP PROTOCOL (JSON-RPC 2.0 over stdio) ───────────────────────────────────
 
+// 3.20.1 — durante `akdd update` este servidor PAUSA (deja de atender herramientas), lo
+// CONFIRMA con un ack y se reanuda solo al terminar. Solo en un proyecto Agentix de verdad:
+// registrarse crearía carpetas en cualquier otro directorio.
+let _pausadoPorUpdate = false;
+try {
+  if (fs.existsSync(path.join(ROOT, '.agentic', 'grafo'))) {
+    const _escritor = require('./update-guard.cjs').registerWriter(ROOT, 'mcp', {
+      onPause: () => { _pausadoPorUpdate = true; },
+      onResume: () => { _pausadoPorUpdate = false; },
+    });
+    process.on('exit', () => { try { _escritor.stop(); } catch { /* ya cerrado */ } });
+  }
+} catch { /* motor sin update-guard: no hay exclusión que respetar */ }
+
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
 rl.on('line', async (line) => {
@@ -500,6 +514,10 @@ rl.on('line', async (line) => {
   // lleva respuesta. Antes se contestaba con un error sin id, que algunos
   // clientes registran como fallo del servidor.
   if (id === undefined || id === null) return;
+  if (_pausadoPorUpdate && method === 'tools/call') {
+    sendError(id, -32000, 'UPDATE_IN_PROGRESS: akdd update está actualizando este proyecto; reintenta en unos segundos.');
+    return;
+  }
 
   try {
     if (method === 'ping') {

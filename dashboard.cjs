@@ -5138,6 +5138,12 @@ const server = require('http').createServer((req, res) => {
     res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(full));
     return;
   }
+  if (ruta === '/actualizacion') {
+    // Página propia (solo lectura) de actualización y memoria. No toca el tablero de grafos.
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+    res.end(req.method === 'HEAD' ? undefined : cargarGrafo('update-panel.cjs').HTML);
+    return;
+  }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
   res.end(req.method === 'HEAD' ? undefined : HTML);
@@ -5146,7 +5152,8 @@ const server = require('http').createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
   console.log(`\n  Agentix KDD Dashboard v4`);
-  console.log(`  → ${url}\n`);
+  console.log(`  → ${url}`);
+  console.log(`  Actualización y memoria → ${url}/actualizacion\n`);
   if (process.env.AKDD_DASH_NO_OPEN === '1') return;
   // Open browser
   const { exec } = require('child_process');
