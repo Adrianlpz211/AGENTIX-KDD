@@ -52,14 +52,6 @@ function ejercitarFunciones(root) {
   assert.ok(rec.json.content.includes('único fallo'));
   const ev = m(['evidence', 'verify', cmp.json.envelope.reference_id]);
   assert.ok(ev.json, 'evidence verify responde');
-  // Paquete TEAMS: snapshot → ACK → delta.
-  const script = "const tp=require(" + JSON.stringify(path.join(root, '.agentic', 'grafo', 'teams-packets.cjs')) + ");const root=" + JSON.stringify(root) + ";"
-    + "const base=(o)=>Object.assign({task_id:'T-UPG',plan_id:'P',sprint_id:'S',sender_role:'director',recipient_role:'builder',objective:'objetivo',acceptance:['a','b'],scope:['src/a.js'],risk_tier:'LOW',next_actions:['x']},o||{});"
-    + "const e1=tp.enviar(root,base());const rx={estado:null};const r1=tp.recibir(null,e1.packet);tp.ack(root,{task_id:'T-UPG',recipient_role:'builder',revision:1,hash:r1.ack.hash});"
-    + "const e2=tp.enviar(root,base({next_actions:['x','y']}));process.stdout.write(JSON.stringify({k1:e1.kind,k2:e2.kind}));";
-  const t = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' } });
-  assert.equal(t.status, 0, t.stderr);
-  assert.deepEqual(JSON.parse(t.stdout), { k1: 'snapshot', k2: 'delta' });
 }
 
 for (const version of ['3.19.0', '3.20.0']) {
@@ -90,12 +82,11 @@ for (const version of ['3.19.0', '3.20.0']) {
     ejercitarFunciones(p.root);
     const inventarioTrasUso = real.inventario(p.dbPath);
 
-    // 4. Rollback: archivos atrás, y LO APRENDIDO DESPUÉS (eventos, evidencias, paquetes) se conserva.
+    // 4. Rollback: archivos atrás, y LO APRENDIDO DESPUÉS (eventos, evidencias) se conserva.
     const rb = await rollback({ projectPath: p.root, salir: false, silent: true });
     assert.equal(rb.status, 'ROLLED_BACK', JSON.stringify([rb.errors, rb.reason]));
     assert.ok(filas(p.dbPath, 'SELECT count(*) AS n FROM mem_events')[0].n >= 1, 'el evento capturado después del update sigue ahí');
     assert.ok(filas(p.dbPath, 'SELECT count(*) AS n FROM mem_evidence')[0].n >= 1, 'la evidencia guardada después del update sigue ahí');
-    assert.ok(filas(p.dbPath, 'SELECT count(*) AS n FROM mem_context_packets')[0].n >= 2, 'los paquetes TEAMS siguen ahí');
     assert.equal(real.conservada(inventarioTrasUso, p.dbPath).status, 'PASS', 'el rollback no restauró una BD vieja a ciegas');
   });
 }

@@ -842,7 +842,7 @@ const { nodes, edges, ciclos: ciclosDB, fases: fasesDB, tiemposPorModulo: tiempo
   eventosOperativos: eventosOpDB = [], friccionTotal: friccionTotalDB = null, locks: locksDB = [], fasesTodas: fasesTodasDB = [] } = getGraphData();
 const OP = operativaMod.operativa({
   ciclos: ciclosTodosDB, eventos: eventosOpDB, grupos: friccionDB, totalFriccion: friccionTotalDB, locks: locksDB,
-  fases: fasesTodasDB, modulos: tiemposDB, teams: operativaMod.leerTeams(projectPath),
+  fases: fasesTodasDB, modulos: tiemposDB,
 });
 const codeStructure = getCodeStructureGraph();
 const endpointHeuristicEdges = getEndpointHeuristicEdges(codeStructure.nodes, projectPath);
@@ -1475,7 +1475,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
   <div class="mode-tab" onclick="setMode('memoria',this)" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</div>
   <div class="mode-tab" onclick="setMode('contexto',this)" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</div>
-  <div class="mode-tab" onclick="setMode('teams',this)" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</div>
   <div class="mode-tab" onclick="setMode('actualizacion',this)" title="Estado de la última actualización y de la memoria">🔄 Actualización</div>
 </div>
 
@@ -2307,7 +2306,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <div id="mode-memoria" class="mode-embed"><iframe data-src="/memoria?embed=1" title="Memoria"></iframe></div>
 <div id="mode-contexto" class="mode-embed"><iframe data-src="/contexto?embed=1" title="Contexto y esfuerzo"></iframe></div>
-<div id="mode-teams" class="mode-embed"><iframe data-src="/teams?embed=1" title="TEAMS"></iframe></div>
 <div id="mode-actualizacion" class="mode-embed"><iframe data-src="/actualizacion?embed=1" title="Actualización"></iframe></div>
 
 <div id="mode-tiempos">
@@ -2952,9 +2950,9 @@ function setMode(mode,el){
   // que responde «cuánto costó esto», que es lo primero que pregunta un jefe.
   const mt=document.getElementById('mode-tiempos');
   if(mt)mt.style.display=mode==='tiempos'?'flex':'none';
-  // Memoria, Contexto, TEAMS y Actualización: la página se muestra DENTRO del layout (como Línea de Tiempo o Preservation Intel).
+  // Memoria, Contexto y Actualización: la página se muestra DENTRO del layout (como Línea de Tiempo o Preservation Intel).
   // Se carga al abrir la pestaña y se refresca si pasaron más de 30 s desde la última carga.
-  ['memoria','contexto','teams','actualizacion'].forEach(function(m){
+  ['memoria','contexto','actualizacion'].forEach(function(m){
     var p=document.getElementById('mode-'+m); if(!p) return;
     p.style.display=mode===m?'flex':'none';
     if(mode!==m) return;
@@ -5129,7 +5127,7 @@ const CSP = [
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
-// Las páginas propias (/memoria, /contexto, /teams, /actualizacion) se muestran dentro del tablero: pueden ser embebidas SOLO por el
+// Las páginas propias (/memoria, /contexto, /actualizacion) se muestran dentro del tablero: pueden ser embebidas SOLO por el
 // mismo origen. La raíz (el tablero) sigue sin poder ser embebida por nadie y solo puede embeber su propio origen.
 const CSP_EMBEBIBLE = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'");
 const CSP_RAIZ = CSP + "; frame-src 'self'";
@@ -5178,12 +5176,6 @@ const server = require('http').createServer((req, res) => {
     const pag = cargarGrafo('memoria-pagina.cjs');
     res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
     res.end(req.method === 'HEAD' ? undefined : paraEmbeber(ruta === '/memoria' ? pag.MEMORIA_HTML : pag.CONTEXTO_HTML, url));
-    return;
-  }
-  if (ruta === '/teams') {
-    // Página propia (solo lectura) de la campaña TEAMS: etapas, cobertura de registro, vigilancia y auditoría. No toca el tablero de grafos.
-    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
-    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('teams-pagina.cjs').TEAMS_HTML, url));
     return;
   }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');

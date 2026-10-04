@@ -31,10 +31,9 @@ for (const readme of ['README.md', 'README.es.md']) {
     for (const s of subs) assert.ok(new RegExp("case '" + s + "'").test(memoriaCli), 'akdd memory ' + s + ' no existe en memory-cli.cjs');
   });
 
-  test('comandos documentados (' + readme + '): context, effort budget, teams packet y benchmark contexto existen en la CLI', () => {
+  test('comandos documentados (' + readme + '): context, effort budget y benchmark contexto existen en la CLI', () => {
     for (const s of comandos(readme, 'context')) assert.ok(bin.includes("'" + s + "'") || bin.includes('arg1 === \'' + s + '\''), 'akdd context ' + s);
     assert.match(bin, /sub === 'budget'/);
-    assert.match(bin, /sub === 'packet'/);
     assert.match(bin, /arg1 === 'contexto'/);
     for (const s of comandos(readme, 'benchmark')) assert.equal(s, 'contexto');
     for (const s of comandos(readme, 'effort')) assert.ok(['decide', 'budget', 'reevaluar', 'show'].includes(s), 'akdd effort ' + s);
@@ -42,7 +41,7 @@ for (const readme of ['README.md', 'README.es.md']) {
 }
 
 test('comandos documentados: los módulos que la CLI invoca existen en el paquete', () => {
-  for (const m of ['memory-cli.cjs', 'effort-budget.cjs', 'context-reuse.cjs', 'teams-packets.cjs', 'benchmark-contexto.cjs', 'context-compressor.cjs', 'memory-layers.cjs', 'memoria-salud.cjs']) {
+  for (const m of ['memory-cli.cjs', 'effort-budget.cjs', 'context-reuse.cjs', 'benchmark-contexto.cjs', 'context-compressor.cjs', 'memory-layers.cjs', 'memoria-salud.cjs']) {
     assert.ok(fs.existsSync(path.join(ROOT, '.agentic', 'grafo', m)), m);
   }
 });

@@ -14,7 +14,6 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const RM_PATH = path.join(__dirname, '..', '.agentic', 'grafo', 'restore-manager.cjs');
-const TM_PATH = path.join(__dirname, '..', '.agentic', 'grafo', 'teams-manager.cjs');
 const rm = require(RM_PATH);
 
 function fixture() {
@@ -44,15 +43,6 @@ function fixture() {
 
 function estadoUsuario(fx) {
   return { head: fx.g('rev-parse', 'HEAD'), rama: fx.g('symbolic-ref', 'HEAD'), index: fx.g('ls-files', '-s'), status: fx.g('status', '--porcelain') };
-}
-
-const tarea = (id, archivo) => ({ id, objective: 'tarea ' + id, acceptance: ['criterio ' + id], allowed_files: [archivo], risk: 'LOW', change_type: 'text' });
-function teams(fx, tareas) {
-  const tm = require(TM_PATH);
-  assert.strictEqual(tm.init(fx.root, { aprobarMigracion: true, mismoHost: true }).status, 'ACTIVO');
-  const p = tm.crearPlan(fx.root, { id: 'P1', objective: 'restore', sprints: [{ id: 'S1', tasks: tareas }] });
-  assert.ok(!p.status || !/INVALIDO|DESACTIVADO/.test(p.status), JSON.stringify(p));
-  return tm;
 }
 
 function restaurar(root, ref, extra) {
@@ -282,9 +272,8 @@ test('fallo durante el apply: el journal vuelve al rescate, nunca PASS', () => {
   assert.strictEqual(fx.leer('src/b.js').toString(), 'b actual\n');
 });
 
-test('fallo del apply y también del rescate: INCIDENTE y STOP RESTORE_FAILED en TEAMS', () => {
+test('fallo del apply y también del rescate: INCIDENTE con los archivos afectados', () => {
   const fx = fixture();
-  const tm = teams(fx, [tarea('T1', 'src/a.js')]);
   const c = rm.crear(fx.root, { archivos: ['src/a.js'], task_id: 'T1' });
   fx.escribir('src/a.js', 'actual\n');
   const r2 = rm.aplicar(fx.root, c.punto.id, {
@@ -293,7 +282,6 @@ test('fallo del apply y también del rescate: INCIDENTE y STOP RESTORE_FAILED en
   });
   assert.strictEqual(r2.status, 'INCIDENTE');
   assert.deepStrictEqual(r2.archivos, ['src/a.js']);
-  assert.ok(tm.pendientes(fx.root).some((s) => s.reason_code === 'RESTORE_FAILED'));
 });
 
 test('reinicio a mitad del rollback: se retoma por journal sin repetir pasos a ciegas', () => {
@@ -337,70 +325,4 @@ rm.aplicar(process.cwd(), ${JSON.stringify(c.punto.id)}, { expected_current_hash
   const r = rm.reanudar(fx.root).reanudados[0];
   assert.notStrictEqual(r.status, 'RESTAURADO');
   assert.ok(['FALLO_RECUPERADO', 'INCIDENTE'].includes(r.status));
-});
-
-// ─── rollback de TEAMS ───────────────────────────────────────────────────────
-
-function teamsConTareas(fx, tareas) {
-  const tm = teams(fx, tareas);
-  fs.writeFileSync(path.join(fx.root, '.agentic', 'restore-policy.json'), JSON.stringify({ rollback_automatico: true }));
-  return tm;
-}
-
-test('rollback de la tarea A conserva el cambio ajeno B; la tarea queda REVERTED, no cerrada', () => {
-  const fx = fixture();
-  const tm = teamsConTareas(fx, [tarea('A', 'src/a.js')]);
-  assert.strictEqual(rm.crear(fx.root, { tipo: 'BASELINE', task_id: 'A', archivos: ['src/a.js'] }).punto.state, 'VERIFIED');
-  fx.escribir('src/a.js', 'module.exports = "bug";\n');
-  rm.crear(fx.root, { tipo: 'AFTER_UNVERIFIED', task_id: 'A', archivos: ['src/a.js'] });
-  fx.escribir('src/b.js', 'cambio de B, de otra persona\n');
-  const r = rm.rollbackAutomatico(fx.root, { task_id: 'A', attempt: 1, fallo_reproducible: true });
-  assert.strictEqual(r.status, 'REVERTIDA', JSON.stringify(r));
-  assert.strictEqual(fx.leer('src/a.js').toString(), 'module.exports = 1;\n');
-  assert.strictEqual(fx.leer('src/b.js').toString(), 'cambio de B, de otra persona\n');
-  assert.strictEqual(tm.leerTarea(fx.root, 'A').state, 'REVERTED');
-  const goal = require(path.join(__dirname, '..', '.agentic', 'grafo', 'goal-check.cjs')).evaluar(fx.root, {});
-  assert.ok(goal.codigo, JSON.stringify(goal));
-  assert.notStrictEqual(goal.codigo, 'GOAL_OK', 'una tarea revertida no cuenta como terminada');
-  assert.strictEqual(tm.reintentar(fx.root, { task_id: 'A' }).status, 'OK');
-  assert.strictEqual(tm.leerTarea(fx.root, 'A').state, 'READY');
-});
-
-test('mismo archivo tocado por otra persona después: el rollback se bloquea y abre STOP', () => {
-  const fx = fixture();
-  const tm = teamsConTareas(fx, [tarea('A', 'src/a.js')]);
-  rm.crear(fx.root, { tipo: 'BASELINE', task_id: 'A', archivos: ['src/a.js'] });
-  fx.escribir('src/a.js', 'entrega de A\n');
-  rm.crear(fx.root, { tipo: 'AFTER_UNVERIFIED', task_id: 'A', archivos: ['src/a.js'] });
-  fx.escribir('src/a.js', 'entrega de A\n+ arreglo manual de otra persona\n');
-  const r = rm.rollbackAutomatico(fx.root, { task_id: 'A', attempt: 1, fallo_reproducible: true });
-  assert.strictEqual(r.status, 'NO_ELEGIBLE');
-  assert.ok(r.motivos.some((m) => m.startsWith('TRABAJO_AJENO_EN_ALCANCE')));
-  assert.strictEqual(fx.leer('src/a.js').toString(), 'entrega de A\n+ arreglo manual de otra persona\n');
-  assert.ok(tm.pendientes(fx.root).some((s) => s.reason_code === 'ROLLBACK_NO_ELEGIBLE'));
-});
-
-test('rollback sin autorización, con efectos externos o sin fallo reproducible: no elegible', () => {
-  const fx = fixture();
-  teamsConTareas(fx, [tarea('A', 'src/a.js')]);
-  rm.crear(fx.root, { tipo: 'BASELINE', task_id: 'A', archivos: ['src/a.js'] });
-  fx.escribir('src/a.js', 'entrega\n');
-  rm.crear(fx.root, { tipo: 'AFTER_UNVERIFIED', task_id: 'A', archivos: ['src/a.js'] });
-  assert.ok(rm.elegibilidadRollback(fx.root, { task_id: 'A', fallo_reproducible: false }).motivos.includes('FALLO_NO_REPRODUCIBLE'));
-  assert.ok(rm.elegibilidadRollback(fx.root, { task_id: 'A', fallo_reproducible: true, side_effects: [{ tipo: 'DB' }] }).motivos.includes('EFECTOS_EXTERNOS'));
-  fs.writeFileSync(path.join(fx.root, '.agentic', 'restore-policy.json'), JSON.stringify({ rollback_automatico: false }));
-  assert.ok(rm.elegibilidadRollback(fx.root, { task_id: 'A', fallo_reproducible: true }).motivos.includes('POLITICA_NO_AUTORIZA'));
-});
-
-test('restaurar código ya verificado invalida esa tarea DONE: vuelve a REVERTED', () => {
-  const fx = fixture();
-  const tm = teams(fx, [tarea('A', 'src/a.js')]);
-  const base = rm.crear(fx.root, { archivos: ['src/a.js'] });
-  const db = require(path.join(__dirname, '..', '.agentic', 'grafo', 'db-adapter.cjs')).openWrite(path.join(fx.root, '.agentic', 'memoria.db'));
-  try { db.prepare("UPDATE teams_tasks SET state = 'DONE_VERIFIED' WHERE id = 'A'").run(); } finally { db.close(); }
-  fx.escribir('src/a.js', 'implementado y verificado\n');
-  const { r } = restaurar(fx.root, base.punto.id);
-  assert.strictEqual(r.status, 'RESTAURADO');
-  assert.deepStrictEqual(r.tareas_revertidas, ['A']);
-  assert.strictEqual(tm.leerTarea(fx.root, 'A').state, 'REVERTED');
 });

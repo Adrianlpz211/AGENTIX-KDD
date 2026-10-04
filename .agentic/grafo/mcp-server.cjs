@@ -938,8 +938,7 @@ const TOOLS_V34 = [
   { name: 'telemetry_summary', description: 'Summary of all telemetry: total spans, STOPs, recalls, remembers.', inputSchema: { type:'object', properties:{}, required:[] } },
   { name: 'effort_decide', description: 'Universal effort router: tier = max(difficulty, risk), LOW/MEDIUM/HIGH with gates, roles, context budget and repair attempts. Same decision for aa:, sprint and teams. A requested tier below the risk floor is rejected (MIN_SEGURIDAD). Pass event to re-evaluate an existing task.', inputSchema: { type:'object', properties:{ intent:{type:'string'}, paths:{type:'array', items:{type:'string'}}, change_type:{type:'string'}, task_id:{type:'string'}, requested_tier:{type:'string'}, index_coverage:{type:'string'}, max_context_bytes:{type:'number'}, max_tool_calls:{type:'number'}, event:{type:'string'}, detail:{type:'string'} }, required:[] } },
   { name: 'context_pack', description: 'One context package per task (objective, acceptance, authorized paths, recall summaries, risks, file hashes, evidence). Reused when task and context are unchanged. Pass role to get only that role\'s part.', inputSchema: { type:'object', properties:{ task_id:{type:'string'}, objective:{type:'string'}, acceptance:{type:'array', items:{type:'string'}}, paths:{type:'array', items:{type:'string'}}, role:{type:'string'} }, required:['objective'] } },
-  { name: 'teams', description: 'TEAMS native backend (same as `akdd teams` and `teams:` in chat). action: init|plan|run|status|pause|resume|disable|pending|resolve|import|verify|views|revise-plan|connect-builder|builder-ready|findings|review|close|close-ack|close-confirm|reopen-campaign|progress|round|report|memory-mark|import-channel. init needs approve_migration=true to add teams_* tables (with backup) and is idempotent for the same roles (use reconfigurar to change roles). findings sub: añadir|publicar|promover|descartar|tomar|entregar|reanudar|latido|soltar|verificar|reabrir|bloquear|desbloquear|reubicar|siguiente|listar; review sub: registrar|informar|consumir|estado|pendientes|sujeto-final; pass the arguments of each in params (e.g. {task_id, severity, criterion, proposal, acceptance, location}). run validates first batch + builder READY + verifier and runs one pass with the real verifier. progress returns the measured advance (verified tasks / plan tasks) with the owner decisions that block the rest. resolve only succeeds if the host prompt hook recorded the person writing "teams: resolver <id> <decision>".', inputSchema: { type:'object', properties:{ action:{type:'string'}, approve_migration:{type:'boolean'}, plan:{type:'object'}, pending_id:{type:'string'}, decision:{type:'string'}, text:{type:'string'}, task_id:{type:'string'}, gates:{type:'array', items:{type:'object'}}, sprint:{type:'string'}, sub:{type:'string'}, params:{type:'object'}, reconfigurar:{type:'boolean'}, sesion:{type:'string'}, proyecto:{type:'string'}, listo:{type:'boolean'} }, required:['action'] } },
-  { name: 'whatsapp', description: 'Optional WhatsApp notices (same backend as `akdd ws` and `ws:` in chat). action: estado|desactivar|reintentar|procesar|teams|activar|contacto|elegir. activar/contacto/elegir only succeed if the host prompt hook recorded the person typing them; this tool cannot activate on its own. Without a real tested transport the activation ends UNSUPPORTED and nothing is sent.', inputSchema: { type:'object', properties:{ action:{type:'string'}, activation_id:{type:'string'}, text:{type:'string'}, choice:{type:'string'} }, required:['action'] } },
+  { name: 'whatsapp', description: 'Optional WhatsApp notices (same backend as `akdd ws` and `ws:` in chat). action: estado|desactivar|reintentar|procesar|activar|contacto|elegir. activar/contacto/elegir only succeed if the host prompt hook recorded the person typing them; this tool cannot activate on its own. Without a real tested transport the activation ends UNSUPPORTED and nothing is sent.', inputSchema: { type:'object', properties:{ action:{type:'string'}, activation_id:{type:'string'}, text:{type:'string'}, choice:{type:'string'} }, required:['action'] } },
   { name: 'restore', description: 'Real code restore points (Git objects in private refs/agentix/restore/*, never HEAD/branch/index). action: list|create|show|preview|apply|resume. apply needs expected_current_hash from a fresh preview; a preview that asks for a decision cannot be confirmed from here (only an interactive terminal). Restores code only: databases, migrations, deploys and messages are listed as not reverted.', inputSchema: { type:'object', properties:{ action:{type:'string'}, id:{type:'string'}, label:{type:'string'}, files:{type:'array', items:{type:'string'}}, expected_current_hash:{type:'string'} }, required:['action'] } },
 ];
 
@@ -984,14 +983,6 @@ async function handleV34Tool(name, args={}) {
       const p = await c.armar(ROOT2, { task_id: args.task_id, objetivo: args.objective, aceptacion: args.acceptance || [], paths: args.paths || [], origen: 'mcp' });
       return args.role ? c.paraRol(ROOT2, p, args.role) : p;
     }
-    case 'teams': {
-      const t = require(path.join(ROOT2, '.agentic/grafo/teams-manager.cjs'));
-      return t.ejecutarAccion(ROOT2, args.action, {
-        aprobar_migracion: args.approve_migration === true, plan: args.plan, pending_id: args.pending_id, decision: args.decision,
-        texto: args.text, task_id: args.task_id, gates: args.gates, sprint: args.sprint, origen: 'hook-prompt',
-        sub: args.sub, params: args.params, reconfigurar: args.reconfigurar === true, sesion: args.sesion, proyecto: args.proyecto, listo: args.listo === true,
-      });
-    }
     case 'whatsapp': {
       const w = require(path.join(ROOT2, '.agentic/grafo/whatsapp-manager.cjs'));
       const ad = w.adapterActual(ROOT2);
@@ -1000,11 +991,10 @@ async function handleV34Tool(name, args={}) {
         case 'desactivar': return w.desactivar(ROOT2, { adapter: ad });
         case 'reintentar': return w.reintentar(ROOT2, { activation_id: args.activation_id, adapter: ad });
         case 'procesar': return w.procesarCola(ROOT2, { adapter: ad });
-        case 'teams': return w.desdeTeams(ROOT2);
         case 'activar': return w.activar(ROOT2, { origen: 'hook-prompt', texto: args.text || 'ws: activar' });
         case 'contacto': return w.contacto(ROOT2, { activation_id: args.activation_id, texto: args.text, origen: 'hook-prompt', adapter: ad });
         case 'elegir': return w.elegir(ROOT2, { activation_id: args.activation_id, eleccion: args.choice, origen: 'hook-prompt', adapter: ad });
-        default: return { status: 'USO', detalle: 'action: estado|desactivar|reintentar|procesar|teams|activar|contacto|elegir' };
+        default: return { status: 'USO', detalle: 'action: estado|desactivar|reintentar|procesar|activar|contacto|elegir' };
       }
     }
     case 'restore': {

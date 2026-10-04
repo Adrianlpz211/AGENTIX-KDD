@@ -99,7 +99,6 @@ function planPiloto(root, destino) {
       'akdd update en la copia; repetir para comprobar que es idempotente',
       'health y capabilities en la copia',
       'un ciclo aa: pequeño con post-cycle',
-      'TEAMS: ida y vuelta por el canal MD entre las dos sesiones',
       'restore real de un punto creado en la copia',
       'WhatsApp: solo si la persona escribe ws: activar en ese momento',
     ],

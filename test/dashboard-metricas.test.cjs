@@ -216,15 +216,13 @@ test('D22: ciclos sin cierre verificado no completan el primer ciclo; config vac
   });
 });
 
-test('D22: TEAMS instalado no se afirma degradado ni verificado por el archivo', async () => {
+test('D22: un módulo instalado no se afirma degradado ni verificado por el archivo', async () => {
   const dir = tmp('integ'); crearFixture(dir);
   const g = path.join(dir, '.agentic', 'grafo'); fs.mkdirSync(g, { recursive: true });
-  fs.writeFileSync(path.join(g, 'teams-manager.cjs'), '// fixture\n');
   fs.writeFileSync(path.join(g, 'whatsapp-manager.cjs'), '// fixture\n');
   await conTablero(dir, (html) => {
-    assert.match(html, /data-integracion="teams" data-estado="instalada"/);
-    assert.doesNotMatch(html, /data-integracion="teams" data-estado="degradada"/);
-    assert.doesNotMatch(html, /data-integracion="teams" data-estado="verificada"/);
+    assert.doesNotMatch(html, /data-integracion="whatsapp" data-estado="degradada"/);
+    assert.doesNotMatch(html, /data-integracion="whatsapp" data-estado="verificada"/);
     assert.match(html, /data-integracion="whatsapp" data-estado="instalada"/);
   });
 });

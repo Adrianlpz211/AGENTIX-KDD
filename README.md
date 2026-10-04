@@ -44,7 +44,7 @@ Everything Agentix does belongs to one of **three pieces**. If you get lost in t
 |---|---|---|---|
 | ⚓ | **Anchor** — memory | Remembers decisions, rules, errors and the code's structure across sessions, **traces where each piece of knowledge came from**, and surfaces only what is relevant at the right moment. | 4-layer memory (CoALA) · KDD graph · AST code graph with line precision · hybrid BM25 + vector recall under a token budget · **memory with provenance** (activity → observation → knowledge → evidence) · **layered recall** · **compaction that keeps the original** · privacy redaction · known-cure matching · natural-language per-file descriptions · MemCurator · gate ledger · measured task time |
 | 🔧 | **Lever** — verification | Before accepting a change, mechanically checks that it doesn't break what already worked. When in doubt it **stops on the safe side**. Never reports a false "green". | Evidence-based closing (PASS/FAIL/SKIP/UNVERIFIED/ERROR) · TDD Gate · Preservation Gate (per-test contracts + front scenarios) · Regression Guard · protected files · AST blast radius · Spec Gate · Security Gate (secrets/PII/injection/cross-tenant) · Browser Gate · UI Native Gate · design memory · CSS Token Gate · Simple Gate · git hooks · prediction grading |
-| 🔨 | **Hammer** — autonomy | Runs complete development cycles on a leash: analyzes, builds, tests, learns, recovers from stops, and reports. | `aa:` pipeline · effort router (LOW/MEDIUM/HIGH) · LEGION MODE (parallel sub-agents, read/judge steps only) · 4-lens QA · `audit:` department · **TEAMS native** (director + three reviewers + builder) · restore points · RECOVERY protocol · multi-instance locks · safe update · ClickUp bridge (opt-in) · WhatsApp notices (opt-in) |
+| 🔨 | **Hammer** — autonomy | Runs complete development cycles on a leash: analyzes, builds, tests, learns, recovers from stops, and reports. | `aa:` pipeline · effort router (LOW/MEDIUM/HIGH) · LEGION MODE (parallel sub-agents, read/judge steps only) · 4-lens QA · `audit:` department · restore points · RECOVERY protocol · multi-instance locks · safe update · ClickUp bridge (opt-in) · WhatsApp notices (opt-in) |
 
 **The measured property that defines the armor:** when Agentix doubts, it protects. Against a real parser, of 1,989 symbols compared, the range error falls on the safe side in **99.75%** of cases (dangerous side: 5 cases, all ≤ 5 lines).
 
@@ -53,10 +53,9 @@ Everything Agentix does belongs to one of **three pieces**. If you get lost in t
 | You want… | You type | What runs |
 |---|---|---|
 | **One agent, one task** (the daily mode) | `aa: <task>` | The full individual pipeline: enricher → analysis → build → TDD → QA → memory → post-cycle → measured time |
-| **Claude Code directs, Cursor builds** a bigger plan | `teams: plan <goal>` | The TEAMS campaign: sprints of tasks, a builder, three reviewers, a Corrections queue, measured progress |
 | **Read-only audit** | `audit: auditar` | Seven auditors in parallel; never touches code |
 
-Both `aa:` and `teams:` close through the **same core** — the same cycles, KDD memory, contracts, AST, design memory, preservation gate and dashboard. A TEAMS task is registered with `origin = teams`; you never need to type `aa:` for it. Nothing about the individual flow changed when TEAMS arrived, and a regression test runs the whole `aa:` cycle against a real engine to keep it that way.
+Everything `aa:` does closes through one **core** — cycles, KDD memory, contracts, AST, design memory, preservation gate and dashboard.
 
 ---
 
@@ -89,7 +88,7 @@ audit: auditar                                  ← 7 parallel auditors; read-on
 akdd dashboard                                  ← see everything
 ```
 
-> The command vocabulary (`aa:`, `audit:`, `teams:`) is Spanish — the task you write after it can be in any language. Chat prefixes are instructions for the agent, not shell commands.
+> The command vocabulary (`aa:`, `audit:`) is Spanish — the task you write after it can be in any language. Chat prefixes are instructions for the agent, not shell commands.
 
 ---
 
@@ -151,7 +150,7 @@ New tables arrive **only through `akdd update`**. Reading never creates or migra
 | Host | Capture | What it sees |
 |---|---|---|
 | Claude Code / Cursor **with the host hooks installed** (`akdd host-hooks install`, never automatic) | `NATIVE_PASSIVE` | Shell, edit and MCP actions **before** they run, and the guard's decision — not the tool's output |
-| Same hosts **without** hooks | `PIPELINE_ONLY` | Only what goes through Agentix: `aa:`, post-cycle, Agentix MCP tools, TEAMS |
+| Same hosts **without** hooks | `PIPELINE_ONLY` | Only what goes through Agentix: `aa:`, post-cycle, Agentix MCP tools |
 | Any other host | `UNSUPPORTED` | Nothing is promised |
 
 It does **not** see an IDE's internal reads and searches, tool output, or the model's reasoning.
@@ -203,49 +202,9 @@ Every answer carries explicit states (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSI
 
 ## 🔨 Autonomy — the Hammer
 
-### TEAMS native — Claude Code directs, Cursor builds
+### TEAMS — being rebuilt
 
-Open both on the same project and, in the chat:
-
-```
-teams: activar
-teams: plan <objective>
-teams: arrancar director      ← in Claude Code: it reads its own protocol; nothing to paste
-teams: arrancar builder       ← in Cursor: same, as the builder
-teams: vigilar                ← starts your watchers (host loop + wake-up task)
-teams: comprobar              ← tells you exactly what is alive and what is not
-teams: ejecutar
-teams: estado · teams: pendientes · teams: pausa · teams: continuar · teams: avance · teams: cerrar
-```
-
-A plan has sprints of tasks with `acceptance`, `allowed_files`, `depends_on`, `risk` and `change_type`. Activating the TEAMS tables in an existing project asks for migration approval (`init --aprobar-migracion`). CLI equivalent: `akdd teams <init|plan|run|status|pending|resolve|goal>`.
-
-TEAMS runs on the **same core as `aa:`**. Every task the director verifies goes through a bridge that records it as a cycle, memory, contracts, AST, layout and preservation evidence with `origin = teams`. The record is an *outbox*: it is queued in the same transaction as the event, retried if it fails, and a task stays `MEMORY_PENDING` until it is really registered. A failed registration never blocks independent tasks, but it keeps the final close from being "complete".
-
-| Piece | What it does |
-|---|---|
-| **The builder never marks DONE** | It submits; the director verifies with gates on the exact subject |
-| **You land it, the director plans it** | You state everything (scope, rules, reference links). The director turns it into sprints → phases → tasks with acceptance, files, dependencies, risks and review criteria, shows you a summary and asks only what is indispensable |
-| **Audit never gates ordinary progress** | The builder goes Phase 1 → Phase 2 → Sprint 2 while the reviewers work. A late finding goes to **Correcciones pendientes**; the builder reads it first, suspends its task safely, fixes, and resumes at the exact position. A real unmet dependency still blocks its branch; security and preservation are never relaxed |
-| **Three reviewers** | Frontend/UI-UX, backend, and business (a general auditor of the domain logic). Each verdict is bound to the hash it reviewed; an old hash does not count |
-| **Closing** | An empty queue is *not* the end: the campaign waits for the final audit. The director closes only when all three reviewers concluded on the FINAL subject, findings are resolved or listed, and every memory record is registered. The builder acknowledges and stops **its own** loop and watch. Final state: `COMPLETED` or `COMPLETED_WITH_PENDING` |
-| **Decisions that are yours** | Recorded with the question and alternatives; independent work continues; the director reports *"the project stands at X % because of these decisions of yours"*. X is computed from the plan (verified tasks ÷ planned tasks), never invented |
-| **Research on the internet** | The director and the business reviewer can fetch the **reference links you gave** (or ones you authorize). Content is stored as evidence (URL, date, hash), redacted, and treated strictly as data. Private networks and redirects to them are refused |
-| **Two independent watchers** | The host loop every 180 s is the backup that does wake the model; a file watch lowers latency to seconds. A signal is not a task and not an ACK |
-| **Shared context** | Director and builder exchange **versioned packets** (snapshot, or a delta only against the revision the receiver acknowledged); the director **re-verifies the original evidence** — an invented PASS or evidence from an older version is rejected |
-
-```bash
-akdd teams prompt director      # the real start prompts, with your absolute paths and plan
-akdd teams prompt builder       # paste once in Cursor
-akdd teams avance               # measured progress and the owner decisions that hold it back
-akdd teams correcciones listar  # findings by priority   ·   akdd teams revision ...   ·   akdd teams cerrar
-akdd teams vigilancia estado    # what is installed, alive, detecting, and what the host really accepts
-akdd teams investigar consultar --plan=P --url=... --pregunta="..."
-```
-
-**How the model is woken.** A file watcher cannot enter a chat by itself; the host does it. The director and the builder each launch `teams-vigilancia.cjs esperar --rol=<role> --despertar` as a **background task of their host** (Claude Code: a background command or Monitor; Cursor: a background process). It prints `AGENT_LOOP_WAKE_<role>` and exits when there is work, the host delivers that to the session as a notification, the session reads, works and relaunches it. It spends no turns while idle. The 180 s host loop stays as the backup. Agentix reports the wake as `EVENT_WAKE_POR_TAREA_DEL_HOST` while the wait is alive and only as `EVENT_WAKE_VERIFICADO` once the session confirmed a read after a notice.
-
-**Limits, said plainly.** Without that background task or a confirmed host loop the mode is `MANUAL_ONLY` (`EVENT_WAKE_UNSUPPORTED`) and no autonomy is announced. TEAMS is verified with simulated builder/receipts and real storage (levels A and B); the **real Claude Code + Cursor campaign (level C) is `NO_EJECUTADO`** until you run it. No Windows scheduled task is installed unless you approve it, and updating Agentix never installs one.
+The TEAMS mode (Claude Code directs, Cursor builds) was removed from this version and is being rebuilt from scratch. Until it ships, use `aa:` (one agent, one task) and `audit:`.
 
 ### The rest of the hammer
 
@@ -273,7 +232,6 @@ akdd teams investigar consultar --plan=P --url=... --pregunta="..."
 | ⏱ **Línea de Tiempo** | Measured time per task and module |
 | 🧬 **Memoria** (`/memoria`) | What is stored, the queue and dead-letters, provenance, legacy records, independent health states |
 | 📦 **Contexto y esfuerzo** (`/contexto`) | Effort tier, cumulative budget, net payload reduction and *how it was measured*, per-host coverage |
-| 👥 **TEAMS** (`/teams`) | Campaign state, tasks, pending corrections, reviewers, measured progress, watchers |
 | 🔄 **Actualización** (`/actualizacion`) | Installed version, schema compatibility, the last verification, what was preserved, the backup, what to do |
 
 The new pages are read-only and paginated; opening one never writes. Health shows independent states — service, readable, schema, search, last verified write, queue, update — and the dashboard is **not green** if the schema is broken even when HTTP answers 200. Missing data reads "not available", never `0`. A read-only API (`/api/v1/summary`, `/tasks`, `/contracts`, `/incidents`, `/usage`, `/restore-points`…) and the graph libraries are served locally — no CDN.
@@ -318,7 +276,7 @@ Plain-language visual guides: [how to read the graph](docs/GRAFO-GUIA.md) · [ho
 | Before planning a change | `impact_precheck`, `contracts_blast`, `effort_decide` | What breaks if this file changes, how many contracts are at risk, which tier and gates apply |
 | While working | `pipeline_step`, `pipeline_gate`, `contracts_gate`, `context_compress` / `context_recover` | Each step registered through the harness; large outputs compacted with the original recoverable |
 | When closing | `remember`, `causal_add`, `memory_capture` | The tested lesson goes into memory for the next session |
-| Coordination | `teams`, `teams_packet`, `restore`, `session_historial` | Plans between Claude Code and Cursor, shared packets, restore points, resuming a chat |
+| Coordination | `restore`, `session_historial` | Restore points, resuming a chat |
 
 It is the same engine and the same `memoria.db` as the CLI — **not another AI, not a cloud memory**. Its value depends on the agent using the tools; it can't keep an IDE session alive by itself. List the live tool set with `akdd capabilities`.
 
@@ -388,9 +346,9 @@ Options: `--check` (plan only), `--json` (one JSON document on stdout), `--no-mi
 
 **🥇 Battle-tested** (repeated real use): the `aa:` pipeline, 4-layer memory + hybrid search, classic gates (Spec/TDD/Security/Regression), automatic per-commit registration, checkpoints, multi-instance locks, dashboard graphs, MCP, line-level containment, parallel Front/Back.
 
-**🥈 Verified with fixtures, real Git, real SQLite and a real browser** (controlled scenarios, not yet months of production): evidence-based closing, the transactional update and its upgrades from the real npm packages, effort router and context packages, per-test contracts, protected files, AST blast radius, index-based git hooks and the canary, restore points, **memory with provenance, the durable queue, layered recall and compaction**, the TEAMS engine and its bridge to the common core, the global MCP launcher, the dashboard pages, time measurement.
+**🥈 Verified with fixtures, real Git, real SQLite and a real browser** (controlled scenarios, not yet months of production): evidence-based closing, the transactional update and its upgrades from the real npm packages, effort router and context packages, per-test contracts, protected files, AST blast radius, index-based git hooks and the canary, restore points, **memory with provenance, the durable queue, layered recall and compaction**, the global MCP launcher, the dashboard pages, time measurement.
 
-**🥉 Logic verified, live host NOT verified**: TEAMS with Claude Code and Cursor open at the same time on one machine (level C — `NO_EJECUTADO`), IDE host-hook adapters inside each IDE, WhatsApp notices end to end.
+**🥉 Logic verified, live host NOT verified**: IDE host-hook adapters inside each IDE, WhatsApp notices end to end.
 
 **🔒 Private beta**: team collaboration (shared memory).
 
@@ -409,7 +367,7 @@ Options: `--check` (plan only), `--json` (one JSON document on stdout), `--no-mi
 
 ### Context benchmark (deterministic, no user data)
 
-`akdd benchmark contexto` runs eight cases against the real modules — baseline (nothing compacted) vs optimized, same task, same acceptance. Recovering an original **counts against** the saving.
+`akdd benchmark contexto` runs seven cases against the real modules — baseline (nothing compacted) vs optimized, same task, same acceptance. Recovering an original **counts against** the saving.
 
 | Case | Net payload saved | Note |
 |---|---|---|
@@ -419,10 +377,9 @@ Options: `--check` (plan only), `--json` (one JSON document on stdout), `--no-mi
 | D · refactor with protected contracts | 95.2 % | all 30 protected contracts listed; under a tight cap it answers `INSUFFICIENT_BUDGET` instead of dropping any |
 | E · rare critical record in a long JSON | 99.4 % | found over the complete original |
 | F · empty / malformed / secret / code to edit | 41.4 % | edges: nothing lost, nothing leaked |
-| G · TEAMS, restarts and a changed evidence | 71.3 % | simulated receiver; protocol and database are real |
 | H · 4,000-node memory | 99.3 % | index + two details, never a dump |
 
-All 31 acceptance criteria held. This is a **payload** reduction (bytes exact; tokens are `bytes/4` *estimates*), not a saving of session, reasoning or money. A campaign with real models is `NO_EJECUTADO` (it costs money and needs your authorization), and none of this was measured inside Cursor or Claude Code.
+All acceptance criteria held. This is a **payload** reduction (bytes exact; tokens are `bytes/4` *estimates*), not a saving of session, reasoning or money. A campaign with real models is `NO_EJECUTADO` (it costs money and needs your authorization), and none of this was measured inside Cursor or Claude Code.
 
 > ⚠️ **Honesty first:** the 19-phase benchmark is **N=1, directional, not peer-reviewed** — see [BENCHMARK.md](BENCHMARK.md). Live counts of modules, MCP tools and tests change with every release, so they are not written here: `node scripts/sync-version.cjs --inventario` and `akdd capabilities` print them.
 
@@ -480,11 +437,10 @@ akdd capabilities              # Installed / wired / executed / verified, per mo
 akdd dashboard                 # Visual board at localhost:3847
 ```
 
-### Effort, context & TEAMS
+### Effort & context
 ```bash
 akdd effort decide "<task>" --paths=a,b [--type=T] [--json]   # Tier + gates + budgets
 akdd context armar "<goal>" --paths=a,b                        # One context package per task
-akdd teams <init --aprobar-migracion|plan plan.json|run|status|pending|resolve <id> <decision>|goal>
 akdd restore <list|create --label=L [--files=a,b]|show <id>|preview <id>|apply <id> --expected-current-hash=H>
 ```
 
@@ -507,7 +463,6 @@ akdd context compress <file|-> --kind=log|test|json|search|doc|code --task=T [--
 akdd context recover <reference_id> [--lines=a-b|--json-path=items]
 akdd context leer <file> --task=T     # Read with reuse (a changed hash always invalidates)
 akdd effort budget estado <task>      # Cumulative effort budget per task · 'host' = what Agentix cannot observe
-akdd teams packet estado|snapshot|ack|invalidar|cerrar   # Shared director/builder packets
 akdd benchmark contexto [--json]      # Deterministic benchmark (net payload, honest measurement)
 ```
 
@@ -569,13 +524,13 @@ akdd locks release-all         # Release everything (session cleanup)
 ## Honest limits (what it is NOT)
 
 1. **It's not invulnerable.** The armor reduces and directs error; it doesn't eliminate it. The quality of autonomous fixes comes from whichever model you run.
-2. **Verified is not the same as live-certified.** TEAMS with two IDEs open at once, the IDE host-hook adapters and WhatsApp are verified in logic and fixtures, not yet inside a live IDE session. The TEAMS receiver, builder and director in the tests are simulated; the protocol and the database are real.
+2. **Verified is not the same as live-certified.** The IDE host-hook adapters and WhatsApp are verified in logic and fixtures, not yet inside a live IDE session.
 3. **It has a coverage ceiling, and declares it.** Files without symbols don't get line precision — doubt closes the gate instead. `coverage-meter` and `UNKNOWN` states tell you where.
 4. **Regex extractors, not a parser** — a measured decision (see "Where it comes from"). Edge cases fall into DOUBT, not silence.
 5. **The semantic band stays in the model.** Business values are watched by iron, but "does this contradict the SPIRIT of the decision?" is judged by the LLM following protocol — and the ledger records which protection came from which.
 6. **No fixed token-saving promise.** The effort numbers measure context requested, not host tokens or result quality.
 7. **The 19-phase benchmark is N=1** — directional, not peer-reviewed.
-8. **The update has limits it states.** A lock file cannot control an outside program that opens `memoria.db` with its own SQLite: for those the update relies on SQLite's write lock and **stops** (`BLOCKED`) if it can't get it. Dozens of engine modules still open SQLite directly instead of through the adapter; they are listed, locked by a test so no new one appears unnoticed, and do not consult the exclusion. A live TEAMS director/builder pair during an update was not tested end to end. `better-sqlite3` is unverified on Node 24. Restoring historical data over newer learnings is not part of `--rollback`.
+8. **The update has limits it states.** A lock file cannot control an outside program that opens `memoria.db` with its own SQLite: for those the update relies on SQLite's write lock and **stops** (`BLOCKED`) if it can't get it. Dozens of engine modules still open SQLite directly instead of through the adapter; they are listed, locked by a test so no new one appears unnoticed, and do not consult the exclusion. `better-sqlite3` is unverified on Node 24. Restoring historical data over newer learnings is not part of `--rollback`.
 9. **Memory with provenance sees what the host hands over.** Native passive capture needs the host hooks installed and only covers actions *before* they run; without them, only what goes through Agentix is recorded. A claim of "verified inside Cursor/Claude" is never made from a fixture; a smoke test in real hosts is `NO_EJECUTADO` unless you run it.
 10. **Compaction is a payload measure, not a promise.** The benchmark measures bytes Agentix controls, deterministically; tokens are `bytes/4` estimates. When recovering the original is needed, the saving shrinks — and in some cases it is zero by design.
 11. **The redactor reduces risk; it is not a DLP.** Regular expressions miss secrets that carry no context. Use `.agentic/privacy-policy.json` to deny paths and fields.
@@ -617,7 +572,7 @@ Results, the log and the exact tarball land in `_output/release-<version>/` (`ve
 
 ## Status & transparency
 
-Agentix is **young, evolving software**. 3.20 was built by asking, gate by gate, whether a green could be faked — and closing it where it could; 3.20.1 added memory you can trace, an update that proves itself, and a TEAMS mode wired to the same core. Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
+Agentix is **young, evolving software**. 3.20 was built by asking, gate by gate, whether a green could be faked — and closing it where it could; 3.20.1 added memory you can trace, an update that proves itself, and the groundwork for a rebuilt TEAMS mode. Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
 
 The real promise, without inflation:
 

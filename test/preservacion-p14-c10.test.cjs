@@ -146,18 +146,17 @@ test('P15: LOW en auth no salta permisos; caché con cuerpo cambiado no evita la
 
 // ─── P16 / C09 ───────────────────────────────────────────────────────────────
 
-test('P16: stdin vacío no ladrilla; sin ruta o MCP protegido sí se niega', () => {
+test('P16: stdin vacío no ladrilla; sin ruta sí se niega', () => {
   const root = tmp('akdd p16 ');
-  fs.mkdirSync(path.join(root, '.agentic', '_teams'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.agentic'), { recursive: true });
   const dec = (host, ev, e) => { const o = hg.procesar(host, ev, e, root); return host === 'claude' ? o.hookSpecificOutput.permissionDecision : o.permission; };
   assert.strictEqual(dec('cursor', 'edit', null), 'allow', 'transporte roto no apaga Cursor');
   assert.strictEqual(dec('cursor', 'edit', { tool_input: {} }), 'deny', 'sin ruta no se sabe qué escribe');
   assert.strictEqual(dec('claude', 'shell', { tool_input: {} }), 'deny');
   assert.strictEqual(dec('cursor', 'edit', { tool_input: { path: path.join(root, 'src con espacio', 'a.js') } }), 'allow');
-  assert.strictEqual(dec('cursor', 'mcp', { tool_input: { path: path.join(root, '.agentic', '_teams', 'origen-humano.jsonl') } }), 'deny');
   assert.strictEqual(dec('claude', 'mcp', { tool_input: { query: 'select 1' } }), 'allow');
   const ev = fs.readFileSync(path.join(root, '.agentic', '_hooks-eventos.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-  assert.ok(ev.length >= 5 && ev.every((e) => e.origen === 'host'), 'cada ejecución deja huella');
+  assert.ok(ev.length >= 4 && ev.every((e) => e.origen === 'host'), 'cada ejecución deja huella');
 });
 
 test('C09: instalar usa ruta absoluta entre comillas, incluye MCP, y el smoke real decide el estado', () => {
@@ -208,30 +207,6 @@ test('C08: mock no hace VERIFIED; cambio de cuerpo invalida; execution_id repeti
   assert.match(cambio.invalidadas[0].motivo, /MODULO_CAMBIO/);
   assert.strictEqual(cap.evaluar({ ...base, verificaciones: [hostV, hostV, hostV] }, actual).verificaciones_vigentes, 1);
   assert.strictEqual(cap.evaluar({ instalado: true }).estado, 'INSTALLED');
-});
-
-test('C08: TEAMS no acepta los gates que manda el constructor; verifica el director', () => {
-  const tm = require(path.join(G, 'teams-manager.cjs'));
-  const ad = require(path.join(G, 'teams-adapters.cjs'));
-  const { createGateResult } = require(path.join(G, 'gate-result.cjs'));
-  const root = tmp('akdd-c08-');
-  fs.mkdirSync(path.join(root, '.agentic'));
-  fs.mkdirSync(path.join(root, 'src'));
-  fs.writeFileSync(path.join(root, 'src', 'a.js'), "module.exports = 1;\n");
-  fs.writeFileSync(path.join(root, '.agentic', 'config.md'), 'CONFIGURADO: SI\n');
-  dba.openWrite(path.join(root, '.agentic', 'memoria.db')).close();
-  assert.strictEqual(tm.init(root, { aprobarMigracion: true }).status, 'ACTIVO');
-  tm.crearPlan(root, { id: 'P', objective: 'x', sprints: [{ id: 'S', tasks: [{ id: 'A', objective: 'a', acceptance: ['ok'], allowed_files: ['src/a.js'], risk: 'LOW', change_type: 'text' }] }] });
-  const falsos = (t0) => { const t = tm.leerTarea(root, t0.id); return tm.gatesRequeridos(t).map((gate) => createGateResult({ gate, status: 'PASS', subject_hash: 'h-A', execution_id: 'del-builder-' + gate, evidence: [{ kind: 'fixture', subject_hash: 'h-A' }] })); };
-  const builder = new ad.AdapterPrueba({ producir: (a) => ({ files: a.task.allowed_files, subject_hash: 'h-A', evidence: falsos(a.task), gates: falsos(a.task) }) });
-  let directorCalls = 0;
-  const director = (res) => { directorCalls++; const t = tm.leerTarea(root, res.task_id); return tm.gatesRequeridos(t).map((gate) => createGateResult({ gate, status: 'FAIL', subject_hash: t.subject_hash, execution_id: 'dir-' + gate, evidence: [{ kind: 'ejecucion' }] })); };
-  let v = null;
-  for (let i = 0; i < 3 && !v; i++) v = ad.tick(root, { builder, verificador: director, puntos: false }).find((p) => p.paso === 'verificar');
-  assert.ok(v, 'el director llegó a verificar');
-  assert.ok(directorCalls > 0, 'el constructor no puede sustituir al comprobador del director');
-  assert.notStrictEqual(v.status, 'DONE_VERIFIED', 'los PASS declarados por el constructor no cuentan');
-  assert.notStrictEqual(tm.leerTarea(root, 'A').state, 'DONE_VERIFIED');
 });
 
 // ─── C10 ─────────────────────────────────────────────────────────────────────

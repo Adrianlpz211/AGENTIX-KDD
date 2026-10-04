@@ -1,5 +1,9 @@
 # Changelog — Agentic KDD
 
+## [Sin publicar] — TEAMS v4 (en reconstrucción)
+
+Se retiró por completo el modo TEAMS anterior (19 módulos `teams-*`, su CLI, su herramienta MCP, su pestaña del tablero, su perfil del laboratorio y sus pruebas): su flujo no seguía el protocolo manual que el dueño usa en producción (canal MD único, la auditoría nunca gatea el avance). Se conserva el núcleo común (`post-cycle --origen=teams`, memoria con procedencia, puntos de restauración, puente WhatsApp, filtro `origen` del tablero) para que el TEAMS nuevo se registre en él. `akdd teams` responde que no está disponible. El laboratorio (`sandbox`) queda solo en modo individual y el benchmark de contexto en siete casos.
+
 ## [3.20.4] — 2026-10-04
 
 **Dashboard: Memoria, Contexto y esfuerzo, TEAMS y Actualización se abren DENTRO del tablero.**

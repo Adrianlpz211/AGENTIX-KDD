@@ -93,7 +93,7 @@ test('accesos SQLite: la lista de aperturas directas es exactamente la declarada
 
 test('accesos SQLite: los escritores que importan durante un update respetan la exclusión', () => {
   for (const f of ['.agentic/grafo/db-adapter.cjs', '.agentic/grafo/post-cycle.cjs', '.agentic/grafo/hook-runner.cjs', '.agentic/grafo/lock-manager.cjs',
-    '.agentic/grafo/gate-telemetry.cjs', '.agentic/grafo/mcp-server.cjs', '.agentic/grafo/teams-watch.cjs']) {
+    '.agentic/grafo/gate-telemetry.cjs', '.agentic/grafo/mcp-server.cjs']) {
     assert.match(leer(f), /update-guard\.cjs/, f + ' debe consultar update-guard');
   }
   assert.match(leer('.agentic/grafo/mcp-server.cjs'), /registerWriter/, 'el MCP se registra como escritor con pausa y ack');

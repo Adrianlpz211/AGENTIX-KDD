@@ -25,21 +25,21 @@ const lines=['# AGENTIX — reporte adversarial', '', 'Estado: **'+report.status
 fs.writeFileSync(path.join(dest,'REPORTE.md'),lines.join('\n'));
 fs.writeFileSync(path.join(dest,'REPORTE.html'),'<!doctype html><meta charset="utf-8"><title>AGENTIX Sandbox</title><style>body{background:#11121a;color:#e8e8f4;font:16px system-ui;max-width:1100px;margin:40px auto;padding:24px}h1{color:#ad8cff}pre{white-space:pre-wrap}a{color:#69caff}</style><h1>AGENTIX · '+esc(report.mode)+'</h1><h2>'+esc(report.status)+'</h2><p>Fixture aislado. No es una certificación universal.</p><pre>'+esc(lines.join('\n'))+'</pre>');
 }
-function run({mode='teams',seed=211,rounds,output}={}){
-if(!['individual','teams'].includes(mode))throw Error('MODE_INVALID');
+function run({mode='individual',seed=211,rounds,output}={}){
+if(mode!=='individual')throw Error('MODE_INVALID');
 const dest=output?path.resolve(output):fs.mkdtempSync(path.join(os.tmpdir(),'agentix-'+mode+'-'));
 if(dest===source||dest.startsWith(source+path.sep))throw Error('OUTPUT_MUST_BE_OUTSIDE_REPOSITORY');
 if(fs.existsSync(dest)&&fs.readdirSync(dest).length)throw Error('OUTPUT_MUST_BE_EMPTY');
 fs.mkdirSync(dest,{recursive:true});const root=path.join(dest,'engine');const manifest=snapshot(root);
-const catalog=require('./catalog.cjs');const groups={...catalog.individual,...(mode==='teams'?catalog.teams:{})};
-const selected=new Set(Object.values(groups).flat());const excluded=new Set(mode==='individual'?Object.values(catalog.teams).flat():[]);groups.otros_mecanismos=fs.readdirSync(path.join(root,'test')).filter(f=>f.endsWith('.test.cjs')).map(f=>f.slice(0,-9)).filter(n=>!selected.has(n)&&!excluded.has(n));
+const catalog=require('./catalog.cjs');const groups={...catalog.individual};
+const selected=new Set(Object.values(groups).flat());const excluded=new Set();groups.otros_mecanismos=fs.readdirSync(path.join(root,'test')).filter(f=>f.endsWith('.test.cjs')).map(f=>f.slice(0,-9)).filter(n=>!selected.has(n)&&!excluded.has(n));
 const suites=[];for(const [name,names]of Object.entries(groups)){
 process.stdout.write('Prueba '+name+'...\n');
 const files=names.map(n=>'test/'+n+'.test.cjs');const missing=files.filter(f=>!fs.existsSync(path.join(root,f)));
 if(missing.length){suites.push({name,status:'ERROR',missing});continue;}
 const r=command(root,['--test','--test-reporter=tap',...files]);const log=name+'.tap.txt';fs.writeFileSync(path.join(dest,log),r.stdout+'\n'+r.stderr);suites.push({name,...verdict(r),log});
 }
-const attacks=require('./probes.cjs').run(root,rounds??(mode==='teams'?512:64),seed);if(mode==='teams'){const native=require('./native-probes.cjs').run(root);attacks.native=native;attacks.results.push(...native.results);attacks.failures.push(...native.failures);}
+const attacks=require('./probes.cjs').run(root,rounds??64,seed);
 json(path.join(dest,'ATAQUES.json'),attacks);
 const original_changed=unchanged(manifest);
 const pending=['Cursor individual real: abrir workspace preparado y ejecutar campaña de host.','Claude Code + Cursor simultáneos: intercambio nativo, ACK, continuidad y cierre pendiente de ejecutar.','Instalación de hooks dentro de IDE y transporte real no ejecutados por este corredor.','Vigilancia Windows: simulación no prueba tarea instalada.','Dashboard: navegador real/offline/390px pendiente; firmas y APIs son mecanismos.','WhatsApp real excluido; no se envían mensajes.','Tokens reales UNKNOWN: solo el proveedor/host puede acreditarlos.'];

@@ -61,7 +61,7 @@ function markdown() {
     l.push('**Último release check:** no hay informe en `_output/` (ejecuta `npm run release:check`). Sin informe no hay plataforma ni artefacto certificados.');
   }
   l.push('');
-  for (const doc of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03', 'TEAMS']) {
+  for (const doc of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03']) {
     const lista = datos.requisitos.filter((r) => r.doc === doc);
     l.push('## ' + doc + ' (' + lista.length + ' requisitos)');
     l.push('');
@@ -76,7 +76,7 @@ function markdown() {
   const noHost = datos.requisitos.filter((r) => /NO_EJECUTADO/.test(r.alcance));
   l.push('## Lo que NO está verificado');
   l.push('');
-  l.push('- **Hosts reales (Cursor, Claude Code):** ' + (noHost.length ? noHost.map((r) => r.id).join(', ') + ' quedan `NO_EJECUTADO`. ' : '') + 'Los receptores/constructores/directores de TEAMS en las pruebas son simulados; el protocolo y la base son reales.');
+  l.push('- **Hosts reales (Cursor, Claude Code):** ' + (noHost.length ? noHost.map((r) => r.id).join(', ') + ' quedan `NO_EJECUTADO`. ' : '') + 'Los hosts reales no se ejecutaron en las pruebas.');
   l.push('- **Campañas con modelos reales:** `NO_EJECUTADO` (cuestan dinero y requieren autorización). El benchmark es determinista y mide payload.');
   l.push('- **Publicación:** esta matriz no afirma que 3.20.1 esté publicada: `npm view agentic-kdd version` y `npm run release:verify` lo dicen.');
   l.push('');

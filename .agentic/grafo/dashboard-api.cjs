@@ -32,22 +32,7 @@ const iso = (x) => { const d = fu.fechaUtc(x); return d ? d.toISOString() : null
    probada sin una huella propia; las pruebas con fixtures no la sustituyen. */
 function integraciones(projectPath) {
   const hay = (f) => fs.existsSync(path.join(projectPath, '.agentic', 'grafo', f));
-  const teams = (() => {
-    if (!hay('teams-manager.cjs')) return { id: 'teams', estado: 'no_instalada', detalle: '', accion: 'akdd update' };
-    try {
-      const tm = require('./teams-manager.cjs');
-      const st = typeof tm.estado === 'function' ? tm.estado(projectPath) : null;
-      if (st && (st.status === 'ACTIVE' || st.activo === true)) {
-        return { id: 'teams', estado: 'activa', detalle: 'coordinación activa', accion: '' };
-      }
-      if (st && st.status) {
-        return { id: 'teams', estado: 'instalada', detalle: 'módulo presente; estado=' + st.status + ' — no verificado por existir el archivo', accion: 'teams: activar' };
-      }
-    } catch { /* el archivo fixture no es el módulo real */ }
-    return { id: 'teams', estado: 'instalada', detalle: 'módulo presente; sin evidencia de host nativo ni ACTIVE', accion: 'teams: activar' };
-  })();
   return [
-    teams,
     hay('whatsapp-manager.cjs')
       ? { id: 'whatsapp', estado: 'instalada', detalle: 'el módulo existe; activo solo tras ws: activar con respuesta ACTIVE', accion: 'ws: activar (lo escribe la persona)' }
       : { id: 'whatsapp', estado: 'no_instalada', detalle: '', accion: '' },
@@ -177,7 +162,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       if ((r.faltan || []).includes('ciclos')) return { status: 'UNAVAILABLE', data: null, reason_code: 'TABLA_AUSENTE' };
       let lista = r.value.ciclos.filter((c) => enVentana(q, c.fecha_inicio));
       if (q.estado) lista = lista.filter((c) => ec.clasificar(c.estado) === q.estado);
-      // 3.20.1: el mismo backend de ciclos para `aa` y `teams`; el origen se distingue por el prefijo determinista del id (teams-nucleo).
+      // 3.20.1: el mismo backend de ciclos para `aa` y `teams`; el origen se distingue por el prefijo determinista del id (el cierre de TEAMS registra con ese prefijo).
       const origenDe = (c) => (String(c.ciclo_id).startsWith('teams_') ? 'teams' : 'aa');
       if (q.origen && q.origen !== 'todos') lista = lista.filter((c) => origenDe(c) === q.origen);
       lista.sort((a, b) => -fu.compararPorFecha(a, b, 'fecha_inicio'));
@@ -236,27 +221,6 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
         const r = require('./contexto-panel.cjs').resumen(projectPath, { cursor: q.cursor, limit: q.limit, task: q.task, role: q.role });
         return { status: r.status, data: r.data, coverage: r.coverage || null, reason_code: r.reason_code || null, source: 'contexto-panel' };
       } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
-    } },
-    // 3.20.1 — panel TEAMS (solo lectura, ADITIVO): las cuatro etapas por separado y la cobertura de registro.
-    // Filtros: origen (aa|teams|todos), plan, sprint, phase, role, correction. Lo que no se puede leer es null, no 0.
-    teams: { params: ['project_id', 'origen', 'plan', 'sprint', 'phase', 'role', 'correction', 'cursor', 'limit'], fn: (q) => {
-      if ('origen' in q && !['aa', 'teams', 'todos'].includes(q.origen)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'origen: aa | teams | todos' }] };
-      if ('role' in q && !['frontend', 'backend', 'negocio', 'builder', 'director'].includes(q.role)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'role: frontend | backend | negocio | builder | director' }] };
-      try {
-        const r = require('./teams-panel.cjs').resumen(projectPath, q);
-        if (r.status !== 'OK' || !r.data) return { status: 'UNAVAILABLE', data: null, reason_code: r.reason_code || 'ERROR', source: 'teams-panel' };
-        const pg = require('./teams-panel.cjs').paginarTareas(r.data, q);
-        return { status: 'OK', data: Object.assign({}, r.data, { tareas: pg.tareas }), coverage: pg.coverage, reason_code: r.reason_code || null, source: 'teams-panel', errors: (r.faltan || []).map((t) => ({ code: 'TABLA_AUSENTE', source: t })) };
-      } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
-    } },
-    'teams-vigilancia': { params: ['project_id', 'role'], fn: (q) => {
-      if ('role' in q && !['builder', 'director'].includes(q.role)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'role: builder | director' }] };
-      try { const r = require('./teams-panel.cjs').vigilancia(projectPath, { role: q.role }); return { status: r.status, data: r.data, reason_code: r.reason_code || null, source: 'teams-panel' }; }
-      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
-    } },
-    'teams-auditoria': { params: ['project_id', 'plan', 'role', 'correction', 'cursor', 'limit'], fn: (q) => {
-      try { const r = require('./teams-panel.cjs').auditoria(projectPath, q, { cursor: q.cursor, limit: q.limit }); return { status: r.status, data: r.data, coverage: r.coverage || null, reason_code: r.reason_code || null, source: 'teams-panel' }; }
-      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
     incidents: { params: ['project_id', 'cursor', 'limit'], fn: (q) => {
       const r = datos.filas(dbPath, { e: operativa.CONSULTAS.eventosOperativos }, Object.assign({ snapshot: true }, opts));

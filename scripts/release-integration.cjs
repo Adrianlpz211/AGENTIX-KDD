@@ -49,7 +49,7 @@ async function rpc(root) {
     const initialized = await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'agentix-release-check', version: '1' } });
     assert.equal(initialized.serverInfo.version, TARGET);
     const tools = await call('tools/list', {});
-    for (const n of ['recall', 'remember', 'effort_decide', 'teams', 'restore', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_queue', 'context_compress', 'context_recover', 'effort_budget', 'teams_packet']) assert.ok(tools.tools.some((t) => t.name === n), 'MCP tool ' + n);
+    for (const n of ['recall', 'remember', 'effort_decide', 'restore', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_queue', 'context_compress', 'context_recover', 'effort_budget', 'teams_packet']) assert.ok(tools.tools.some((t) => t.name === n), 'MCP tool ' + n);
     assert.ok(!tools.tools.some((t) => t.name === 'memory_validate'), 'validar conocimiento no se delega en el modelo');
     const cap = await tool('memory_capture', { host: 'mcp-release', session_id: 'rel', host_event_id: 'm1', event_type: 'test_run', task_id: 'T-MCP', output: 'ok' });
     assert.equal(cap.status, 'CAPTURED', JSON.stringify(cap));
@@ -81,7 +81,7 @@ function memoriaCli(motor, root, args) {
 
 /**
  * Las funciones de memoria con evidencia, con el motor que dejó el UPDATE dentro del proyecto:
- * captura idempotente → cola → índice → compactar → recuperar por hash → paquete TEAMS (snapshot y delta).
+ * captura idempotente → cola → índice → compactar → recuperar por hash.
  */
 function funcionesNuevas(root) {
   const m = (args) => memoriaCli(root, root, args);
@@ -97,14 +97,7 @@ function funcionesNuevas(root) {
   assert.ok(cmp.delivered.includes('unico fallo del release') && cmp.envelope.delivered_bytes < cmp.envelope.original_bytes);
   const rec = m(['recover', cmp.envelope.reference_id, '--lines=3001-3001', '--task=T-REL']).json;
   assert.ok(rec.ok && rec.content.includes('unico fallo') && rec.sha256.length === 64);
-  const script = 'const tp=require(' + JSON.stringify(path.join(root, '.agentic', 'grafo', 'teams-packets.cjs')) + ');const root=' + JSON.stringify(root) + ';'
-    + "const base=(o)=>Object.assign({task_id:'T-REL',plan_id:'P',sprint_id:'S',sender_role:'director',recipient_role:'builder',objective:'objetivo',acceptance:['a','b'],scope:['src/a.js'],risk_tier:'LOW',next_actions:['x']},o||{});"
-    + "const e1=tp.enviar(root,base());const r1=tp.recibir(null,e1.packet);tp.ack(root,{task_id:'T-REL',recipient_role:'builder',revision:1,hash:r1.ack.hash});"
-    + "const e2=tp.enviar(root,base({next_actions:['x','y']}));process.stdout.write(JSON.stringify({k1:e1.kind,k2:e2.kind}));";
-  const t = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' } });
-  assert.equal(t.status, 0, t.stderr);
-  assert.deepEqual(JSON.parse(t.stdout), { k1: 'snapshot', k2: 'delta' });
-  return { capture: true, idempotent: true, queue: true, layered_index: true, compression: true, recovery_by_hash: true, teams_delta: true };
+  return { capture: true, idempotent: true, queue: true, layered_index: true, compression: true, recovery_by_hash: true };
 }
 
 /** Añade al consumidor datos que un usuario real sí podría perder. */

@@ -250,9 +250,7 @@ function topN(grupos, n, totalAgregado) {
 
 /* ─── D14: actividad ──────────────────────────────────────────────────────── */
 
-let inactividad = null;
-try { inactividad = require('./builder-inactividad.cjs'); } catch { /* sin TEAMS instalado */ }
-const UMBRAL_HEURISTICO_MS = inactividad ? inactividad.LATIDOS_AUSENTES * inactividad.LATIDO_MS + inactividad.GRACIA_MS.MEDIUM : 3.5 * 60 * 1000;
+const UMBRAL_HEURISTICO_MS = 3.5 * 60 * 1000; // sin latido real: heurística por antigüedad de la tarea abierta
 
 const lockDe = (m, locks, ahora) => (locks || []).find((l) => {
   const n = String(l.module_name || '');
@@ -264,9 +262,8 @@ const lockDe = (m, locks, ahora) => (locks || []).find((l) => {
  *   ESTABLE              sin tarea abierta (terminado hace meses también)
  *   TRABAJANDO           tarea abierta con lease vigente (el lease es su latido)
  *   POSIBLE_INACTIVIDAD  tarea abierta sin lease más allá del umbral — heurística
- * Lo de TEAMS sale de builder-inactividad, el mismo que alimenta WhatsApp.
  */
-function actividad({ modulos, ciclos, locks, teams, ahora = Date.now() }) {
+function actividad({ modulos, ciclos, locks, ahora = Date.now() }) {
   const abiertas = (ciclos || []).filter((c) => estadoCiclo.clasificar(c.estado) === 'EN_CURSO');
   const lista = (modulos || []).map((t) => {
     const m = String(t.m);
@@ -281,16 +278,9 @@ function actividad({ modulos, ciclos, locks, teams, ahora = Date.now() }) {
       ? { m, estado: 'POSIBLE_INACTIVIDAD', heuristico: true, ausente_ms: ausente, detalle: 'sin latido ni lease: heurística por antigüedad de la tarea abierta' }
       : { m, estado: 'TRABAJANDO', heuristico: true, ausente_ms: ausente, detalle: 'abierta hace poco; sin latido real' };
   });
-  const MAPA = { ACTIVO: 'TRABAJANDO', SOSPECHA: 'POSIBLE_INACTIVIDAD', DEGRADED_HEURISTICO: 'SIN_LATIDO', CONFIRMADO: 'HOST_DESCONECTADO' };
-  let equipo = null;
-  if (teams && teams.estado && teams.estado.inicializado) {
-    const esperando = (teams.estado.tareas || []).filter((t) => t.state === 'BLOCKED_HUMAN').map((t) => ({ task_id: t.id, estado: 'ESPERANDO_DECISION', heuristico: false, detalle: t.blocked_reason || 'espera una decisión' }));
-    const corriendo = ((teams.evaluacion && teams.evaluacion.tareas) || []).map((t) => ({ task_id: t.task_id, estado: MAPA[t.status] || 'SIN_LATIDO', heuristico: t.status === 'DEGRADED_HEURISTICO', detalle: t.detalle || null }));
-    equipo = { status: (teams.evaluacion && teams.evaluacion.status) || null, tareas: esperando.concat(corriendo) };
-  }
   const conteo = {};
   for (const x of lista) conteo[x.estado] = (conteo[x.estado] || 0) + 1;
-  return { modulos: lista, conteo, equipo, umbral_ms: UMBRAL_HEURISTICO_MS };
+  return { modulos: lista, conteo, equipo: null, umbral_ms: UMBRAL_HEURISTICO_MS };
 }
 
 /* ─── D15: tiempos ────────────────────────────────────────────────────────── */
@@ -345,32 +335,17 @@ const CONSULTAS = {
   fasesTodas: { tabla: 'fases', sql: 'SELECT ciclo_id, agente, duracion_ms, fecha_inicio, fecha_fin FROM fases' },
 };
 
-/** TEAMS en solo lectura; sin TEAMS, null. La vista nunca actúa (no llama a `actuar`). */
-function leerTeams(root, ahora = Date.now()) {
-  try {
-    const tm = require('./teams-manager.cjs');
-    const estado = tm.estado(root);
-    if (!estado || !estado.inicializado) return null;
-    const evaluacion = inactividad ? inactividad.evaluar(root, { ahora, heartbeat_soportado: false }) : null;
-    return { estado, evaluacion, pendientes: tm.pendientes(root) };
-  } catch { return null; }
-}
-
 /** Todo lo operativo a partir de las filas ya leídas en una misma lectura. */
-function operativa({ ciclos, eventos, grupos, totalFriccion, locks, fases, modulos, teams, ahora = Date.now(), top = 40 }) {
+function operativa({ ciclos, eventos, grupos, totalFriccion, locks, fases, modulos, ahora = Date.now(), top = 40 }) {
   const incs = incidentes(eventos);
   return {
     incidentes: incs,
     retrabajo: retrabajo(ciclos, incs),
-    friccion: friccion(incs, { snapshotAt: ahora, decisiones: teams ? teams.pendientes : [] }),
+    friccion: friccion(incs, { snapshotAt: ahora, decisiones: [] }),
     top: topN(grupos, top, totalFriccion),
-    actividad: actividad({ modulos, ciclos, locks, teams, ahora }),
-    tiempos: tiempos({ ciclos, fases, plan: teams && teams.estado && teams.estado.plan }),
+    actividad: actividad({ modulos, ciclos, locks, ahora }),
+    tiempos: tiempos({ ciclos, fases, plan: null }),
   };
 }
 
-module.exports = { incidentes, retrabajo, friccion, topN, actividad, tiempos, union, medir, operativa, leerTeams, CONSULTAS, SEVERIDAD, CIERRE, UMBRAL_HEURISTICO_MS };
-
-/* 3.20.1 — panel de la campaña TEAMS (aditivo): etapas construidas / auditadas / verificadas / registradas por separado, cobertura de
-   registro, vigilancia y auditoría, con filtros origen / plan / sprint / fase / rol / corrección. Se carga al pedirlo: sin TEAMS no cuesta nada. */
-Object.defineProperty(module.exports, 'teamsPanel', { enumerable: true, get() { return require('./teams-panel.cjs'); } });
+module.exports = { incidentes, retrabajo, friccion, topN, actividad, tiempos, union, medir, operativa, CONSULTAS, SEVERIDAD, CIERRE, UMBRAL_HEURISTICO_MS };

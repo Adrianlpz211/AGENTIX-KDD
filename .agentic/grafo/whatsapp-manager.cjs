@@ -14,7 +14,7 @@
  * mensaje de prueba y los eventos de la política mostrada; nada más. Lo que
  * llega por el chat de WhatsApp es dato, no orden.
  *
- * Sin WhatsApp, Agentix y TEAMS funcionan igual: nada aquí bloquea tareas.
+ * Sin WhatsApp, Agentix funciona igual: nada aquí bloquea tareas.
  */
 
 const fs = require('fs');
@@ -64,7 +64,7 @@ function configBase(root) {
   return {
     schema_version: SCHEMA_VERSION, project_id: proyectoId(root), state: 'OFF', generation: 0,
     transport_id: 'none', country: null, contact: null, anterior: null, activation: null,
-    politica: JSON.parse(JSON.stringify(POLITICA_DEFECTO)), teams_cursor: 0, ultima_llamada: null,
+    politica: JSON.parse(JSON.stringify(POLITICA_DEFECTO)), ultima_llamada: null,
   };
 }
 function leerConfig(root) {
@@ -447,41 +447,6 @@ function procesarCola(root, { adapter, ahora = Date.now() } = {}) {
   return out;
 }
 
-// ─── enlace con TEAMS ────────────────────────────────────────────────────────
-
-/**
- * Lee los eventos nuevos de TEAMS y encola los avisos que la política
- * permite. Avanza su propio cursor: no consume el ACK del director.
- */
-function desdeTeams(root, { ahora = Date.now() } = {}) {
-  let tm;
-  try { tm = require('./teams-manager.cjs'); } catch { return { status: 'SIN_TEAMS' }; }
-  const est = tm.estado(root);
-  if (!est.inicializado) return { status: 'SIN_TEAMS' };
-  const c = leerConfig(root);
-  const d = tm.delta(root, { rol: 'director', desde: c.teams_cursor || 0, limite: 500 });
-  const avisos = [];
-  const plan = est.plan ? est.plan.id : null;
-  for (const ev of d.eventos) {
-    const p = ev.payload || {};
-    if (ev.kind === 'INCIDENT' && p.scope === 'GLOBAL') avisos.push({ evento: 'INCIDENTE_GLOBAL', incident_id: p.id, plan_id: plan, que: `alto global (${p.reason_code})`, accion: 'revisar el incidente en el chat del proyecto' });
-    if (ev.kind === 'STOP' && ['LIMITE_REPARACIONES', 'RESTORE_FAILED'].includes(p.reason_code)) {
-      const t = est.tareas.find((x) => x.id === ev.task_id);
-      if (p.reason_code === 'RESTORE_FAILED' || (t && t.tier === 'HIGH')) avisos.push({ evento: 'RECUPERACION_AGOTADA', incident_id: p.id, plan_id: plan, tarea: ev.task_id, que: `sin más intentos automáticos (${p.reason_code})`, accion: 'decidir cómo seguir con esa tarea' });
-    }
-  }
-  const ejecutables = est.tareas.some((t) => ['READY', 'RUNNING', 'VERIFYING', 'PENDING'].includes(t.state));
-  const humanas = est.pendientes.filter((x) => x.scope !== 'CHANNEL');
-  if (!ejecutables && humanas.length) avisos.push({ evento: 'SIN_TAREAS_POR_DECISION', incident_id: humanas.map((x) => x.id).sort().join(','), plan_id: plan, que: `todo lo que queda espera ${humanas.length} decisión(es)`, accion: 'responder en el chat: teams: resolver <id> <decisión>' });
-  const total = est.tareas.length;
-  if (total && est.tareas.every((t) => ['DONE_VERIFIED', 'CANCELLED'].includes(t.state))) avisos.push({ evento: 'REPORTE_FINAL', plan_id: plan, revision: total, que: `plan cerrado: ${est.conteo.DONE_VERIFIED || 0} verificadas, ${est.conteo.CANCELLED || 0} canceladas` });
-  const resultados = avisos.map((a) => Object.assign({ evento: a.evento }, notificar(root, a, { ahora })));
-  const c2 = leerConfig(root);
-  c2.teams_cursor = d.eventos.length ? d.eventos[d.eventos.length - 1].seq : c.teams_cursor || 0;
-  guardarConfig(root, c2);
-  return { status: 'OK', avisos: resultados };
-}
-
 // ─── llamadas y mensajes entrantes ───────────────────────────────────────────
 
 /** Llamar solo con soporte real, habilitado a propósito, y un incidente confirmado. */
@@ -535,13 +500,12 @@ if (require.main === module) {
   else if (cmd === 'estado') r = estado(root);
   else if (cmd === 'politica') r = configurarPolitica(root, { progreso: opt.progreso == null ? undefined : opt.progreso !== 'off', progreso_cada_min: opt.cada, cooldown_emergencia_min: opt.cooldown, country: opt.pais, llamadas: opt.llamadas == null ? undefined : opt.llamadas === 'on' });
   else if (cmd === 'procesar') r = procesarCola(root, { adapter: ad });
-  else if (cmd === 'teams') r = desdeTeams(root);
   else r = { status: 'USO', detalle: 'whatsapp-manager.cjs activar | contacto <id> <número o nombre> | elegir <id> <n> | reintentar <id> | desactivar | estado | politica [--progreso=on|off --cada=15 --cooldown=5 --pais=58 --llamadas=on|off] | procesar | teams' };
   console.log(JSON.stringify(r, null, 2));
 }
 
 module.exports = {
   SCHEMA_VERSION, ESTADOS, EVENTOS, EMERGENCIAS, POLITICA_DEFECTO, PREGUNTA,
-  activar, contacto, elegir, reintentar, desactivar, estado, configurarPolitica, notificar, procesarCola, desdeTeams, llamar, entrante,
+  activar, contacto, elegir, reintentar, desactivar, estado, configurarPolitica, notificar, procesarCola, llamar, entrante,
   validarContacto, enmascarar, registrarOrigenHumano, origenDesdePrompt, parsearIntencion, leerConfig, entregas, componerMensaje, adapterActual,
 };

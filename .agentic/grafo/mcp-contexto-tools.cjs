@@ -33,7 +33,6 @@ const TOOLS = [
   { name: 'context_recover', description: 'Recover the original behind a compression reference: by lines, byte range/cursor or limited JSON selector. Verifies size and SHA-256; returns EVIDENCE_CHANGED / EVIDENCE_UNAVAILABLE / EXPIRED instead of invented content. Required before concluding an ABSENCE of errors from a compacted result.', inputSchema: { type: 'object', properties: { reference_id: STR, task_id: STR, line_from: NUM, line_to: NUM, offset: NUM, length: NUM, json_path: STR, fields: { type: 'array', items: STR }, limit: NUM }, required: ['reference_id'] } },
   { name: 'context_read', description: 'Read a project file with reuse: returns the content once per recipient and a reference/delta afterwards, never hiding a change because the name is the same. Counted in the task effort budget.', inputSchema: { type: 'object', properties: { path: STR, task_id: STR, role: STR, recipient: STR, needed: { type: 'boolean' } }, required: ['path', 'task_id'] } },
   { name: 'effort_budget', description: 'Cumulative effort budget per task (not reset by changing role or asking another recall): estado | registrar | host (what Agentix can and cannot observe). Host tools outside Agentix are reported as not observed, never as zero.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['estado', 'registrar', 'host'] }, task_id: STR, kind: STR, role: STR, delivered_bytes: NUM, recovered_bytes: NUM, original_bytes: NUM }, required: ['action'] } },
-  { name: 'teams_packet', description: 'Shared director/builder context packets (snapshot or delta with base_revision, ACK with revision+hash): estado | snapshot | ack | pendientes | invalidar | cerrar | validar_entrega (the director re-verifies original evidence; an invented PASS is rejected).', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['estado', 'snapshot', 'ack', 'pendientes', 'invalidar', 'cerrar', 'validar_entrega'] }, task_id: STR, recipient_role: STR, revision: NUM, hash: STR, state_hash: STR, paths: { type: 'array', items: STR }, reason: STR, plan_id: STR, sprint_id: STR, entrega: { type: 'object' } }, required: ['action'] } },
 ];
 
 const CAPABILITIES = () => ({
@@ -89,19 +88,6 @@ async function handle(name, args = {}, root) {
         if (args.action === 'registrar') return b.registrar(raiz, args.task_id, { kind: args.kind, role: args.role, delivered_bytes: args.delivered_bytes, recovered_bytes: args.recovered_bytes, original_bytes: args.original_bytes });
         return b.estado(raiz, args.task_id);
       }
-      case 'teams_packet': {
-        const tp = cargar('teams-packets.cjs');
-        const rol = args.recipient_role || 'builder';
-        switch (args.action) {
-          case 'snapshot': return noConfiable(tp.snapshotActual(raiz, { task_id: args.task_id, recipient_role: rol, revision: args.revision }));
-          case 'ack': return tp.ack(raiz, { task_id: args.task_id, recipient_role: rol, revision: Number(args.revision), hash: args.hash, state_hash: args.state_hash });
-          case 'pendientes': return tp.pendientesDeAck(raiz, { recipient_role: rol, task_id: args.task_id });
-          case 'invalidar': return tp.invalidar(raiz, { task_id: args.task_id, paths: args.paths || [], reason: args.reason });
-          case 'cerrar': return tp.cerrar(raiz, { task_id: args.task_id, plan_id: args.plan_id, sprint_id: args.sprint_id, motivo: 'CLOSED' });
-          case 'validar_entrega': return tp.validarEntrega(raiz, { ...(args.entrega || {}), task_id: args.task_id });
-          default: return tp.estadoCorriente(raiz, { task_id: args.task_id, recipient_role: rol });
-        }
-      }
       default: return fallo('UNKNOWN_TOOL', 'Herramienta no registrada en ' + CONTRACT_VERSION + ': ' + name);
     }
   } catch (e) {
@@ -111,7 +97,7 @@ async function handle(name, args = {}, root) {
 
 /* Llamadas MCP que NO se registran como actividad: son lecturas de la propia memoria o salud
    (registrarlas se alimentaría a sí mismo) y las de este contrato. */
-const NO_CAPTURAR = /^(memory_|recall$|health_check$|system_health$|session_historial$|context_|effort_budget$|teams_packet$)/;
+const NO_CAPTURAR = /^(memory_|recall$|health_check$|system_health$|session_historial$|context_|effort_budget$)/;
 const sesionMcp = 'mcp-' + process.pid + '-' + Date.now().toString(36);
 
 /**

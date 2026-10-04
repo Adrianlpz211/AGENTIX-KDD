@@ -1,6 +1,6 @@
 # AGENTIX Sandbox — campaña adversarial
 
-Dos perfiles: **Cursor individual** y **TEAMS (Claude Code director + Cursor constructor)**. TEAMS agrega pruebas de coordinación y 512 ataques reproducibles por defecto; individual 64. El objetivo es encontrar falsos positivos, regresiones y protocolos que existen pero no están conectados.
+Perfil **Cursor individual**, 64 ataques reproducibles por defecto. El objetivo es encontrar falsos positivos, regresiones y protocolos que existen pero no están conectados. (El perfil TEAMS se retiró mientras el modo TEAMS se reconstruye.)
 
 ## Ejecutar mecanismos
 
@@ -8,7 +8,6 @@ Desde el checkout de Agentix, con dependencias instaladas:
 
 ```powershell
 node scripts/sandbox.cjs run --mode=individual --seed=211
-node scripts/sandbox.cjs run --mode=teams --seed=211 --rounds=512
 ```
 
 Los reportes HTML, MD y JSON y logs TAP quedan en la ruta temporal impresa. Código de salida 1 significa hallazgos; 2 fallo del corredor. ERROR, SKIP, TODO, cero tests y UNVERIFIED nunca cuentan como aprobación completa. Cada grupo ejecuta archivos concretos; no confundir suma de suites con número de pruebas únicas. El informe registra hashes del checkout y detecta modificaciones concurrentes. Si Cursor modifica el origen durante la campaña, repetir sobre una versión estable.
@@ -17,12 +16,11 @@ Los reportes HTML, MD y JSON y logs TAP quedan en la ruta temporal impresa. Cód
 
 ```powershell
 node scripts/sandbox.cjs prepare --mode=individual
-node scripts/sandbox.cjs prepare --mode=teams
 ```
 
-Opcional: `--output="C:/ruta/nueva/vacia"`. No usar el proyecto original ni una carpeta con contenido. Abrir **workspace** del directorio impreso. El primer directorio contiene CURSOR.md; el segundo CLAUDE-DIRECTOR.md y CURSOR-BUILDER.md. Pegar una vez el prompt correspondiente en cada sesión. El control y el oráculo se encuentran fuera del workspace.
+Opcional: `--output="C:/ruta/nueva/vacia"`. No usar el proyecto original ni una carpeta con contenido. Abrir **workspace** del directorio impreso. El directorio contiene CURSOR.md; pegar una vez ese prompt en la sesión. El control y el oráculo se encuentran fuera del workspace.
 
-El modo individual entrega una tarea por vez; el agente implementa y envía con `node .lab/agent.cjs submit <id>`. El modo TEAMS usa el administrador y el canal MD **nativos**, ACK, fencing, resultado y verificación. No usar AdapterPrueba para declarar una sesión real disponible. Hay doce objetivos en tres sprints, dificultad variable, fronteras backend, escape frontend, idempotencia, decisiones humanas, esfuerzo, dashboard y seguridad de restauración. El descuento comercial queda pendiente por diseño; los trabajos independientes continúan.
+El modo individual entrega una tarea por vez; el agente implementa y envía con `node .lab/agent.cjs submit <id>`. 
 
 El oráculo funcional no reemplaza todos los gates de Agentix. Los gates que este controlador no puede acreditar quedan UNVERIFIED; el reporte debe mostrarlo. No fabricarlos para obtener 100%. El agente debe aplicar los protocolos reales de memoria, pruebas, preservación y restauración y aportar evidencia. La campaña de mecanismos prueba fallos más amplios que las doce funciones del proyecto.
 
@@ -30,7 +28,6 @@ El oráculo funcional no reemplaza todos los gates de Agentix. Los gates que est
 
 - Control sano más pruebas negativas: evidencia inventada, ejecución ausente, sujeto/ciclo distinto, status UNVERIFIED disfrazado, NO_APLICA con fallo y timeout.
 - Suite real: preservación frontend/backend, mutantes visuales, contratos, protección, blast radius, restauración selectiva, efectos, esfuerzo, presupuestos, memoria, distribución y dashboard.
-- TEAMS: colas, ACK, repetición, locks, leases, sesiones, baseline previo a escritura, rollback, supervisión de planes y vigilancia mediante los tests correspondientes.
 - Estado funcional y nativo por separado. Una función PASS no certifica autonomía del host.
 - No medir ahorro de tokens con duración. Tokens UNKNOWN hasta tener contadores reales del proveedor.
 - Autonomía acotada: 120 acciones/90 minutos y tres reparaciones individuales; reportar checkpoint y pendientes, nunca DONE por presupuesto.

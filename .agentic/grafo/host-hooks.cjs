@@ -226,15 +226,15 @@ function smoke(root, host, { timeoutMs = 10000 } = {}) {
   const os = require('os');
   const { spawnSync } = require('child_process');
   const fx = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd smoke '));
-  fs.mkdirSync(path.join(fx, '.agentic', '_teams'), { recursive: true });
+  fs.mkdirSync(path.join(fx, '.agentic', '_whatsapp'), { recursive: true });
   fs.mkdirSync(path.join(fx, 'src con espacio'), { recursive: true });
   const guardia = path.join(__dirname, 'host-guard.cjs');
   const casos = [
     { id: 'edicion-segura', evento: 'edit', dato: path.join(fx, 'src con espacio', 'a.js'), espera: 'allow' },
-    { id: 'edicion-protegida', evento: 'edit', dato: path.join(fx, '.agentic', '_teams', 'origen-humano.jsonl'), espera: 'deny' },
+    { id: 'edicion-protegida', evento: 'edit', dato: path.join(fx, '.agentic', '_whatsapp', 'estado.json'), espera: 'deny' },
     { id: 'shell-seguro', evento: 'shell', dato: 'git status', espera: 'allow' },
     { id: 'shell-salta-gates', evento: 'shell', dato: 'git commit --no-verify -m x', espera: 'deny' },
-    { id: 'mcp-protegido', evento: 'mcp', dato: path.join(fx, '.agentic', '_teams', 'origen-humano.jsonl'), espera: 'deny' },
+    { id: 'mcp-protegido', evento: 'mcp', dato: path.join(fx, '.agentic', '_whatsapp', 'estado.json'), espera: 'deny' },
     { id: 'payload-malformado', evento: 'edit', crudo: '{"tool_input": {"path": ', espera: 'allow' },
   ];
   const resultados = casos.map((c) => {
@@ -275,8 +275,8 @@ function cobertura(root) {
     fila('scripts lanzados por shell', [...conHook(/^(beforeShellExecution|PreToolUse)$/).map((x) => x + ' (solo el comando, no lo que el script escribe)'), ...posterior], false),
     fila('git staged / commit', posterior, gitHook),
     fila('akdd update', ['protected-files en update', ...posterior], true),
-    fila('aa: / sprint / TEAMS (PRE_CLOSE)', ['gates de cierre (post-cycle, teams verificar) — detectan después de escribir, no evitan la escritura'], false),
-    fila('aa: / sprint / TEAMS (POST_DETECTION)', posterior, false),
+    fila('aa: / sprint (PRE_CLOSE)', ['gates de cierre (post-cycle) — detectan después de escribir, no evitan la escritura'], false),
+    fila('aa: / sprint (POST_DETECTION)', posterior, false),
     fila('edición manual fuera del agente', posterior, false),
   ];
   const huecos = filas.filter((f) => f.estado !== 'CUBIERTO').map((f) => f.via);

@@ -1,5 +1,5 @@
 'use strict';
-/* MCP de 3.20.1 por stdio REAL: capas de memoria + captura, cola, compactación, lectura, esfuerzo y paquetes TEAMS. */
+/* MCP de 3.20.1 por stdio REAL: capas de memoria + captura, cola, compactación, lectura, y esfuerzo. */
 const test = require('node:test');
 const { SIN_DRIVER } = require('./helpers/db-real.cjs');
 if (SIN_DRIVER) { test(require('node:path').basename(__filename) + ' (omitido: ' + SIN_DRIVER + ')', { skip: SIN_DRIVER }, () => {}); return; }
@@ -51,7 +51,7 @@ test('stdio real: tools/list, captura, cola, capas, compactar→recuperar; la ra
     const init = await s.llamar('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     assert.equal(init.serverInfo.name, 'agentic-kdd');
     const lista = (await s.llamar('tools/list', {})).tools.map((t) => t.name);
-    for (const n of ['recall', 'remember', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_health', 'memory_queue', 'context_compress', 'context_recover', 'context_read', 'effort_budget', 'teams_packet']) assert.ok(lista.includes(n), 'falta ' + n);
+    for (const n of ['recall', 'remember', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_health', 'memory_queue', 'context_compress', 'context_recover', 'context_read', 'effort_budget']) assert.ok(lista.includes(n), 'falta ' + n);
     assert.ok(!lista.includes('memory_validate'));
 
     // captura idempotente

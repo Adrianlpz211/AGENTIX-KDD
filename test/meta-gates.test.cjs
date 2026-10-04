@@ -22,7 +22,6 @@ const MUTANTES = [
   { id: 'GATE-REPLAY', archivo: 'regression-guard.cjs', busca: "event_id: `pres:${behavior.id}:${e.execution_id}`", pone: "event_id: `pres:${behavior.id}:${e.execution_id}:${Math.random()}`", prueba: 'preservacion-escenarios.test.cjs', patron: 'P05: un replay' },
   { id: 'GATE-RESTORE-HASH', archivo: 'restore-manager.cjs', busca: 'if (!expected_current_hash || expected_current_hash !== p.expected_current_hash) return', pone: 'if (false) return', prueba: 'restore.test.cjs', patron: 'hash cambiado tras el preview' },
   { id: 'GATE-PAYLOAD', archivo: 'host-guard.cjs', busca: "const PAYLOAD_INVALIDO = { decision: DENY,", pone: "const PAYLOAD_INVALIDO = { decision: 'allow',", prueba: 'preservacion-p14-c10.test.cjs', patron: 'P16: stdin' },
-  { id: 'GATE-EVIDENCIA-AJENA', archivo: 'teams-adapters.cjs', busca: 'const gates = (verificador(res) || []).concat(extras);', pone: 'const gates = ((res.evidence && res.evidence.length ? res.evidence : null) || verificador(res) || []).concat(extras);', prueba: 'preservacion-p14-c10.test.cjs', patron: 'C08: TEAMS no acepta' },
 ];
 
 function copia(m) {

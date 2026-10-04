@@ -18,7 +18,7 @@
  *   verified   un test que lo usa pasó en la última corrida registrada por
  *              scripts/run-tests.cjs, y el módulo no cambió después.
  *
- * Capacidades que aún no tienen integración (TEAMS nativo, restauración,
+ * Capacidades que aún no tienen integración (restauración,
  * WhatsApp) se listan como 'no_integrada' hasta que exista el módulo: no se
  * anuncian por haberse escrito en un documento.
  *
@@ -44,7 +44,6 @@ const EVIDENCIA = {
 
 /* Capacidades prometidas por el plan que todavía no pueden anunciarse. */
 const PENDIENTES = [
-  { id: 'teams', patron: /^teams[-.]/ },
   { id: 'restore', patron: /^restore[-.]/ },
   { id: 'whatsapp', patron: /^(ws|whatsapp)[-.]/ },
 ];

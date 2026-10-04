@@ -14,13 +14,13 @@ const usage = require(path.join(G, 'context-usage.cjs'));
 
 const firma = (r) => r.cases.map((c) => [c.id, c.baseline_bytes, c.optimized_bytes, c.recovered_bytes, c.criteria_met, c.criteria_total].join(':')).join('|');
 
-test('benchmark: ocho casos A–H, ningún criterio de aceptación perdido, y se publica la distribución (incluido lo que no ahorra)', () => {
+test('benchmark: siete casos (A–F y H), ningún criterio de aceptación perdido, y se publica la distribución (incluido lo que no ahorra)', () => {
   const r = bench.ejecutar({ seed: 20261003 });
-  assert.deepEqual(r.cases.map((c) => c.id), ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+  assert.deepEqual(r.cases.map((c) => c.id), ['A', 'B', 'C', 'D', 'E', 'F', 'H']);
   for (const c of r.cases) assert.equal(c.passed, true, c.id + ' perdió: ' + JSON.stringify((c.criteria || []).filter((x) => !x.ok)));
   assert.equal(r.acceptance.no_criterion_lost, true);
   assert.equal(r.acceptance.criteria_met, r.acceptance.criteria_total);
-  assert.ok(r.distribution_net_percent && r.distribution_net_percent.n === 8);
+  assert.ok(r.distribution_net_percent && r.distribution_net_percent.n === 7);
   assert.ok(r.distribution_net_percent.min <= 0, 'la distribución incluye el caso SIN ahorro (riesgo alto), no solo los favorables');
   assert.ok(r.cases_without_saving.includes('C'), 'un cambio pequeño de riesgo alto no ahorra: se dice');
   // Honestidad del alcance.
@@ -45,7 +45,7 @@ test('benchmark: CLI list/run salen bien y run devuelve 0 solo si no se perdió 
   const { spawnSync } = require('node:child_process');
   const l = spawnSync(process.execPath, [path.join(G, 'benchmark-contexto.cjs'), 'list'], { encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' } });
   assert.equal(l.status, 0);
-  assert.equal(JSON.parse(l.stdout).length, 8);
+  assert.equal(JSON.parse(l.stdout).length, 7);
   const r = spawnSync(process.execPath, [path.join(G, 'benchmark-contexto.cjs'), 'run', '--only=A,C', '--json'], { encoding: 'utf8', env: { ...process.env, NODE_NO_WARNINGS: '1' }, timeout: 300000 });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).cases.length, 2);

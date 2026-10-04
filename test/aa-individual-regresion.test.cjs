@@ -130,7 +130,7 @@ test('aa: individual — memoria y consulta de siempre: grafo, regresión, bloqu
 test('aa: individual — el dashboard sigue sirviendo el tablero de grafos y sus datos, y ahora trae las páginas nuevas como pestañas', () => {
   const src = fs.readFileSync(path.join(REPO, 'dashboard.cjs'), 'utf8');
   for (const tab of ["setMode('graph'", "setMode('docs'", "setMode('intel'", "setMode('tiempos'"]) assert.ok(src.includes(tab), 'pestaña histórica ausente: ' + tab);
-  for (const m of ['memoria', 'contexto', 'teams', 'actualizacion']) assert.ok(src.includes("setMode('" + m + "',this)"), 'el tablero no tiene la pestaña ' + m);
+  for (const m of ['memoria', 'contexto', 'actualizacion']) assert.ok(src.includes("setMode('" + m + "',this)"), 'el tablero no tiene la pestaña ' + m);
   // los grafos NO cambian: la API histórica sigue presente
   const api = require(path.join(GRAFO, 'dashboard-api.cjs'));
   assert.equal(typeof api, 'object');

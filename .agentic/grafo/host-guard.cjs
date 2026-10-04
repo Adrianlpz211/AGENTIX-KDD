@@ -9,8 +9,8 @@
  *                   la DENY LIST, allow en lo demás (lectura incluida).
  *   --event=edit    antes de escribir un archivo: deny si es protegido,
  *                   ask si es un archivo de secretos.
- *   --event=prompt  registra el origen humano de `teams: resolver` (ambos
- *                   hosts); en Claude además enriquece `aa:` con presupuesto,
+ *   --event=prompt  registra el origen humano de `ws:` (ambos hosts); en
+ *                   Claude además enriquece `aa:` con presupuesto,
  *                   timeout y sin repetir el mismo prompt + grafo.
  *
  * Consentimiento: SOLO lo da la persona en el diálogo del host (ask). Un texto
@@ -127,7 +127,6 @@ function evaluarEdicion(root, archivo) {
   if (!archivo) return { decision: 'allow' };
   const rel = path.relative(root, path.resolve(root, String(archivo))).replace(/\\/g, '/');
   if (rel.startsWith('../') || rel === '..' || path.isAbsolute(rel)) return { decision: 'allow', reason: 'FUERA_DEL_PROYECTO' };
-  if (/^\.agentic\/_teams\/origen-humano\.jsonl$/i.test(rel)) return { decision: DENY, reason: 'ORIGEN_HUMANO', detalle: 'solo el hook de prompt registra decisiones de la persona' };
   if (/^\.agentic\/_whatsapp\//i.test(rel)) return { decision: DENY, reason: 'WHATSAPP_ESTADO', detalle: 'el estado de WhatsApp solo cambia con ws: activar/desactivar escritos por la persona' };
   try {
     const pf = require('./protected-files.cjs').verificar(root, [rel]);
@@ -210,20 +209,6 @@ function comandoDe(entrada) {
 
 function mensaje(r) {
   return `[agentix] ${r.reason}${r.detalle ? ': ' + r.detalle : ''}`;
-}
-
-/**
- * Lo que la persona escribió como `teams: resolver <id> <decisión>` queda
- * registrado como prueba de origen humano. El modelo no pasa por aquí.
- */
-function origenTeams(root, prompt, host) {
-  try {
-    const tm = require('./teams-manager.cjs');
-    const i = tm.parsearIntencion(prompt);
-    if (!i || i.accion !== 'resolve' || !i.pending_id) return null;
-    tm.registrarOrigenHumano(root, { pending_id: i.pending_id, decision: i.decision, host });
-    return `[agentix] decisión humana registrada para ${i.pending_id}; aplícala con akdd teams resolve ${i.pending_id} "${i.decision}"`;
-  } catch { return null; }
 }
 
 /** `ws: ...` o la respuesta a "¿a qué contacto te escribo?" quedan como prueba de origen humano. */
@@ -352,8 +337,6 @@ function procesar(host, evento, entrada, root) {
   if (r) { anotarEvento(root, host, evento, entrada, r); return salida(host, evento, r); }
   if (evento === 'prompt') {
     const prompt = entrada.prompt || entrada.user_prompt || '';
-    const teams = origenTeams(root, prompt, host);
-    if (teams) return salida(host, evento, null, teams);
     const ws = origenWhatsapp(root, prompt, host);
     if (ws) return salida(host, evento, null, ws);
     return salida(host, evento, null, host === 'claude' ? enriquecer(root, prompt).contexto : null);
@@ -361,7 +344,7 @@ function procesar(host, evento, entrada, root) {
   return null;
 }
 
-module.exports = { raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenTeams, origenWhatsapp, sinCitas, ENRIQ };
+module.exports = { raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenWhatsapp, sinCitas, ENRIQ };
 
 if (require.main === module) {
   const opt = Object.fromEntries(process.argv.slice(2).map((a) => /^--([^=]+)=(.*)$/.exec(a)).filter(Boolean).map((m) => [m[1], m[2]]));

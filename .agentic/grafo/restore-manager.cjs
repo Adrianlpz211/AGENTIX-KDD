@@ -524,11 +524,10 @@ function aplicar(root, ref, { expected_current_hash, confirmar_decision = false,
   }
   anotar(root, { op: 'apply', fase: 'completado', apply: applyId, point_id: p.point_id });
   evento(root, 'APPLY', 'OK', p.point_id);
-  const revertidas = revertirTareas(root, tocados, p.point_id);
   return {
     status: 'RESTAURADO', point_id: p.point_id, rescate: rescate.punto.id, escritos: p.ops.filter((o) => o.op !== 'DELETE').length,
     borrados: p.ops.filter((o) => o.op === 'DELETE').length, recuperacion: p.efectos_externos_no_revertibles.length ? 'SOLO_CODIGO' : 'CODIGO',
-    efectos_externos_no_revertidos: p.efectos_externos_no_revertibles, tareas_revertidas: revertidas,
+    efectos_externos_no_revertidos: p.efectos_externos_no_revertibles,
     sistema_restaurado: p.efectos_externos_no_revertibles.length === 0 ? null : false,
     pendiente: 'correr los gates del alcance: el contenido volvió, la verificación no viene incluida',
   };
@@ -552,7 +551,6 @@ function recuperar(root, plan, ctx, causa, inyectarFallo) {
     anotar(root, { op: 'apply', fase: 'incidente', apply: plan.apply, causa, causa_rescate: e2.message });
     evento(root, 'APPLY', 'INCIDENTE', plan.point_id);
     const archivos = plan.ops.map((o) => o.path);
-    if (plan.task_id) { try { require('./teams-manager.cjs').restauracionFallida(root, { task_id: plan.task_id, files: archivos, detalle: e2.message }); } catch { /* sin TEAMS */ } }
     return errorR('INCIDENTE', 'ni el apply ni el rescate quedaron verificados: estado desconocido en ' + archivos.join(', '), { causa, causa_rescate: e2.message, rescate: plan.rescate, archivos });
   }
 }
@@ -593,14 +591,6 @@ function reanudar(root) {
   return { status: 'OK', reanudados: out };
 }
 
-function revertirTareas(root, archivos, pointId) {
-  try {
-    const tm = require('./teams-manager.cjs');
-    if (!tm.estado(root).inicializado) return [];
-    return tm.invalidarPorRestore(root, { files: archivos, point_id: pointId });
-  } catch { return []; }
-}
-
 function evento(root, gate, verdict, id) {
   try {
     const f = path.join(root, '.agentic', 'memoria.db');
@@ -610,7 +600,7 @@ function evento(root, gate, verdict, id) {
   } catch { /* la línea de tiempo es informativa */ }
 }
 
-// ─── rollback automático (TEAMS) ─────────────────────────────────────────────
+// ─── rollback automático ─────────────────────────────────────────────
 
 /**
  * Solo si todo esto es cierto: la política lo autoriza; la tarea tiene un
@@ -653,27 +643,17 @@ function elegibilidadRollback(root, { task_id, attempt = null, fallo_reproducibl
 
 function rollbackAutomatico(root, o) {
   const e = elegibilidadRollback(root, o);
-  const tm = (() => { try { return require('./teams-manager.cjs'); } catch { return null; } })();
   if (!e.elegible) {
-    if (tm && o.task_id) {
-      try {
-        tm.stop(root, {
-          reason_code: 'ROLLBACK_NO_ELEGIBLE', scope: 'DEPENDENCY_CHAIN', task_id: o.task_id, decision_required: true,
-          evidence: [{ kind: 'rollback', motivos: e.motivos }], question: `No se puede revertir ${o.task_id} solo: ${e.motivos.join('; ')}. ¿Cómo seguir?`,
-        });
-      } catch { /* tarea ajena a TEAMS */ }
-    }
     return { status: 'NO_ELEGIBLE', motivos: e.motivos };
   }
   const p = preview(root, e.baseline);
   anotar(root, { op: 'rollback', fase: 'inicio', task_id: o.task_id, attempt: o.attempt || null, point_id: e.baseline });
-  const r = aplicar(root, e.baseline, { expected_current_hash: p.expected_current_hash, origen: 'rollback-teams', task_id: o.task_id });
+  const r = aplicar(root, e.baseline, { expected_current_hash: p.expected_current_hash, origen: 'rollback-automatico', task_id: o.task_id });
   if (r.status !== 'RESTAURADO') {
     anotar(root, { op: 'rollback', fase: 'fallo', task_id: o.task_id, attempt: o.attempt || null, resultado: r.status });
     return Object.assign({ status: 'ROLLBACK_FALLIDO' }, r);
   }
   anotar(root, { op: 'rollback', fase: 'ok', task_id: o.task_id, attempt: o.attempt || null, point_id: e.baseline });
-  if (tm) { try { tm.marcarRevertida(root, { task_id: o.task_id, point_id: e.baseline, motivo: 'ROLLBACK_AUTOMATICO' }); } catch { /* sin TEAMS */ } }
   return { status: 'REVERTIDA', point_id: e.baseline, restauracion: r, nota: 'la tarea no quedó implementada: volvió al punto sano' };
 }
 

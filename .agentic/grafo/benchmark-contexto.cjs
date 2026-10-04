@@ -3,7 +3,7 @@
 /**
  * Benchmark PROPIO y determinista de contexto y esfuerzo (H03).
  *
- *   node benchmark-contexto.cjs run [--seed=N] [--json]     ejecuta los ocho casos A–H
+ *   node benchmark-contexto.cjs run [--seed=N] [--json]     ejecuta los siete casos (A–F y H)
  *   node benchmark-contexto.cjs list                         describe el corpus
  *
  * Qué es y qué NO es:
@@ -12,7 +12,7 @@
  *   · Compara, para la MISMA tarea y la MISMA aceptación, un BASELINE sin compactación (lo que se
  *     entregaría tal cual) contra la versión OPTIMIZADA de Agentix (compactación + recuperación
  *     recuperable + presupuestos), usando los módulos reales: context-compressor, memory-layers,
- *     effort-router/effort-budget, teams-packets, evidence-store.
+ *     effort-router/effort-budget, evidence-store.
  *   · La versión optimizada incluye lo que le costaría CUMPLIR el criterio: si para satisfacerlo
  *     tiene que recuperar el original, esos bytes se suman. Si eso anula el ahorro, se muestra
  *     (neto ≤ 0) y no se oculta.
@@ -207,47 +207,6 @@ caso('F', 'Vacío, malformado, secreto y código a editar', 'Los bordes no inven
       crit('el secreto canario no está ni en lo entregado ni en el original almacenado', !sec.delivered.includes(canario) && !String(almacenado.content || '').includes(canario)),
       crit('el código a editar llega íntegro', ed.delivered === codigo && ed.envelope.complete === true),
     ], { note: 'Casos de borde: el ahorro es ~0 por diseño (passthrough/íntegro); lo medido es que nada se pierde ni se filtra.' });
-  } finally { p.limpiar(); }
-});
-
-// ─── G · TEAMS multi-sprint con reinicios, ACK desordenado, delta perdido, evidencia caducada ───
-caso('G', 'TEAMS multi-sprint con fallos', 'Paquetes incrementales sin estado corrupto; evidencia caducada/cambiada rechazada; decisión humana no bloqueante.', (ctx) => {
-  const tp = cargar('teams-packets.cjs'); const store = cargar('evidence-store.cjs'); const p = ctx.proyecto('G');
-  try {
-    fs.mkdirSync(path.join(p.root, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(p.root, 'src', 'a.js'), 'module.exports = 1;\n');
-    const CRITERIOS = Array.from({ length: 30 }, (_, i) => 'El criterio de aceptación número ' + i + ' describe un comportamiento observable y comprobable');
-    const base = (o = {}) => ({ task_id: 'G-1', plan_id: 'P-1', sprint_id: 'S-1', sender_role: 'director', recipient_role: 'builder', objective: 'Que el total del carrito sume el descuento', acceptance: CRITERIOS, scope: ['src/a.js'], risk_tier: 'MEDIUM', protected_contract_refs: ['C-PRECIO-1'], next_actions: ['implementar'], ...o });
-    const rx = { estado: null, recibir(pk) { const x = tp.recibir(this.estado, pk); if (x.status === 'APLICADO') this.estado = x.estado; return x; } };
-    let optimizado = 0; let baseline = 0; const rondas = 12;
-    const acciones = ['implementar'];
-    const e1 = tp.enviar(p.root, base());
-    rx.recibir(e1.packet); optimizado += e1.delivered_bytes; baseline += e1.snapshot_bytes;
-    const a1 = tp.ack(p.root, { task_id: 'G-1', recipient_role: 'builder', revision: 1, hash: rx.recibir(e1.packet).ack.hash });
-    let confirmadoOk = a1.ok === true; let ultimaKind = null; let deltas = 0;
-    for (let i = 2; i <= rondas; i++) {
-      acciones.push('paso ' + i);
-      const e = tp.enviar(p.root, base({ next_actions: acciones.slice() }));
-      optimizado += e.delivered_bytes; baseline += e.snapshot_bytes; ultimaKind = e.kind; if (e.kind === 'delta') deltas++;
-      if (i === 6) rx.estado = null; // el receptor REINICIA: el delta no se puede aplicar → pide snapshot
-      const ap = rx.recibir(e.packet);
-      if (ap.status === 'PIDE_SNAPSHOT') { const s = tp.snapshotActual(p.root, { task_id: 'G-1', recipient_role: 'builder' }); optimizado += bytes(s.packet.body); const ap2 = rx.recibir(s.packet); confirmadoOk = confirmadoOk && ap2.status === 'APLICADO'; if (ap2.ack) tp.ack(p.root, { task_id: 'G-1', recipient_role: 'builder', revision: ap2.ack.revision, hash: ap2.ack.hash }); }
-      else if (ap.ack) tp.ack(p.root, { task_id: 'G-1', recipient_role: 'builder', revision: ap.ack.revision, hash: ap.ack.hash });
-    }
-    const final = tp.snapshotActual(p.root, { task_id: 'G-1', recipient_role: 'builder' });
-    const igual = rx.estado && tp.hashContenido(rx.estado.contenido) === tp.hashContenido(JSON.parse(final.packet.body));
-    // Evidencia caducada/cambiada: el director rechaza un PASS que no puede comprobar.
-    const ev = store.guardar(p.root, { text: 'PASS 10/10' }, { kind: 'test_log', retention: 'durable_audit', task_id: 'G-1' });
-    fs.writeFileSync(store.rutaObjeto(p.root, ev.sha256), 'PASS 99/99 (cambiado)');
-    const val = tp.validarEntrega(p.root, { task_id: 'G-1', criterios: [{ criterio: 'tests', status: 'PASS', evidence_id: ev.evidence_id }], files: [] });
-    // Decisión humana pendiente NO bloqueante: se registra y la tarea sigue.
-    const dec = tp.registrarDecisionPendiente(p.root, { task_id: 'G-1', pregunta: '¿Mostrar el descuento en el PDF?', bloqueante: false });
-    return resultado(baseline, optimizado, 0, [
-      crit('reinicio del receptor → snapshot, no estado corrupto', confirmadoOk && igual === true),
-      crit('hubo entregas incrementales (delta) además de snapshots', deltas >= 1, 'deltas=' + deltas),
-      crit('evidencia cambiada: el director NO da PASS', val.ok === false),
-      crit('decisión humana no bloqueante registrada sin detener', !!(dec && (dec.ok !== false))),
-    ], { rondas, deltas, note: 'Receptor, constructor y director SIMULADOS: el protocolo y la base son reales; que un host real los lea no está probado aquí.' });
   } finally { p.limpiar(); }
 });
 

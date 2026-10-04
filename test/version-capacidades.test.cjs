@@ -99,11 +99,11 @@ test('H30: sin fuente de huella, ejecutado es desconocido (null), no false', () 
   assert.strictEqual(r.executed, null);
 });
 
-test('H30: TEAMS, restauración y WhatsApp no se anuncian sin módulo integrado', () => {
+test('H30: restauración y WhatsApp no se anuncian sin módulo integrado', () => {
   const raiz = tmp();
   escribir(raiz, '.agentic/grafo/y.cjs', 'module.exports = 1;\n');
   const p = cap.analizar(raiz).pendientes;
-  for (const id of ['teams', 'restore', 'whatsapp']) {
+  for (const id of ['restore', 'whatsapp']) {
     assert.strictEqual(p.find((x) => x.id === id).estado, 'no_integrada');
   }
 });

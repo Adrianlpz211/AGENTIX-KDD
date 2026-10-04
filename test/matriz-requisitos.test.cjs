@@ -20,7 +20,6 @@ test('matriz: los seis documentos tienen requisitos y todos declaran su alcance 
 
 test('matriz: lo que no se probó en un host real se declara NO_EJECUTADO y el documento no afirma publicación', () => {
   const md = m.markdown();
-  assert.match(md, /H02-11b/);
   assert.match(md, /NO_EJECUTADO/);
   assert.match(md, /no afirma que 3\.20\.1 esté publicada/);
   assert.match(md, /Implementado no es verificado/i);

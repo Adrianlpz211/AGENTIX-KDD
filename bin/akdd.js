@@ -146,11 +146,9 @@ const HELP = `
   Dashboard:
     akdd dashboard         Open visual dashboard in browser
 
-  3.20 — effort, TEAMS, restore, hooks, time:
+  3.20 — effort, restore, hooks, time:
     akdd effort decide "<task>" [--paths=a,b] [--type=T] [--json]   LOW/MEDIUM/HIGH by difficulty AND risk
     akdd context armar "<goal>" --paths=a,b                          One context package per task
-    akdd teams <init|plan <plan.json>|run|status|pending|resolve|pause|resume|disable|goal>
-                           Claude Code director + Cursor builder (init needs --aprobar-migracion)
     akdd restore <list|create --label=L [--files=a,b]|show|preview|apply <id> --expected-current-hash=H>
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
@@ -172,7 +170,6 @@ const HELP = `
     akdd context recover <reference_id> [--lines=a-b]  Retrieve the original (hash verified)
     akdd effort budget <estado <id>|host [id]>          Cumulative effort budget per task
     akdd benchmark contexto [--json]   Deterministic benchmark of compaction + recovery + effort (net payload, measured honestly)
-    akdd teams packet <estado|snapshot|ack|invalidar|cerrar>   Shared director↔builder context packets
 
   MCP Setup (Cursor / Claude Code / VS Code):
     akdd mcp               Configure MCP for THIS project (Cursor + Claude Code)
@@ -242,37 +239,14 @@ switch (command) {
     break;
   }
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
-  case 'teams': {
-    const sub = arg1 || 'status';
-    if (['init', 'plan', 'run', 'status', 'pause', 'resume', 'disable', 'pending', 'resolve', 'import', 'verify', 'views'].includes(sub)) runModule('teams-manager.cjs', sub, ...args.slice(2));
-    else if (sub === 'goal') runModule('goal-check.cjs', ...args.slice(2));
-    else if (sub === 'watch') runModule('teams-watch.cjs', ...args.slice(2));
-    else if (sub === 'packet') runModule('teams-packets.cjs', ...args.slice(2));
-    else if (sub === 'vigilar') runModule('builder-inactividad.cjs', ...args.slice(2));
-    else if (sub === 'revisar-plan') runModule('teams-manager.cjs', 'revise-plan', ...args.slice(2));
-    else if (sub === 'revalidar') runModule('teams-manager.cjs', 'revalidate', ...args.slice(2));
-    else if (sub === 'conectar-builder') runModule('teams-builder.cjs', 'conectar', ...args.slice(2));
-    else if (sub === 'builder-listo') runModule('teams-builder.cjs', 'listo', ...args.slice(2));
-    else if (sub === 'correcciones') runModule('teams-correcciones.cjs', ...args.slice(2));
-    else if (sub === 'revision') runModule('teams-revision.cjs', ...args.slice(2));
-    else if (['cerrar', 'avance', 'memoria'].includes(sub)) runModule('teams-cierre.cjs', sub, ...args.slice(2));
-    else if (sub === 'cerrar-ack') runModule('teams-cierre.cjs', 'ack', ...args.slice(2));
-    else if (sub === 'confirmar-cierre') runModule('teams-cierre.cjs', 'confirmar', ...args.slice(2));
-    else if (sub === 'reabrir-campana') runModule('teams-cierre.cjs', 'reabrir', ...args.slice(2));
-    else if (sub === 'reportar' || sub === 'ronda') runModule('teams-md-session.cjs', sub, ...args.slice(2));
-    else if (sub === 'importar-canal') runModule('teams-canal.cjs', 'importar', ...args.slice(2));
-    else if (sub === 'nucleo') runModule('teams-nucleo.cjs', ...args.slice(2));
-    else if (sub === 'puente') runModule('teams-puente.cjs', ...args.slice(2));
-    else if (sub === 'vigilancia') runModule('teams-vigilancia.cjs', ...args.slice(2));
-    else if (sub === 'prompt') runModule('teams-prompts.cjs', ...args.slice(2));
-    else if (sub === 'investigar') runModule('teams-investigar.cjs', ...args.slice(2));
-    else uso('akdd teams <init [--aprobar-migracion]|plan <plan.json>|run|status|pause|resume|disable|pending|resolve <id> <decisión>|import <archivo>|verify <id> --gates=<json>|views|packet <estado|snapshot|ack|invalidar|cerrar>|nucleo <cierre|revision|procesar|estado|cobertura|ciclos>|puente <verificar <id>|procesar>|vigilancia <estado|capacidades|instalar|apagar|esperar>|prompt <director|builder|frontend|backend|negocio>|investigar <consultar|permitir|listar>|goal|watch --rol=R|revalidar <id> --gates=<json>|revisar-plan --archivo=<json>|conectar-builder --sesion=ID --proyecto=RUTA [--listo]|builder-listo|correcciones <añadir|publicar|listar|tomar|entregar|reanudar|verificar|reabrir|descartar|bloquear|desbloquear|reubicar>|revision <registrar|informar|consumir|pendientes|sujeto-final|estado>|reportar <entrega|correccion|nota>|ronda --rol=R|cerrar|cerrar-ack|confirmar-cierre|reabrir-campana|avance|memoria|importar-canal>');
-    break;
-  }
+  case 'teams':
+    // TEAMS (Director + Cursor) se está reescribiendo desde cero siguiendo el protocolo de trabajo del dueño (canal único, la auditoría nunca gatea el avance).
+    console.log('akdd teams: no disponible en esta versión — el modo TEAMS se está reconstruyendo desde cero. Mientras tanto usa el protocolo manual (.legion/).');
+    process.exitCode = 2; break;
   case 'ws': {
     const sub = arg1 || 'estado';
-    if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar', 'teams'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));
-    else uso('akdd ws <activar|contacto <id> <número o nombre>|elegir <id> <n>|reintentar <id>|desactivar|estado|politica|procesar|teams>');
+    if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));
+    else uso('akdd ws <activar|contacto <id> <número o nombre>|elegir <id> <n>|reintentar <id>|desactivar|estado|politica|procesar>');
     break;
   }
   case 'restore': {
