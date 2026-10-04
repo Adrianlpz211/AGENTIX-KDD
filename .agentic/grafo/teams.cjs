@@ -401,7 +401,7 @@ function fijarModoEnCanal(root, mecanica, opt) {
 
 const SIN_CANAL = 'No hay canal TEAMS en este proyecto. Ejecuta `teams: activar` (o `node .agentic/grafo/teams.cjs activar`).';
 
-function observar(root, e, say) {
+function observar(root, e, say, forzar = false) {
   const detalles = aceptacionesDetalle(e.c);
   const res = [];
   const est = leerEstado(root);
@@ -414,10 +414,10 @@ function observar(root, e, say) {
     const miAcept = aceps.filter((a) => a.id === t.id).map((a) => a.at).sort((x, y) => x - y)[0];
     const previa = Math.max(0, ...aceps.filter((a) => a.id !== t.id && (!miAcept || a.at < miAcept)).map((a) => a.at));
     const inicio = Number.isFinite(creada) ? Math.max(creada, previa) : null;
-    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio });
+    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio, forzar });
     res.push({ id: t.id, ...r });
   }
-  const nuevos = res.filter((x) => !['YA_REGISTRADA'].includes(x.estado));
+  const nuevos = res.filter((x) => !['YA_REGISTRADA', 'EN_ESPERA'].includes(x.estado));
   if (say) for (const x of nuevos) say(x.estado === 'REGISTRADA' ? `  ✔ ${x.id} registrada en el núcleo (ciclo ${x.ciclo}, área ${x.area}, ${x.archivos} archivo(s))` : `  ⚠ ${x.id} ${x.estado}${x.causa ? ': ' + x.causa : ''} — no frena nada; se reintenta en la próxima revisión`);
   return res;
 }
@@ -707,7 +707,7 @@ function ejecutar(argv, root) {
 
   if (cmd === 'observar') {
     const e = necesitaCanal(); if (!e) return salida(1);
-    const r = observar(root, e, (x) => say(x));
+    const r = observar(root, e, (x) => say(x), !!opt.reintentar);
     say(`Observado: ${r.length} tarea(s) aceptada(s) · ${JSON.stringify(reg.resumen(root))}`);
     return salida();
   }

@@ -19,6 +19,7 @@ const { spawnSync } = require('child_process');
 const canal = require('./teams-canal.cjs');
 
 const REINTENTOS_MAX = 5;
+const ENFRIAMIENTO_MS = 30 * 60 * 1000; // tras agotar los intentos, a los 30 min se vuelve a probar solo
 const HIJO_MS = 4 * 60 * 1000;
 const rutaRegistro = (root) => path.join(canal.dirEstado(root), 'registro.json');
 
@@ -87,7 +88,15 @@ function registrarTarea(root, tarea, acept, opts = {}) {
   const clave = tarea.id + '@' + canal.sha(tarea.titulo + '|' + (acept.fecha || '')).slice(0, 10);
   const previo = reg.tareas[clave];
   if (previo && previo.estado === 'REGISTRADA') return { ...previo, estado: 'YA_REGISTRADA', clave };
-  if (previo && (previo.intentos || 0) >= REINTENTOS_MAX) return { ...previo, estado: 'ABANDONADA', clave };
+  if (previo && previo.estado === 'PENDIENTE') {
+    // Espera progresiva entre intentos (1, 2, 4, 8, 15 min): un fallo transitorio (base ocupada por otro proceso) NO gasta los
+    // 5 intentos en segundos — medido en glowly: tres tareas agotaron el presupuesto en 1 s por «database is locked».
+    const edad = Date.now() - Date.parse(previo.at);
+    if (opts.forzar || acept.forzar) previo.intentos = 0;
+    else if ((previo.intentos || 0) >= REINTENTOS_MAX && edad > ENFRIAMIENTO_MS) previo.intentos = 0; // enfriado: vuelve a intentarlo solo
+    else if ((previo.intentos || 0) >= REINTENTOS_MAX) return { ...previo, estado: 'ABANDONADA', clave };
+    else if (edad < Math.min(15 * 60000, 60000 * 2 ** Math.max(0, (previo.intentos || 1) - 1))) return { ...previo, estado: 'EN_ESPERA', clave };
+  }
 
   const script = opts.postCycle || process.env.AKDD_TEAMS_POSTCYCLE || path.join(root, '.agentic', 'grafo', 'post-cycle.cjs');
   const archivos = archivosDe(root, tarea, acept.reporte);

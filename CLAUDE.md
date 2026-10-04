@@ -68,7 +68,7 @@ constructor); en Cursor eres el CONSTRUCTOR. Usa `--rol=director` o `--rol=build
 |---|---|
 | `teams: vigilar` | lanzar `esperar --rol=<rol> --despertar` como TAREA EN SEGUNDO PLANO del host y **relanzarlo PRIMERO tras cada aviso (antes de trabajar)**; en Claude Code con la herramienta Monitor usa `--continuo` (no termina al avisar). `AGENT_LOOP_END_*` = cerrado, `AGENT_LOOP_PAUSE_*` = pausado: NO relanzar. Si `ronda`/`revisar` dicen en su primera línea que tu vigilante no está vivo, relánzalo ya |
 | `teams: comprobar` | `comprobar`: decir TAL CUAL qué vigilante está vivo; nunca anunciar autonomía que no figure |
-| `teams: estado` / `avance` / `reporte` | `estado` / `avance` / `reporte` (reporte al dueño: hecho, no hecho y por qué, pendiente, qué probar) |
+| `teams: estado` / `avance` / `reporte` / `observar [--reintentar]` | `estado` / `avance` / `reporte` (reporte al dueño: hecho, no hecho y por qué, pendiente, qué probar) |
 | `teams: tarea "…"` · `corrección "…"` | `tarea` / `corregir` (el Director; las correcciones nunca frenan el avance) |
 | `teams: resolver D-001 <decisión>` | `decidir D-001 "<decisión>"` — solo vale si la persona lo escribió ella |
 | `teams: heredar` | `heredar`: tras adoptar un canal con historial, marca lo vivo en ese momento como HEREDADA para que el constructor empiece limpio |

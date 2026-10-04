@@ -1352,6 +1352,42 @@
           "base bloqueada por un escritor"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-registro-espera",
+      "doc": "TEAMS",
+      "requisito": "Un fallo transitorio del registro no agota los reintentos en segundos: espera progresiva, enfriamiento y reintento manual",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "REGISTRO"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-sin-claude-md",
+      "doc": "TEAMS",
+      "requisito": "activar no escribe en CLAUDE.md ni INSTRUCCIONES-PROYECTO y retira el bloque que escribían versiones anteriores",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "MIGRACIÓN"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-reloj",
+      "doc": "TEAMS",
+      "requisito": "post-cycle deduce la duración también tras cerrar el ciclo",
+      "alcance": "proceso real (texto del código verificado)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "post-cycle deduce la duración TAMBIÉN"
+        ]
+      ]
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Changelog — Agentic KDD
 
-## [3.22.2] — 2026-10-04
+## [3.22.3] — 2026-10-04
 
 **Blindaje tras la primera campaña real (glowly): lo que falló al usar TEAMS con Cursor y Claude Code a la vez.**
 - **Cursor ya sabe qué es `teams:`.** Faltaba la regla que se lo enseña: ahora viaja con Agentix (`.cursor/rules/teams.mdc`, siempre activa) y define `teams: constructor`, `continuar` y `pausa`. La palabra del comando pasa a español: `teams: constructor` (`builder` sigue valiendo en la CLI).
@@ -10,6 +10,9 @@
 - **Duración de los ciclos de TEAMS:** se sella el inicio (cuando el constructor quedó libre para la tarea) y el reloj de Agentix prefiere la marca del propio ciclo a marcas ajenas. Antes salían con duración 0.
 - **Indexador del mapa de código (AST) que dejaba la base bloqueada ~10 min:** ahora espera por los bloqueos de otros escritores (antes chocaba al instante), solo corre UN indexado por proyecto a la vez, escribe por lotes cortos, tiene presupuesto de tiempo (la siguiente corrida sigue donde quedó) y no reescribe el PageRank si el código no cambió.
 - **Tablero:** si la base está ocupada por un escritor largo sirve la última lectura buena marcada `stale` (y lo dice) en vez de `DB_BLOQUEADA` o colgarse; espera 2 s por consulta en lugar de 5.
+- **El registro en el núcleo ya no se «abandona» por un fallo transitorio:** en glowly 3 tareas aceptadas agotaron sus 5 reintentos en 1 segundo (base ocupada) y quedaron fuera de Agentix. Ahora hay espera progresiva entre intentos (1, 2, 4, 8, 15 min), enfriamiento de 30 min tras agotarlos y ${BT}teams observar --reintentar${BT} para forzarlo.
+- **El reloj de Agentix mide también los ciclos de TEAMS:** ${BT}post-cycle${BT} deduce la duración otra vez TRAS cerrar el ciclo (el paso previo corría antes de que existiera ${BT}fecha_fin${BT} y todos quedaban en 0).
+- **${BT}teams: activar${BT} ya no escribe en ${BT}CLAUDE.md${BT}:** su bloque de recuperación hacía que ${BT}akdd update${BT} viera «cambios propios» y dejara ${BT}CLAUDE.md${BT} sin actualizar. La regla viaja ahora en el CLAUDE.md que gestiona Agentix y ${BT}activar${BT} retira el bloque que escribieron las versiones 3.21–3.22.1.
 - **Migración desde el TEAMS anterior:** `teams: activar` detecta un canal del motor viejo y lo archiva (`.legion/ANTIGUO-v3-vista.md`) en vez de adoptarlo, y detiene los vigilantes viejos que seguían vivos tras `akdd update` reescribiendo el canal. `teams: comprobar` los avisa.
 
 ## [3.22.0] — 2026-10-04

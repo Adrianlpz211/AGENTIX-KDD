@@ -186,7 +186,9 @@ test('si el registro falla NO frena nada: queda pendiente y observar lo reintent
   } finally { delete process.env.AKDD_TEAMS_POSTCYCLE; }
   const restaurar = stubPostCycle(root);
   try {
-    salida(root, 'observar');
+    assert.match(salida(root, 'observar'), /Observado/);
+    assert.equal(llamadasStub(root).length, 0, 'recién fallado: está en espera, no reintenta de inmediato (espera progresiva)');
+    salida(root, 'observar', '--reintentar');
     assert.equal(llamadasStub(root).length, 1);
     assert.equal(require(path.join(G, 'teams-registro.cjs')).resumen(root).registradas, 1);
   } finally { restaurar(); }
@@ -767,4 +769,36 @@ test('post-cycle deduce la duración TAMBIÉN tras cerrar el ciclo (el paso 2.75
   assert.ok(cierre > 0 && segunda > cierre, 'la segunda pasada del reloj va DESPUÉS del cierre del ciclo');
   assert.ok(primera > 0 && primera < cierre, 'la primera pasada sigue donde estaba');
   assert.match(src.slice(segunda - 300, segunda + 200), /completarUltimo\(ROOT\)/);
+});
+
+test('REGISTRO — un fallo transitorio (base ocupada) no gasta los 5 intentos en segundos: espera progresiva, enfriamiento y reintento manual', () => {
+  const root = proyecto();
+  const stub = path.join(root, 'stub-falla.cjs');
+  fs.writeFileSync(stub, "const fs=require('fs'),path=require('path');const d=path.join(process.cwd(),'.agentic','_teams');fs.mkdirSync(d,{recursive:true});fs.appendFileSync(path.join(d,'stub-calls.jsonl'),'x'+String.fromCharCode(10));if(fs.existsSync(path.join(process.cwd(),'FALLAR'))){console.error('❌ post-cycle falló: database is locked');process.exit(1);}");
+  process.env.AKDD_TEAMS_POSTCYCLE = stub;
+  const llamadas = () => { try { return fs.readFileSync(path.join(root, '.agentic', '_teams', 'stub-calls.jsonl'), 'utf8').trim().split('\n').length; } catch { return 0; } };
+  const regPath = path.join(root, '.agentic', '_teams', 'registro.json');
+  const envejecer = (min, intentos) => { const r = JSON.parse(fs.readFileSync(regPath, 'utf8')); for (const v of Object.values(r.tareas)) { v.at = new Date(Date.now() - min * 60000).toISOString(); if (intentos !== undefined) v.intentos = intentos; } fs.writeFileSync(regPath, JSON.stringify(r)); };
+  try {
+    arrancado(root); salida(root, 'tarea', 'X', '--criterio=a', '--sin-contexto'); salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo');
+    fs.writeFileSync(path.join(root, 'FALLAR'), '1');
+    salida(root, 'aceptar', 'T-001');
+    assert.equal(llamadas(), 1);
+    for (let i = 0; i < 6; i++) salida(root, 'observar');
+    assert.equal(llamadas(), 1, 'seis revisiones seguidas NO reintentan: están en espera (antes agotaban los 5 intentos en 1 s)');
+    assert.equal(JSON.parse(fs.readFileSync(regPath, 'utf8')).tareas[Object.keys(JSON.parse(fs.readFileSync(regPath, 'utf8')).tareas)[0]].intentos, 1);
+    envejecer(3);
+    salida(root, 'observar');
+    assert.equal(llamadas(), 2, 'pasada la espera (1 min) reintenta');
+    envejecer(0, 5);
+    assert.match(salida(root, 'observar') + '', /Observado/);
+    assert.equal(llamadas(), 2, 'con los 5 intentos gastados y reciente, no insiste');
+    envejecer(45, 5);
+    salida(root, 'observar');
+    assert.equal(llamadas(), 3, 'a los 30 min de enfriamiento vuelve a intentarlo solo');
+    fs.rmSync(path.join(root, 'FALLAR'));
+    envejecer(0, 5);
+    assert.match(salida(root, 'observar', '--reintentar'), /registrada en el núcleo/);
+    assert.equal(require(path.join(G, 'teams-registro.cjs')).resumen(root).registradas, 1, 'el reintento manual ignora la espera y lo registra');
+  } finally { delete process.env.AKDD_TEAMS_POSTCYCLE; }
 });
