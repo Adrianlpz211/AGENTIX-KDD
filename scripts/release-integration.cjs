@@ -229,13 +229,12 @@ async function check(tgz, lab, baselines) {
   assert.equal(uopt.json.status, 'VERIFIED', 'con opcionales presentes pero inutilizables: ' + JSON.stringify([uopt.json.errors, uopt.json.warnings]));
   const optionalDeps = { optional_present_install: true, update_status: uopt.json.status, driver: uopt.json.schema && uopt.json.schema.driver ? uopt.json.schema.driver : 'n/d' };
 
-  const attacks = require('../sandbox/probes.cjs').run(bundle, 512, 211), native = require('../sandbox/native-probes.cjs').run(bundle);
+  const attacks = require('../sandbox/probes.cjs').run(bundle, 512, 211);
   assert.equal(attacks.failures.length, 0, JSON.stringify(attacks.failures));
-  assert.equal(native.failures.length, 0, JSON.stringify(native.failures));
-  fs.writeFileSync(path.join(lab, 'adversarial-results.json'), JSON.stringify({ attacks, native }, null, 2));
+  fs.writeFileSync(path.join(lab, 'adversarial-results.json'), JSON.stringify({ attacks }, null, 2));
   void versiones;
   return {
-    adversarial: { cases: attacks.results.length + native.results.length, failures: 0, seed: 211 },
+    adversarial: { cases: attacks.results.length, failures: 0, seed: 211 },
     clean_npm_install_core: true, optional_dependencies: optionalDeps, published_baseline: consumidores.map((c) => c.from), target: TARGET, sqlite_integrity: 'ok',
     new_memory_functions_after_upgrade: consumidores.map((c) => ({ from: c.from, ...c.memory_functions })),
     consumers: consumidores,

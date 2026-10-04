@@ -409,3 +409,18 @@ test('el piloto de release solo exige herramientas MCP que el servidor realmente
   const fuentes = fs.readdirSync(G).filter((n) => /^mcp-.*\.cjs$/.test(n)).map((n) => fs.readFileSync(path.join(G, n), 'utf8')).join(String.fromCharCode(10));
   for (const n of exigidas) assert.ok(new RegExp("name:\\s*'" + n + "'").test(fuentes), 'el piloto exige ' + n + ' pero el servidor no la define');
 });
+
+test('ningún script de release ni del laboratorio requiere un archivo que ya no existe (restos del TEAMS retirado)', () => {
+  const raiz = path.join(__dirname, '..');
+  const rotos = [];
+  for (const dir of ['scripts', 'sandbox']) {
+    for (const n of fs.readdirSync(path.join(raiz, dir)).filter((x) => /\.c?js$/.test(x))) {
+      const src = fs.readFileSync(path.join(raiz, dir, n), 'utf8');
+      for (const m of src.matchAll(/require\(\s*'(\.{1,2}\/[^']+)'\s*\)/g)) {
+        const destino = path.resolve(raiz, dir, m[1]);
+        if (!fs.existsSync(destino) && !fs.existsSync(destino + '.cjs') && !fs.existsSync(destino + '.js') && !fs.existsSync(destino + '.json')) rotos.push(dir + '/' + n + ' → ' + m[1]);
+      }
+    }
+  }
+  assert.deepEqual(rotos, []);
+});
