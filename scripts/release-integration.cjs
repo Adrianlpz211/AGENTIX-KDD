@@ -49,7 +49,7 @@ async function rpc(root) {
     const initialized = await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'agentix-release-check', version: '1' } });
     assert.equal(initialized.serverInfo.version, TARGET);
     const tools = await call('tools/list', {});
-    for (const n of ['recall', 'remember', 'effort_decide', 'restore', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_queue', 'context_compress', 'context_recover', 'effort_budget', 'teams_packet']) assert.ok(tools.tools.some((t) => t.name === n), 'MCP tool ' + n);
+    for (const n of ['recall', 'remember', 'effort_decide', 'restore', 'memory_index', 'memory_detail', 'memory_timeline', 'memory_evidence', 'memory_capture', 'memory_queue', 'context_compress', 'context_recover', 'effort_budget']) assert.ok(tools.tools.some((t) => t.name === n), 'MCP tool ' + n);
     assert.ok(!tools.tools.some((t) => t.name === 'memory_validate'), 'validar conocimiento no se delega en el modelo');
     const cap = await tool('memory_capture', { host: 'mcp-release', session_id: 'rel', host_event_id: 'm1', event_type: 'test_run', task_id: 'T-MCP', output: 'ok' });
     assert.equal(cap.status, 'CAPTURED', JSON.stringify(cap));

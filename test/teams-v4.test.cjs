@@ -400,3 +400,12 @@ test('canal real con historial en texto libre (sin ids): no inventa pendientes, 
   assert.match(salida(root, 'tarea', 'Lote 17 nuevo', '--criterio=x'), /encolada/);
   assert.equal(T.calcular(root).tareasPend.length, 1, 'lo nuevo sí cuenta');
 });
+
+test('el piloto de release solo exige herramientas MCP que el servidor realmente define (no una retirada como teams_packet)', () => {
+  const piloto = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release-integration.cjs'), 'utf8');
+  const lista = /for \(const n of \[([^\]]+)\]\) assert\.ok\(tools\.tools\.some/.exec(piloto);
+  assert.ok(lista, 'no se encontró la lista de herramientas exigidas');
+  const exigidas = [...lista[1].matchAll(/'(\w+)'/g)].map((m) => m[1]);
+  const fuentes = ['mcp-server.cjs', 'mcp-contexto-tools.cjs'].map((n) => fs.readFileSync(path.join(G, n), 'utf8')).join(String.fromCharCode(10));
+  for (const n of exigidas) assert.ok(new RegExp("name: '" + n + "'").test(fuentes), 'el piloto exige ' + n + ' pero el servidor no la define');
+});
