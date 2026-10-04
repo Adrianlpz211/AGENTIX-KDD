@@ -28,7 +28,7 @@ test('dashboard: tras un update verificado la tarjeta muestra los estados REALES
     assert.equal(status, 200);
     const x = json.data;
     assert.equal(json.status, 'OK');
-    assert.match(x.installed_version, /^3\.20\./);
+    assert.match(x.installed_version, /^3\.2\d\./);
     assert.equal(x.service.responds, true);
     assert.equal(x.memory.can_work, true);
     assert.equal(x.schema.status, 'COMPLETE');

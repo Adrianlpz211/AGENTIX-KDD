@@ -38,7 +38,7 @@ function comprobar() {
       if (!fs.readFileSync(f, 'utf8').includes(titulo)) huecos.push({ id: r.id, motivo: 'no aparece "' + titulo + '" en ' + path.relative(ROOT, f) });
     }
   }
-  for (const d of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03']) if (!docs.has(d)) huecos.push({ id: d, motivo: 'el documento no tiene requisitos' });
+  for (const d of ['C01', 'C02', 'C03', 'H01', 'H02', 'H03', 'TEAMS']) if (!docs.has(d)) huecos.push({ id: d, motivo: 'el documento no tiene requisitos' });
   return huecos;
 }
 

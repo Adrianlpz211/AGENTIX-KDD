@@ -202,9 +202,29 @@ Every answer carries explicit states (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSI
 
 ## 🔨 Autonomy — the Hammer
 
-### TEAMS — being rebuilt
+### TEAMS — Claude Code directs, Cursor builds (one MD channel)
 
-The TEAMS mode (Claude Code directs, Cursor builds) was removed from this version and is being rebuilt from scratch. Until it ships, use `aa:` (one agent, one task) and `audit:`.
+The protocol many people run by hand, now a command wired into Agentix. Everything is by chat:
+
+```
+teams: activar                  ← creates .legion/ (or ADOPTS the one you already have, untouched)
+teams: arrancar director        ← in Claude Code: it reads its own protocol; nothing to paste
+teams: arrancar builder         ← in Cursor: same, as the builder
+teams: vigilar · comprobar      ← background watchers · what is really alive
+teams: estado · avance · reporte · cerrar
+```
+
+| Piece | What it does |
+|---|---|
+| **One channel** | `.legion/AUDITORIA-CURSOR.md`: Corrections, Tasks, Report, Director audit, Decisions. If it is not written there, it did not happen |
+| **Audit never gates progress** | The builder keeps going while the Director's 3 sub-agents (frontend/UI-UX, backend, business) audit behind it. A late finding goes to *Correcciones pendientes* and the builder reads it first, mid-task. Only a real BLOQUEANTE stops |
+| **The round prints everything** | `ronda` prints every pending correction and task in full, so the builder cannot skip parts of the file; it only closes when it prints `RONDA_COMPLETA` |
+| **Punctual reports** | One line per task (HECHO / PARCIAL / NO_HECHO + reason + exact verification). Missing reports, HECHO with open boxes and "resolved" without saying what are detected for you |
+| **Decisions** | The Director decides when it knows, **researches the internet by itself (with or without your links)** when it doubts, and only asks you what is not on the internet or is security-blocking |
+| **Wake-up and a real end** | Each role runs a background watcher the host delivers; the ~3 min loop is the independent backup. `cerrar` publishes the final report and tells **both** watchers to stop — nobody waits for something that will never arrive |
+| **Connected to Agentix** | Every task the Director accepts is registered by itself with `origin = teams` in the same core as `aa:` (cycle, KDD memory, contracts, AST, design, preservation, dashboard). If registration fails it stays pending and retries; it never stops the work |
+
+Agentix **observes**; it does not run a state machine. Honest limits: the wake-up depends on the host delivering the background task (`teams: comprobar` tells you what is verified), and live Cursor + Claude Code together is still `NO_EJECUTADO` in the matrix.
 
 ### The rest of the hammer
 

@@ -107,6 +107,6 @@ El informe dice en qué plataforma y Node corrió: **no se infiere de otras**. L
 
 ## Lo que NO está verificado
 
-- **Hosts reales (Cursor, Claude Code):** Los hosts reales no se ejecutaron en las pruebas.
+- **Hosts reales (Cursor, Claude Code):** TEAMS-v4-hosts quedan `NO_EJECUTADO`. Los hosts reales no se ejecutaron en las pruebas.
 - **Campañas con modelos reales:** `NO_EJECUTADO` (cuestan dinero y requieren autorización). El benchmark es determinista y mide payload.
 - **Publicación:** esta matriz no afirma que 3.20.1 esté publicada: `npm view agentic-kdd version` y `npm run release:verify` lo dicen.

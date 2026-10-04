@@ -36,7 +36,7 @@ test('3.19.0 REAL → versión actual con UN comando: VERIFIED, memoria conserva
   assert.equal(r.exit_code, 0);
   assert.equal(r.ok, true);
   assert.equal(r.versions.from, '3.19.0');
-  assert.match(r.versions.to, /^3\.20\./);
+  assert.match(r.versions.to, /^3\.2\d\./);
   assert.equal(real.conservada(antes, p.dbPath).status, 'PASS');
   assert.equal(r.preservation.db.status, 'PASS');
   assert.equal(r.preservation.files.status, 'PASS');

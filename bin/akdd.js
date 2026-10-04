@@ -152,6 +152,7 @@ const HELP = `
     akdd restore <list|create --label=L [--files=a,b]|show|preview|apply <id> --expected-current-hash=H>
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
+    akdd teams <activar|estado|ronda|revisar|tarea|corregir|resolver|reportar|aceptar|cerrar|…>   Claude Code directs, Cursor builds (one MD channel)
     akdd ws <activar|estado|desactivar>   Optional WhatsApp notices (needs a real browser session)
     akdd simple            Simplicity gate: duplicated code, deps with native equivalent
     akdd capabilities      What this install can really do (verified vs pending)
@@ -239,10 +240,7 @@ switch (command) {
     break;
   }
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
-  case 'teams':
-    // TEAMS (Director + Cursor) se está reescribiendo desde cero siguiendo el protocolo de trabajo del dueño (canal único, la auditoría nunca gatea el avance).
-    console.log('akdd teams: no disponible en esta versión — el modo TEAMS se está reconstruyendo desde cero. Mientras tanto usa el protocolo manual (.legion/).');
-    process.exitCode = 2; break;
+  case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
   case 'ws': {
     const sub = arg1 || 'estado';
     if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));

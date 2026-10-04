@@ -1019,6 +1019,135 @@
           "aa: individual — el dashboard"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-1",
+      "doc": "TEAMS",
+      "requisito": "La ronda del constructor imprime TODO lo pendiente (correcciones primero, tareas completas): no depende de que lea el MD entero",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "la ronda del constructor imprime TODO lo pendiente"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-2",
+      "doc": "TEAMS",
+      "requisito": "Una tarea con casillas marcadas y sin reporte puntual es una omisión que la ronda no deja cerrar",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "reporte puntual: una tarea con casillas marcadas"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-3",
+      "doc": "TEAMS",
+      "requisito": "Lo no implementado queda visible: HECHO con casillas abiertas, NO_HECHO/PARCIAL sin motivo, y sale en el reporte al dueño",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "lo que NO se implementó queda visible"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-4",
+      "doc": "TEAMS",
+      "requisito": "Aceptar una tarea la registra en el núcleo (post-cycle origen teams, ciclo teams_, archivos reales) una sola vez",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "aceptar registra la tarea en el núcleo"
+        ]
+      ],
+      "nota": "proceso real (CLI y archivos); post-cycle simulado en la prueba, real en la verificación manual"
+    },
+    {
+      "id": "TEAMS-v4-5",
+      "doc": "TEAMS",
+      "requisito": "Si el registro falla no frena nada: queda pendiente y se reintenta",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "si el registro falla NO frena nada"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-6",
+      "doc": "TEAMS",
+      "requisito": "El vigilante despierta con lo pendiente, no repite por lo ya atendido y despierta a media espera",
+      "alcance": "proceso real (procesos y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "vigilante del constructor: despierta con lo pendiente"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-7",
+      "doc": "TEAMS",
+      "requisito": "Cerrar manda terminar a los vigilantes de los dos roles; nadie queda esperando",
+      "alcance": "proceso real (procesos y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "CIERRE: cerrar manda terminar"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-8",
+      "doc": "TEAMS",
+      "requisito": "La investigación no se limita a los links del dueño; solo se escala lo que no está en internet o es bloqueante",
+      "alcance": "proceso real (texto del protocolo)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "el protocolo del Director no limita la investigación"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-9",
+      "doc": "TEAMS",
+      "requisito": "Dos agentes escribiendo el canal a la vez no se pisan",
+      "alcance": "proceso real (procesos y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "dos agentes escribiendo a la vez"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-10",
+      "doc": "TEAMS",
+      "requisito": "Adopta sin tocar el canal de la carpeta manual del dueño",
+      "alcance": "proceso real (archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "adopta el canal de la carpeta manual"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-hosts",
+      "doc": "TEAMS",
+      "requisito": "Cursor y Claude Code reales con sus vigilantes de fondo trabajando un proyecto de principio a fin",
+      "alcance": "host real NO_EJECUTADO",
+      "pruebas": [],
+      "nota": "Se prueba con el proyecto del dueño; el despertar solo cuenta como verificado tras `teams: comprobar`."
     }
   ]
 }

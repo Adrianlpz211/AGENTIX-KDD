@@ -202,9 +202,29 @@ Cada respuesta trae estados explícitos (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MI
 
 ## 🔨 Autonomía — el Martillo
 
-### TEAMS — en reconstrucción
+### TEAMS — Claude Code dirige, Cursor construye (un solo canal MD)
 
-El modo TEAMS (Claude Code dirige, Cursor construye) se retiró de esta versión y se está reconstruyendo desde cero. Mientras tanto usa `aa:` (un agente, una tarea) y `audit:`.
+El protocolo que mucha gente corre a mano, ahora un comando conectado a Agentix. Todo por chat:
+
+```
+teams: activar                  ← crea .legion/ (o ADOPTA el que ya tengas, sin tocarlo)
+teams: arrancar director        ← en Claude Code: lee su propio protocolo; nada que pegar
+teams: arrancar builder         ← en Cursor: igual, como constructor
+teams: vigilar · comprobar      ← vigilantes de fondo · qué está realmente vivo
+teams: estado · avance · reporte · cerrar
+```
+
+| Pieza | Qué hace |
+|---|---|
+| **Un solo canal** | `.legion/AUDITORIA-CURSOR.md`: Correcciones, Tareas, Reporte, Auditoría del Director, Decisiones. Si no está escrito ahí, no pasó |
+| **La auditoría nunca gatea el avance** | El constructor sigue mientras los 3 sub-agentes del Director (frontend/UI-UX, backend, negocio) auditan por detrás. Un hallazgo tardío va a *Correcciones pendientes* y el constructor lo lee primero, a media tarea. Solo un BLOQUEANTE real frena |
+| **La ronda imprime todo** | `ronda` imprime cada corrección y tarea pendiente completa: el constructor no puede saltarse partes del archivo; solo cierra cuando imprime `RONDA_COMPLETA` |
+| **Reportes puntuales** | Una línea por tarea (HECHO / PARCIAL / NO_HECHO + motivo + verificación exacta). Se detectan por ti los reportes que faltan, HECHO con casillas abiertas y «resuelto» sin decir qué |
+| **Decisiones** | El Director decide cuando sabe, **investiga en internet por su cuenta (con o sin tus links)** cuando duda, y solo te pregunta lo que no está en internet o es bloqueante por seguridad |
+| **Despertar y un fin real** | Cada rol corre un vigilante de fondo que el host entrega; el loop de ~3 min es el respaldo independiente. `cerrar` publica el reporte final y manda terminar a **los dos** vigilantes: nadie espera algo que no va a llegar |
+| **Conectado a Agentix** | Cada tarea que el Director acepta se registra sola con `origen = teams` en el mismo núcleo que `aa:` (ciclo, memoria KDD, contratos, AST, diseño, preservación, tablero). Si el registro falla queda pendiente y reintenta; nunca frena el trabajo |
+
+Agentix **observa**; no corre una máquina de estados. Límites honestos: el despertar depende de que el host entregue la tarea de fondo (`teams: comprobar` dice qué está verificado), y Cursor + Claude Code reales a la vez sigue `NO_EJECUTADO` en la matriz.
 
 ### El resto del martillo
 
