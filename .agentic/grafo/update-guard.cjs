@@ -174,7 +174,12 @@ function registerWriter(root, nombre, { onPause, onResume, intervaloMs = 400 } =
   const f = path.join(dirWriters(root), id + '.json');
   const base = { id, name: nombre, pid: process.pid, host: os.hostname(), registered_at: new Date().toISOString() };
   let pausado = false;
-  const escribir = (extra) => { try { fs.writeFileSync(f, JSON.stringify(Object.assign({}, base, { heartbeat_at: Date.now() }, extra || {}))); } catch { /* sin disco */ } };
+  // Escritura ATÓMICA (temporal + rename): quien lee el latido nunca ve un archivo a medias.
+  const escribir = (extra) => {
+    const tmp = f + '.' + process.pid + '.tmp';
+    try { fs.writeFileSync(tmp, JSON.stringify(Object.assign({}, base, { heartbeat_at: Date.now() }, extra || {}))); fs.renameSync(tmp, f); }
+    catch { try { fs.rmSync(tmp, { force: true }); } catch { /* sin disco */ } }
+  };
   escribir();
   const timer = setInterval(() => {
     const e = estado(root);
@@ -203,8 +208,17 @@ async function waitForWriters(root, opId, timeoutMs = 6000) {
     try { nombres = fs.readdirSync(dirWriters(root)).filter((n) => n.endsWith('.json')); } catch { /* sin escritores */ }
     for (const n of nombres) {
       let w = null;
-      try { w = JSON.parse(fs.readFileSync(path.join(dirWriters(root), n), 'utf8')); } catch { continue; }
       const f = path.join(dirWriters(root), n);
+      try { w = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {
+        // Un escritor vivo reescribe su latido cada pocos cientos de ms: una lectura a medias NO significa «no hay escritor».
+        // Ilegible y reciente = desconocido, y desconocido no es ausente: cuenta como sin ack y se vuelve a leer. Ilegible y
+        // viejo es basura de un proceso caído y se retira.
+        let edad = null;
+        try { edad = Date.now() - fs.statSync(f).mtimeMs; } catch { continue; /* ya no existe */ }
+        if (edad > 10000) { try { fs.rmSync(f, { force: true }); } catch { /* otro lo limpió */ } continue; }
+        sinAck.push({ id: n.slice(0, -'.json'.length), name: n, pid: null, ilegible: true });
+        continue;
+      }
       const muerto = w.host === os.hostname() && !vivo(Number(w.pid));
       const sinLatido = Date.now() - Number(w.heartbeat_at || 0) > 10000;
       if (muerto || sinLatido) { try { fs.rmSync(f, { force: true }); } catch { /* otro lo limpió */ } continue; }

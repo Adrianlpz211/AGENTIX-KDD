@@ -111,6 +111,11 @@ test('servicios con conexión persistente: pausan, cierran y CONFIRMAN; el que n
   try {
     for (let i = 0; i < 60 && !salida.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
     assert.ok(salida.includes('LISTO'));
+    // «LISTO» sale al llamar a registerWriter, pero el archivo de registro se escribe un instante después: sin esperarlo, con la máquina
+    // cargada waitForWriters no ve a nadie (acked = 0). Se espera a que el registro EXISTA, no un tiempo fijo.
+    const dirServicios = path.join(root, '.agentic', '_update', 'writers');
+    for (let i = 0; i < 100 && !(fs.existsSync(dirServicios) && fs.readdirSync(dirServicios).some((n) => n.includes('servicio-prueba'))); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fs.existsSync(dirServicios) && fs.readdirSync(dirServicios).some((n) => n.includes('servicio-prueba')), 'el servicio quedó registrado');
     const h = guard.acquire(root, { opId: 'op1', timeoutMs: 100 });
     try {
       const w = await guard.waitForWriters(root, 'op1', 5000);
@@ -171,4 +176,37 @@ test('adaptador: INTEGER de 64 bits, BLOB y respaldo con commits en WAL', () => 
     try { assert.equal(r.get('SELECT count(*) AS n FROM t').n, 1, 'el respaldo incluye lo que aún estaba en el -wal'); } finally { r.close(); }
     assert.throws(() => w.backupTo(copia), (e) => e.code === 'BACKUP_EXISTE', 'nunca pisa un respaldo');
   } finally { w.close(); }
+});
+
+test('escritores: un latido ILEGIBLE y reciente (lectura a mitad de reescritura) NO se toma por «no hay escritor»; uno viejo se retira', async () => {
+  const root = proyecto();
+  const dir = path.join(root, '.agentic', '_update', 'writers');
+  fs.mkdirSync(dir, { recursive: true });
+  // Un servicio vivo que reescribe su latido: el lector lo pilla a medias (JSON truncado, archivo recién modificado).
+  const a = path.join(dir, process.pid + '-servicio.json');
+  fs.writeFileSync(a, '{"id":"x","name":"servicio","pid":' + process.pid + ',"host":"');
+  const w = await guard.waitForWriters(root, 'op-x', 400);
+  assert.equal(w.ok, false, 'desconocido no es ausente: el update NO sigue como si no hubiera escritor');
+  assert.equal(w.sinAck.length, 1); assert.equal(w.sinAck[0].ilegible, true);
+  // Basura vieja de un proceso caído: se retira y no bloquea.
+  const viejo = new Date(Date.now() - 60000);
+  fs.utimesSync(a, viejo, viejo);
+  const w2 = await guard.waitForWriters(root, 'op-x', 400);
+  assert.equal(w2.ok, true); assert.equal(w2.sinAck.length, 0);
+  assert.ok(!fs.existsSync(a), 'el archivo ilegible y viejo se retiró');
+});
+
+test('escritores: el latido de un servicio se escribe de forma ATÓMICA (nunca se ve a medias)', async () => {
+  const root = proyecto();
+  const reg = guard.registerWriter(root, 'atomico', { intervaloMs: 20 });
+  try {
+    const f = reg.file; let ilegibles = 0; let lecturas = 0;
+    const fin = Date.now() + 1500;
+    while (Date.now() < fin) {
+      try { JSON.parse(fs.readFileSync(f, 'utf8')); lecturas++; } catch (e) { if (e.code !== 'ENOENT') ilegibles++; }
+      await new Promise((r) => setImmediate(r));
+    }
+    assert.ok(lecturas > 50, 'se leyó muchas veces mientras se reescribía: ' + lecturas);
+    assert.equal(ilegibles, 0, 'ninguna lectura vio un JSON a medias');
+  } finally { reg.stop(); }
 });
