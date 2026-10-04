@@ -1,5 +1,10 @@
 # Changelog — Agentic KDD
 
+## [3.20.2] — 2026-10-04
+
+**Corrección: `akdd update` ya no se detiene en bases de 3.19 con registros en `gate_events`.**
+Al añadir la columna `event_id` todas las filas existentes quedan en NULL. SQLite admite varios NULL en un índice único, pero la comprobación previa de duplicados del catálogo (`schema-catalog.cjs`) agrupaba los NULL y los contaba como «un grupo duplicado», así que el update terminaba en `RECOVERY_REQUIRED` (`DATOS_DUPLICADOS`) sin migrar. La comprobación ahora ignora las filas con cualquier columna del índice en NULL; los duplicados reales (valores no nulos repetidos) siguen bloqueando y el update sigue sin borrar registros. Nueva prueba de regresión con una base «de 3.19» con 25 filas sin `event_id`. Probado además sobre una copia del respaldo de una base real: 40 → 59 tablas, ninguna fila existente cambió e `integrity_check` ok. El 3.20.1 publicado conserva este defecto: quien lo sufrió queda con la base intacta (`UNCHANGED`) y debe resolver la recuperación pendiente antes de repetir el update.
+
 ## [3.20.1] — 2026-10-03
 
 **Un solo `akdd update`, seguro y verificable.** Hasta la 3.20.0 actualizar eran dos

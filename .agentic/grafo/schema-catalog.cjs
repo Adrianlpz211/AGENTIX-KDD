@@ -293,7 +293,11 @@ function ejecutarOp(db, op, ctx) {
       const idef = def.indexes.find((i) => i.name === op.index);
       if (idef.unique) {
         const cols = colsDelDdl(idef.ddl);
-        const d = db.get(`SELECT count(*) AS n FROM (SELECT 1 FROM ${q(op.table)} GROUP BY ${cols.map(q).join(', ')} HAVING count(*) > 1)`);
+        // Un índice único de SQLite admite varios NULL: una fila con CUALQUIER columna del índice en NULL no choca con ninguna otra.
+        // Sin este filtro, una columna recién añadida (todo NULL) se contaba como «un grupo duplicado» y bloqueaba el update de
+        // cualquier proyecto con registros previos (caso real: gate_events.event_id en una base de 3.19).
+        const sinNulos = cols.map((c) => `${q(c)} IS NOT NULL`).join(' AND ');
+        const d = db.get(`SELECT count(*) AS n FROM (SELECT 1 FROM ${q(op.table)} WHERE ${sinNulos} GROUP BY ${cols.map(q).join(', ')} HAVING count(*) > 1)`);
         if (Number(d.n) > 0) {
           throw err('DATOS_DUPLICADOS', 'no se puede crear el índice único ' + op.index + ': ' + d.n + ' grupo(s) de ' + op.table + '(' + cols.join(', ') + ') están duplicados. Deduplicar es una decisión humana; la actualización no borra registros.', { index: op.index, grupos: Number(d.n) });
         }

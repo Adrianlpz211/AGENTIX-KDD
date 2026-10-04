@@ -226,3 +226,26 @@ test('catálogo: abrir o importar para LEER no crea ni migra la base', () => {
   assert.ok(antesBytes.equals(fs.readFileSync(dbPath)), 'inspect/verify/status no escriben ni un byte');
   assert.throws(() => dba.openReadOnly(path.join(tmp('akdd-nada-'), 'no-existe.db')), (e) => e.code === 'NOT_INITIALIZED');
 });
+
+test('catálogo: gate_events de una base vieja SIN event_id y con filas migra (los NULL no son duplicados); los duplicados REALES siguen bloqueando', () => {
+  // Caso real (proyecto de un consumidor 3.19): la columna event_id no existía y la tabla ya tenía registros. Al añadir la columna
+  // todas las filas quedan en NULL; un índice único admite varios NULL, así que NO es un conflicto.
+  const dbPath = path.join(tmp('akdd-nulos-'), 'memoria.db');
+  real.crearBase(dbPath);
+  let w = abrir(dbPath);
+  try {
+    w.exec('DROP TABLE IF EXISTS gate_events');
+    w.exec('CREATE TABLE gate_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, gate TEXT NOT NULL, verdict TEXT NOT NULL, behavior_id TEXT, file TEXT, detalle TEXT, cycle_hint TEXT, source TEXT)');
+    for (let i = 0; i < 25; i++) w.run("INSERT INTO gate_events (gate, verdict, file) VALUES ('tdd', 'PASS', ?)", ['f' + (i % 3) + '.js']);
+  } finally { w.close(); }
+  w = abrir(dbPath);
+  try {
+    const r = sc.apply(w, { version: '3.20.1' });
+    assert.ok(r, 'la migración completa terminó');
+    assert.equal(w.get('SELECT count(*) AS n FROM gate_events').n, 25, 'ninguna fila se perdió');
+    assert.ok(w.get("SELECT 1 AS x FROM sqlite_master WHERE type = 'index' AND name = 'idx_ge_event'"), 'el índice único existe');
+    // El índice sigue siendo único para los valores reales.
+    w.run("INSERT INTO gate_events (gate, verdict, event_id) VALUES ('g', 'PASS', 'e1')");
+    assert.throws(() => w.run("INSERT INTO gate_events (gate, verdict, event_id) VALUES ('g', 'PASS', 'e1')"), /UNIQUE/i);
+  } finally { w.close(); }
+});
