@@ -196,6 +196,15 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
         return { status: r.status, data: r.data, coverage: r.coverage };
       } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
+    // 3.22.5 — pestaña TEAMS: semáforo, vigilantes, cola y registro. Solo lectura (teams.cjs salud); sin TEAMS instalado → UNAVAILABLE honesto.
+    teams: { params: ['project_id'], fn: () => {
+      try {
+        const f = path.join(projectPath, '.agentic', 'grafo', 'teams.cjs');
+        if (!fs.existsSync(f)) return { status: 'UNAVAILABLE', data: null, reason_code: 'TEAMS_NO_INSTALADO' };
+        const r = require(f).salud(projectPath);
+        return r ? { status: 'OK', data: r } : { status: 'EMPTY', data: null, reason_code: 'SIN_CANAL' };
+      } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
     // 3.20.1 — salud funcional, panel Memoria y panel Contexto y esfuerzo. Solo lectura; el proyecto lo fija el servidor.
     'memory-health': { params: ['project_id'], fn: () => {
       try {

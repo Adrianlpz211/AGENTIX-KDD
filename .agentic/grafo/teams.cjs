@@ -29,6 +29,9 @@ const P = require('./teams-prompts.cjs');
 const SONDEO_MS = 10000;
 const MAX_ESPERA_MS = 105 * 60 * 1000;
 const OCIOSO_MS = 6 * 60 * 1000;
+const REPETIR_MS = 10 * 60 * 1000; // un aviso de «nadie tiene nada» se repite cada tanto mientras siga igual
+const PARCIAL_MS = 10 * 60 * 1000; // un PARCIAL sin avance pasa a ser decisión del Director
+const LOOP_MS = Number(process.env.AKDD_TEAMS_LOOP_MS) || 3 * 60 * 1000;     // cadencia del loop de respaldo; una ronda más espaciada que ~2 ciclos = el loop no está activo
 const REVISION_MS = 8 * 60 * 1000; // una entrega sin revisar se recuerda al Director cada tanto
 
 // ───────────────────────────── utilidades ───────────────────────────────────
@@ -144,8 +147,13 @@ function calcular(root, opts = {}) {
     else if (t.heredada) estado = 'HEREDADA';
     else if (acept.has(t.id)) estado = 'ACEPTADA';
     else if (r && ESTADOS_DEVUELTA.has(r.estado) && !completa) estado = 'DEVUELTA';
+    // PARCIAL que lleva > PARCIAL_MS sin un reporte nuevo: casi siempre está bloqueado por algo que el constructor no puede resolver
+    // (entorno, credenciales, una decisión). Medido en glowly: dos tareas PARCIAL por Docker caído dejaron al constructor ocioso
+    // una hora y el Director sin enterarse. Pasa a «devuelta»: el Director decide (aceptar así, reformular, desbloquear, cancelar).
+    else if (r && r.estado === 'PARCIAL' && !completa && r.at && (ahora - r.at) > (opts.parcialMs || PARCIAL_MS)) estado = 'DEVUELTA';
     else if (hechaBuilder) estado = 'HECHA_SIN_ACEPTAR';
-    return { ...t, estado, reporte: r, completa, aceptacion: detAcept[t.id] || null };
+    const estancada = estado === 'DEVUELTA' && r && r.estado === 'PARCIAL';
+    return { ...t, estado, reporte: r, completa, estancada, aceptacion: detAcept[t.id] || null };
   });
 
   const omisiones = [];
@@ -201,11 +209,16 @@ function accionable(e, rol) {
       const edad = t.reporte && t.reporte.at ? e.ahora - t.reporte.at : 0;
       if (edad >= REVISION_MS) { razones.push(`ENTREGA SIN REVISAR hace ${Math.round(edad / 60000)} min: ${t.id} — audítala (auditar ${t.id}) y acéptala o corrígela; el constructor no puede avanzar su cierre sin tu veredicto`); claves.push('R:' + t.id + ':' + Math.floor(edad / REVISION_MS)); }
     }
-    for (const t of e.devueltas) { razones.push(`DEVUELTA ${t.id} (${t.reporte.estado}): ${corto(t.reporte.detalle, 100)} — decide: reformular, desbloquear o cancelar`); claves.push('V:' + t.id + ':' + canal.sha(t.reporte.detalle).slice(0, 8)); }
+    for (const t of e.devueltas) { razones.push(t.estancada
+        ? `PARCIAL ESTANCADA ${t.id} (sin avance hace ${Math.round((e.ahora - t.reporte.at) / 60000)} min): ${corto(t.reporte.detalle, 140)} — el constructor no puede avanzarla solo: decide (aceptarla así anotando lo que queda, desbloquear lo que falta, reformular o cancelar)`
+        : `DEVUELTA ${t.id} (${t.reporte.estado}): ${corto(t.reporte.detalle, 100)} — decide: reformular, desbloquear o cancelar`); claves.push('V:' + t.id + ':' + canal.sha(t.reporte.detalle).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION del constructor ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
-    if (e.ocioso) { razones.push('CONSTRUCTOR_OCIOSO: la cola está vacía y no hay correcciones — pon el siguiente lote, o decide cerrar'); claves.push('OCIOSO'); }
-    if (e.listo) { razones.push('LISTO_PARA_CERRAR: todo aceptado, sin correcciones y sin más lotes — ejecuta `cerrar` (publica el reporte final y detiene a los vigilantes)'); claves.push('LISTO'); }
+    // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
+    // (el caso «los dos esperando al otro» que dejó glowly parado).
+    const quieto = Math.max(0, e.ahora - e.mtime);
+    if (e.ocioso) { razones.push(`CONSTRUCTOR_OCIOSO: la cola está vacía y no hay correcciones (canal quieto ${Math.round(quieto / 60000)} min) — pon el siguiente lote, o decide cerrar`); claves.push('OCIOSO:' + Math.floor(quieto / REPETIR_MS)); }
+    if (e.listo) { razones.push('LISTO_PARA_CERRAR: todo aceptado, sin correcciones y sin más lotes — ejecuta `cerrar` (publica el reporte final y detiene a los vigilantes)'); claves.push('LISTO:' + Math.floor(Math.max(0, e.ahora - e.mtime) / REPETIR_MS)); }
   }
   return { razones, digest: claves.length ? canal.sha(claves.sort().join('|')).slice(0, 16) : '' };
 }
@@ -230,7 +243,11 @@ function textoRondaBuilder(e) {
     o.push('', `OMISIONES TUYAS (${e.omisiones.length}) — corrígelas antes de cerrar la ronda:`);
     for (const x of e.omisiones) o.push(`  · [${x.codigo}] ${x.texto}`);
   }
-  if (!e.corrPend.length && !e.tareasPend.length && !e.omisiones.length) o.push('', 'Nada nuevo. NO inventes trabajo: cierra la ronda.');
+  if (e.devueltas.length) {
+    o.push('', `EN ESPERA DE DECISIÓN DEL DIRECTOR (${e.devueltas.length}) — NO las rehagas a ciegas; ya están en su mesa:`);
+    for (const t of e.devueltas) o.push(`  · ${t.id} ${t.reporte ? t.reporte.estado : ''}: ${corto(t.reporte ? t.reporte.detalle : t.titulo, 120)}`);
+  }
+  if (!e.corrPend.length && !e.tareasPend.length && !e.omisiones.length) o.push('', e.devueltas.length ? 'Sin trabajo propio ahora: lo tuyo está esperando decisión del Director. NO inventes trabajo; tu vigilante te despertará cuando cambie algo.' : 'Nada nuevo. NO inventes trabajo: cierra la ronda.');
   return o.join('\n');
 }
 
@@ -461,6 +478,12 @@ function ejecutar(argv, root) {
     const e = necesitaCanal(); if (!e) return salida(1);
     // Primera línea, siempre: sin vigilante vivo una corrección o una pausa que llegue mientras trabajas NO te despierta.
     // (Medido en glowly: ambos roles dejaron de relanzarlo tras el primer aviso y pasaron media hora sin él.)
+    { // loop de respaldo: sus rondas periódicas dejan huella; una ronda muy espaciada = el loop no está activo
+      const est1 = leerEstado(root); const prevR = est1.rondas && est1.rondas[rol];
+      if (e.canal === 'ACTIVO' && est1.modo !== 'individual' && prevR && Date.now() - prevR > 2 * LOOP_MS + 60000) {
+        say(`⚠ Tu ronda anterior fue hace ${Math.round((Date.now() - prevR) / 60000)} min. Si no estabas en una tarea larga, tu LOOP DE RESPALDO de ~3 min NO está activo: prográmalo ahora (CronCreate */3 * * * * o el loop de tu host) con este texto: «${P.LOOP_PROMPT(rol)}»`, '');
+      }
+    }
     if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual' && !vigilanteVivo(root, rol)) {
       say(`⚠ TU VIGILANTE (${rol}) NO ESTÁ VIVO. Relánzalo AHORA, ANTES de trabajar, como tarea en segundo plano:  ${P.CMD} esperar --rol=${rol} --despertar${rol === 'director' ? '   (Claude Code con Monitor: añade --continuo)' : ''}`, '');
     }
@@ -476,7 +499,9 @@ function ejecutar(argv, root) {
       else say(`RONDA_INCOMPLETA: ${pend} cosa(s) sin cerrar — ${e.corrPend.length} corrección(es) sin resolver, ${e.omisiones.length} omisión(es). Trabaja lo listado arriba.`);
     }
     const est = leerEstado(root); est.seen = est.seen || {}; est.seen[rol] = accionable(e, rol).digest;
-    for (const w of (est.wakes || []).slice().reverse()) if (w.rol === rol && !w.visto_at) { w.visto_at = iso(); break; }
+    est.rondas = est.rondas || {}; est.rondas[rol] = Date.now();
+    est.rondas_hist = est.rondas_hist || {}; est.rondas_hist[rol] = (est.rondas_hist[rol] || []).concat(Date.now()).slice(-10);
+    for (const w of (est.wakes || [])) if (w.rol === rol && !w.visto_at) w.visto_at = iso(); // la ronda lee TODO lo pendiente: todos los avisos quedan atendidos
     guardarEstado(root, est);
     return salida();
   }
@@ -791,9 +816,15 @@ function ejecutar(argv, root) {
     canal.fijarEstado(root, 'ACTIVO'); say('✔ Canal ACTIVO otra vez. Relanza los vigilantes (`teams: vigilar`).'); return salida();
   }
 
+  if (cmd === 'salud') {
+    const s = salud(root); if (!s) { say(SIN_CANAL); return salida(1); }
+    say(JSON.stringify(s, null, 2)); return salida();
+  }
+
   if (cmd === 'comprobar') {
     const est = leerEstado(root); const dir = path.join(canal.dirEstado(root), 'vigilantes');
     const ec = calcular(root);
+    { const sl = salud(root); if (sl && sl.alertas.length) { say(`SEMÁFORO ${sl.semaforo}:`); for (const al of sl.alertas) say(`  ${al.nivel === 'ROJO' ? '🔴' : '🟡'} ${al.msg}`); say(''); } else if (sl && ['VERDE'].includes(sl.semaforo)) say('SEMÁFORO VERDE: los dos roles con vigilante y loop, sin avisos sin atender.', ''); }
     say(`Canal ${ec ? ec.canal : 'inexistente'} · modo ${est.modo ? est.modo.toUpperCase() : 'POR DEFINIR'}${est.modo === 'individual' ? ' (sin vigilantes: no hacen falta)' : ''}`);
     for (const p of procesosViejos(root)) say(`⚠ PROCESO DEL TEAMS ANTERIOR VIVO (pid ${p.pid}): reescribe el canal con el formato viejo. Ejecuta \`teams: activar\` para detenerlo.`);
     for (const rol of ['builder', 'director']) {
@@ -802,6 +833,8 @@ function ejecutar(argv, root) {
       const edad = v ? Math.round((Date.now() - Date.parse(v.latido)) / 1000) : null;
       const sano = vivo && edad !== null && edad < Math.max(60, (v.sondeo_s || 10) * 4);
       const w = (est.wakes || []).filter((x) => x.rol === rol);
+      const ult = est.rondas && est.rondas[rol]; const hace = ult ? Math.round((Date.now() - ult) / 60000) : null;
+      say(`${rol}: loop de respaldo ${ec && ec.canal === 'ACTIVO' && est.modo !== 'individual' ? (hace !== null && hace <= 4 ? 'ACTIVO (última ronda hace ' + hace + ' min)' : 'NO FIGURA' + (hace !== null ? ' (última ronda hace ' + hace + ' min)' : ' (sin rondas registradas)')) : 'n/a'}`);
       say(`${rol}: ${sano ? 'VIGILANTE_VIVO (pid ' + v.pid + ', latido hace ' + edad + ' s)' : 'NO_HAY_VIGILANTE vivo'} · despertares emitidos ${w.length}, atendidos ${w.filter((x) => x.visto_at).length}`);
     }
     const ver = (est.wakes || []).some((x) => x.visto_at);
@@ -832,7 +865,7 @@ function esperar(root, opt) {
   const desde = iso(); let ultimoLatido = 0; let terminado = false; let watcher = null; let timer = null;
   const latir = () => { try { fs.writeFileSync(archivoV, JSON.stringify({ rol, pid: process.pid, desde, latido: iso(), sondeo_s: sondeoMs / 1000 })); ultimoLatido = Date.now(); } catch { /* sin latido */ } };
   // Bitácora propia del vigilante (arranque, avisos, fin): sin ella un despertar que no llega es imposible de diagnosticar.
-  const continuo = !!opt.continuo; let ultimoEmitido = '';
+  const continuo = !!opt.continuo; let ultimoEmitido = ''; let ultimoEmitidoAt = 0; let recordatorios = 0;
   const archivoLog = path.join(dir, rol + '.log');
   const log = (m) => { try { let t = ''; try { t = fs.readFileSync(archivoLog, 'utf8'); } catch { /* nuevo */ } if (t.length > 120000) t = t.slice(-60000); fs.writeFileSync(archivoLog, t + new Date().toISOString() + ' pid=' + process.pid + ' ' + m + '\n'); } catch { /* sin bitácora */ } };
   log('INICIO sondeo=' + sondeoMs + 'ms max=' + Math.round(maxMs / 60000) + 'min' + (continuo ? ' CONTINUO' : ''));
@@ -851,15 +884,22 @@ function esperar(root, opt) {
     if (e.canal === 'PAUSADO') return fin(`AGENT_LOOP_PAUSE_${rol}\nEl canal está PAUSADO por el Director. NO relances este vigilante y CANCELA tu loop de respaldo: así no gastas tokens consultando mientras no hay instrucciones. Para seguir, el dueño escribe \`teams: continuar\` en tu chat.`);
     if (e.canal === 'CERRADO') return fin(`AGENT_LOOP_END_${rol}\nEl canal está CERRADO: el trabajo terminó. NO relances este vigilante ni sigas sondeando; informa al dueño (ver .legion/REPORTE.md) y detente.`);
     const a = accionable(e, rol); const est = leerEstado(root);
-    if (a.digest && a.digest !== (est.seen || {})[rol] && !(continuo && a.digest === ultimoEmitido)) {
-      est.wakes = (est.wakes || []).concat({ rol, at: iso(), digest: a.digest }).slice(-200); guardarEstado(root, est);
+    const em = (est.emitido || {})[rol]; const yaEmitido = !!(em && em.digest === a.digest && a.digest); const recordar = yaEmitido && Date.now() - em.at >= LOOP_MS;
+    if (continuo && a.digest && a.digest === ultimoEmitido && a.digest !== (est.seen || {})[rol] && Date.now() - ultimoEmitidoAt >= LOOP_MS) {
+      // el aviso sigue sin atenderse: se repite cada ~3 min (con el vigilante continuo el aviso no se pierde aunque el modelo lo ignore una vez)
+      ultimoEmitidoAt = Date.now(); recordatorios++; { est.emitido = est.emitido || {}; est.emitido[rol] = { digest: a.digest, at: Date.now() }; guardarEstado(root, est); } log('RECORDATORIO ' + recordatorios); console.log(`AGENT_LOOP_WAKE_${rol} (RECORDATORIO ${recordatorios}: sigue sin atenderse)\n` + a.razones.slice(0, 6).map((r) => '  · ' + r).join('\n') + `\nAhora: ${P.CMD} ${rol === 'director' ? 'revisar' : 'ronda --rol=builder'}`);
+    }
+    // Sin esto, «relanza el vigilante PRIMERO» provocaba una tormenta: el vigilante nuevo veía el mismo aviso aún sin atender y disparaba de inmediato
+    // (medido en glowly: arranque y fin con 12 ms de diferencia, varias veces por minuto, cada una costando tokens).
+    if (a.digest && a.digest !== (est.seen || {})[rol] && !(continuo && a.digest === ultimoEmitido) && (!yaEmitido || recordar)) {
+      est.wakes = (est.wakes || []).concat({ rol, at: iso(), digest: a.digest }).slice(-200); est.emitido = est.emitido || {}; est.emitido[rol] = { digest: a.digest, at: Date.now() }; guardarEstado(root, est);
       const ahora = `${P.CMD} ${rol === 'director' ? 'revisar' : 'ronda --rol=builder'}`;
-      const bloque = [`AGENT_LOOP_WAKE_${rol}`, ...a.razones.slice(0, 12).map((r) => '  · ' + r),
+      const bloque = [`AGENT_LOOP_WAKE_${rol}${recordar ? ' (RECORDATORIO: el aviso anterior sigue sin atenderse)' : ''}`, ...a.razones.slice(0, 12).map((r) => '  · ' + r),
         continuo
           ? `Ahora: ${ahora}   (imprime TODO lo pendiente; trabájalo completo. NO relances este vigilante: sigue vivo y avisará de lo siguiente)`
           : `Ahora: ${ahora}   (imprime TODO lo pendiente). PRIMERO relanza este vigilante (antes de trabajar): si no, una corrección o una pausa que llegue mientras trabajas no te despierta`].join('\n');
       if (!continuo) return fin(bloque);
-      ultimoEmitido = a.digest; log('AVISO ' + bloque.split('\n').slice(0, 2).join(' | ').slice(0, 200)); console.log(bloque);
+      ultimoEmitido = a.digest; ultimoEmitidoAt = Date.now(); recordatorios = 0; log('AVISO ' + bloque.split('\n').slice(0, 2).join(' | ').slice(0, 200)); console.log(bloque);
     }
     if (Date.now() - inicio > maxMs) return fin(`AGENT_LOOP_RELAUNCH_${rol}\nSigo sin novedades tras ${Math.round(maxMs / 60000)} min; relánzame para renovar la espera (no es un aviso de trabajo).`);
   };
@@ -870,9 +910,56 @@ function esperar(root, opt) {
   revisar();
 }
 
+// ───────────────────────────── salud (tablero, comprobar, monitor) ──────────
+
+function leerVigilante(root, rol) {
+  let v = null; try { v = JSON.parse(fs.readFileSync(path.join(canal.dirEstado(root), 'vigilantes', rol + '.json'), 'utf8')); } catch { /* sin vigilante */ }
+  if (!v) return { vivo: false, pid: null, latido_hace_s: null, desde: null };
+  let proceso = false; try { process.kill(v.pid, 0); proceso = true; } catch { proceso = false; }
+  const hace = Math.round((Date.now() - Date.parse(v.latido)) / 1000);
+  return { vivo: proceso && hace < Math.max(60, (v.sondeo_s || 10) * 4), pid: v.pid, latido_hace_s: hace, desde: v.desde };
+}
+
+/** Semáforo + detalle por rol. Se deriva SOLO de archivos y procesos (sin demonio propio): lo que ve el tablero es lo que hay. */
+function salud(root, opts = {}) {
+  const e = calcular(root, opts); if (!e) return null;
+  const est = leerEstado(root); const ahora = e.ahora; const individual = est.modo === 'individual';
+  const roles = {}; const alertas = []; let nivel = 0;
+  const sube = (n, msg) => { nivel = Math.max(nivel, n); alertas.push({ nivel: n === 2 ? 'ROJO' : 'AMARILLO', msg }); };
+  const NOMBRE = { director: 'Director (Claude Code)', builder: 'Constructor (Cursor)' };
+  for (const rol of ['director', 'builder']) {
+    const a = accionable(e, rol); const v = leerVigilante(root, rol);
+    const ult = est.rondas && est.rondas[rol]; const ultMin = ult ? Math.round((ahora - ult) / 60000) : null;
+    const sinAt = (est.wakes || []).filter((w) => w.rol === rol && !w.visto_at).map((w) => Date.parse(w.at)).filter(Number.isFinite);
+    const avisoMin = sinAt.length ? Math.round((ahora - Math.min(...sinAt)) / 60000) : null;
+    roles[rol] = { nombre: NOMBRE[rol], vigilante: v, ultima_ronda_hace_min: ultMin, loop: individual ? 'n/a' : (ultMin !== null && ultMin <= 6 ? 'ACTIVO' : 'NO FIGURA'), pendiente: a.razones.length, razones: a.razones.slice(0, 6), aviso_sin_atender_min: avisoMin };
+    if (e.canal !== 'ACTIVO' || individual) continue;
+    if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : ''));
+    if (avisoMin !== null && avisoMin >= 10) sube(2, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min (en un turno largo, o dormido: solo tú puedes despertarlo escribiéndole en su chat)');
+    else if (avisoMin !== null && avisoMin >= 3) sube(1, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min');
+    if (ultMin === null || ultMin > 6) sube(1, NOMBRE[rol] + ': su loop de respaldo no figura (' + (ultMin === null ? 'sin rondas registradas' : 'última ronda hace ' + ultMin + ' min') + ')');
+  }
+  const quieto = Math.round(Math.max(0, ahora - e.mtime) / 60000);
+  if (e.canal === 'ACTIVO') {
+    const trabajo = e.tareasPend.length + e.hechasSinAceptar.length + e.devueltas.length + e.corrPend.length;
+    if (trabajo && quieto >= 20) sube(2, 'Nadie avanza: hay ' + trabajo + ' cosa(s) pendiente(s) y el canal lleva ' + quieto + ' min sin cambios');
+    if (!e.total && quieto >= 10) sube(1, 'El canal está ACTIVO pero no hay ninguna tarea en cola: el Director debe encolar el primer lote');
+    if (!trabajo && e.total && !e.listo && quieto >= 10) sube(1, 'Nadie tiene nada accionable pero el proyecto no está cerrado: el Director debe encolar el siguiente lote o cerrar');
+    if (e.listo) sube(1, 'Todo aceptado y sin pendientes (LISTO_PARA_CERRAR): falta que el Director ejecute «cerrar»');
+  }
+  const informativo = e.canal !== 'ACTIVO';
+  return {
+    canal: e.canal, modo: est.modo || null, semaforo: informativo ? e.canal : ['VERDE', 'AMARILLO', 'ROJO'][nivel],
+    alertas, roles, quieto_min: quieto, avance: e.avance, aceptadas: e.aceptadas, total: e.total,
+    cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map((d) => ({ id: d.id, titulo: corto(d.titulo, 90) })) },
+    registro: reg.resumen(root), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
+    generado: new Date(ahora).toISOString(),
+  };
+}
+
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { salud, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

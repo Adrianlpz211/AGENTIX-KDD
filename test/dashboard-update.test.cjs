@@ -115,12 +115,12 @@ test('dashboard: es de SOLO LECTURA, paginado, sin SQL del navegador y sin expon
   } finally { d.cerrar(); }
 });
 
-test('dashboard: las tres páginas propias se muestran DENTRO del tablero (?embed=1 sin cabecera ni menú); solo el mismo origen puede embeberlas', async () => {
+test('dashboard: las cuatro páginas propias se muestran DENTRO del tablero (?embed=1 sin cabecera ni menú); solo el mismo origen puede embeberlas', async () => {
   const p = legacy.proyectoReal('3.20.0', 'dash-embed');
   assert.ok((await actualizar(p.root)).ok);
   const d = await arrancarDashboard(p.root);
   try {
-    for (const ruta of ['/memoria', '/contexto', '/actualizacion']) {
+    for (const ruta of ['/memoria', '/contexto', '/teams', '/actualizacion']) {
       const normal = await pedir(base(d) + ruta);
       const embebida = await pedir(base(d) + ruta + '?embed=1');
       assert.equal(embebida.status, 200, ruta);

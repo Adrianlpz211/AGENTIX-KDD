@@ -1475,6 +1475,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
   <div class="mode-tab" onclick="setMode('memoria',this)" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</div>
   <div class="mode-tab" onclick="setMode('contexto',this)" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</div>
+  <div class="mode-tab" onclick="setMode('teams',this)" title="Director + Constructor: semáforo, vigilantes, cola y registro">🤝 TEAMS</div>
   <div class="mode-tab" onclick="setMode('actualizacion',this)" title="Estado de la última actualización y de la memoria">🔄 Actualización</div>
 </div>
 
@@ -2306,6 +2307,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <div id="mode-memoria" class="mode-embed"><iframe data-src="/memoria?embed=1" title="Memoria"></iframe></div>
 <div id="mode-contexto" class="mode-embed"><iframe data-src="/contexto?embed=1" title="Contexto y esfuerzo"></iframe></div>
+<div id="mode-teams" class="mode-embed"><iframe data-src="/teams?embed=1" title="TEAMS"></iframe></div>
 <div id="mode-actualizacion" class="mode-embed"><iframe data-src="/actualizacion?embed=1" title="Actualización"></iframe></div>
 
 <div id="mode-tiempos">
@@ -2952,7 +2954,7 @@ function setMode(mode,el){
   if(mt)mt.style.display=mode==='tiempos'?'flex':'none';
   // Memoria, Contexto y Actualización: la página se muestra DENTRO del layout (como Línea de Tiempo o Preservation Intel).
   // Se carga al abrir la pestaña y se refresca si pasaron más de 30 s desde la última carga.
-  ['memoria','contexto','actualizacion'].forEach(function(m){
+  ['memoria','contexto','teams','actualizacion'].forEach(function(m){
     var p=document.getElementById('mode-'+m); if(!p) return;
     p.style.display=mode===m?'flex':'none';
     if(mode!==m) return;
@@ -5127,7 +5129,7 @@ const CSP = [
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
-// Las páginas propias (/memoria, /contexto, /actualizacion) se muestran dentro del tablero: pueden ser embebidas SOLO por el
+// Las páginas propias (/memoria, /contexto, /teams, /actualizacion) se muestran dentro del tablero: pueden ser embebidas SOLO por el
 // mismo origen. La raíz (el tablero) sigue sin poder ser embebida por nadie y solo puede embeber su propio origen.
 const CSP_EMBEBIBLE = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'");
 const CSP_RAIZ = CSP + "; frame-src 'self'";
@@ -5165,6 +5167,12 @@ const server = require('http').createServer((req, res) => {
     res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(full));
     return;
   }
+  if (ruta === '/teams') {
+    // Pestaña TEAMS (solo lectura): semáforo, vigilantes, cola y registro. No toca el tablero de grafos.
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
+    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('teams-pagina.cjs').HTML, url));
+    return;
+  }
   if (ruta === '/actualizacion') {
     // Página propia (solo lectura) de actualización y memoria. No toca el tablero de grafos.
     res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
@@ -5188,7 +5196,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}`);
   console.log(`  Actualización y memoria → ${url}/actualizacion`);
-  console.log(`  Memoria → ${url}/memoria  ·  Contexto y esfuerzo → ${url}/contexto\n`);
+  console.log(`  Memoria → ${url}/memoria  ·  Contexto y esfuerzo → ${url}/contexto  ·  TEAMS → ${url}/teams\n`);
   if (process.env.AKDD_DASH_NO_OPEN === '1') return;
   // Open browser
   const { exec } = require('child_process');

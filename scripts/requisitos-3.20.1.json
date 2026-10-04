@@ -1388,6 +1388,150 @@
           "post-cycle deduce la duración TAMBIÉN"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-parados-1",
+      "doc": "TEAMS",
+      "requisito": "Una tarea PARCIAL sin avance pasa a decisión del Director y el constructor no gira en vacío",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "PARADOS-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-parados-2",
+      "doc": "TEAMS",
+      "requisito": "El loop de respaldo deja huella (comprobar y primera línea de la ronda)",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "PARADOS-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-parados-3",
+      "doc": "TEAMS",
+      "requisito": "Los protocolos dan el texto exacto del loop y prohíben terminar el turno a la espera",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "PARADOS-3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-parados-4",
+      "doc": "TEAMS",
+      "requisito": "El vigilante continuo repite el aviso hasta que se atiende",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "PARADOS-4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-salud-1",
+      "doc": "TEAMS",
+      "requisito": "VERDE solo si los dos roles tienen vigilante vivo y loop; sin ellos el semáforo lo dice",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "SALUD-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-salud-2",
+      "doc": "TEAMS",
+      "requisito": "Un aviso sin atender sube de amarillo a rojo con los minutos",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "SALUD-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-salud-3",
+      "doc": "TEAMS",
+      "requisito": "Los dos esperando al otro: el aviso de ocioso se repite y el semáforo marca que nadie avanza",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "SALUD-3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-salud-4",
+      "doc": "TEAMS",
+      "requisito": "Fuera de ACTIVO no hay alarma; comprobar muestra el semáforo primero",
+      "alcance": "proceso real (CLI y archivos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "SALUD-4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-tablero-1",
+      "doc": "TEAMS",
+      "requisito": "El tablero trae la pestaña TEAMS embebible solo por el mismo origen",
+      "alcance": "proceso real (tablero y HTTP)",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "el tablero trae la pestaña TEAMS"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-tablero-2",
+      "doc": "TEAMS",
+      "requisito": "/api/v1/teams sale del canal real y sin TEAMS o sin canal dice la verdad",
+      "alcance": "proceso real (tablero y HTTP)",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "/api/v1/teams"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-tablero-3",
+      "doc": "TEAMS",
+      "requisito": "La oficina 3D va dentro de /teams con three.js local, sin innerHTML ni recursos externos",
+      "alcance": "proceso real (tablero y HTTP)",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "la oficina 3D va dentro de /teams"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-tablero-4",
+      "doc": "TEAMS",
+      "requisito": "La oficina 3D en navegador real: trabajan sentados, 3 min sin trabajo se juntan a conversar, sin errores de página ni CSP",
+      "alcance": "navegador real",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "la oficina 3D en navegador real"
+        ]
+      ]
     }
   ]
 }

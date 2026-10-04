@@ -1,5 +1,20 @@
 # Changelog — Agentic KDD
 
+## [3.22.6] — 2026-10-04
+
+**TEAMS: la oficina 3D en el tablero, y dos arreglos de ruido en los avisos.**
+- **Oficina en vivo (pestaña TEAMS):** un mundito 3D lowpoly (three.js local, sin CDN) donde el Director, los tres sub-agentes de auditoría (frontend/UI-UX, backend, negocio) y el Constructor trabajan en sus escritorios según el canal real: escriben cuando hay tarea, el Director revisa en la pizarra, se celebra con confeti una tarea aceptada. Si pasan 3 minutos sin trabajo se levantan y conversan en la sala de descanso. Los dos perros son los vigilantes: duermen si el vigilante está muerto y aparece el globo «sin vigilante». Arrastrar gira la cámara, rueda acerca, doble clic reinicia; botones para simular cada estado. Es un adorno de solo lectura: si falla, los datos de abajo siguen igual.
+- **Tormenta de relanzamientos corregida:** un vigilante relanzado ya no vuelve a avisar por el mismo resumen del canal hasta pasado el repaso (antes cada relanzamiento era un aviso nuevo).
+- **Los avisos se marcan atendidos al hacer la ronda:** la ronda marca TODOS los avisos pendientes como vistos, no solo el último; se acabó el «aviso sin atender hace 30 min» fantasma.
+
+## [3.22.5] — 2026-10-04
+
+**TEAMS: que ningún rol se quede parado sin que alguien lo sepa (segunda tanda de la campaña real).**
+- **PARCIAL estancada → decisión del Director.** Una tarea que el constructor reporta PARCIAL y que lleva más de 10 min sin reporte nuevo (casi siempre bloqueada por algo que él no puede resolver: Docker caído, credenciales, una decisión) deja de ser «pendiente del constructor»: el Director recibe el aviso con el motivo y las salidas (aceptarla así, desbloquear, reformular, cancelar) y el constructor la ve en «EN ESPERA DE DECISIÓN DEL DIRECTOR» en vez de rehacerla. Antes dos tareas PARCIAL por Docker caído dejaron al constructor ocioso una hora y al Director sin enterarse.
+- **El loop de respaldo deja huella y se puede verificar:** cada `ronda`/`revisar` se registra; `teams comprobar` dice «loop de respaldo ACTIVO / NO FIGURA (última ronda hace N min)»; y la ronda avisa en su primera línea si la anterior fue hace más de ~7 min. Los protocolos (y la regla de Cursor) dan el texto EXACTO del loop de cada rol (CronCreate `*/3 * * * *` en Claude Code) y prohíben terminar el turno «a la espera».
+- **Pestaña TEAMS en el tablero** (`/teams`, solo lectura, se refresca cada 5 s): SEMÁFORO arriba (VERDE / AMARILLO / ROJO) con las razones en palabras; por rol, si su vigilante está VIVO (pid y latido), su loop de respaldo, la última ronda y si tiene un aviso sin atender y desde hace cuánto; cola, entregas por aceptar, devueltas, correcciones, decisiones tuyas; y el registro en Agentix. Sale de `teams salud` (también en `teams comprobar` y `estado`): se deriva solo de archivos y procesos, sin demonio propio que pueda morirse. Nunca muestra un verde inventado: sin vigilantes vivos y con trabajo en cola es ROJO.
+- **«Los dos esperando al otro» ya no es silencioso:** el aviso CONSTRUCTOR_OCIOSO (y el de LISTO_PARA_CERRAR) se REPITE cada 10 min mientras la situación no cambie (antes se emitía una vez; si el Director lo atendía sin actuar, no volvía), y el semáforo marca ROJO cuando hay trabajo pendiente y el canal lleva ≥ 20 min sin cambios.
+- **El vigilante continuo repite el aviso** cada ~3 min mientras nadie lo atienda, y se calla al hacer la ronda (un turno largo del modelo ya no deja el aviso sin respuesta).
 ## [3.22.4] — 2026-10-04
 
 **Blindaje tras la primera campaña real (glowly): lo que falló al usar TEAMS con Cursor y Claude Code a la vez.**
@@ -10,9 +25,9 @@
 - **Duración de los ciclos de TEAMS:** se sella el inicio (cuando el constructor quedó libre para la tarea) y el reloj de Agentix prefiere la marca del propio ciclo a marcas ajenas. Antes salían con duración 0.
 - **Indexador del mapa de código (AST) que dejaba la base bloqueada ~10 min:** ahora espera por los bloqueos de otros escritores (antes chocaba al instante), solo corre UN indexado por proyecto a la vez, escribe por lotes cortos, tiene presupuesto de tiempo (la siguiente corrida sigue donde quedó) y no reescribe el PageRank si el código no cambió.
 - **Tablero:** si la base está ocupada por un escritor largo sirve la última lectura buena marcada `stale` (y lo dice) en vez de `DB_BLOQUEADA` o colgarse; espera 2 s por consulta en lugar de 5.
-- **El registro en el núcleo ya no se «abandona» por un fallo transitorio:** en glowly 3 tareas aceptadas agotaron sus 5 reintentos en 1 segundo (base ocupada) y quedaron fuera de Agentix. Ahora hay espera progresiva entre intentos (1, 2, 4, 8, 15 min), enfriamiento de 30 min tras agotarlos y ${BT}teams observar --reintentar${BT} para forzarlo.
-- **El reloj de Agentix mide también los ciclos de TEAMS:** ${BT}post-cycle${BT} deduce la duración otra vez TRAS cerrar el ciclo (el paso previo corría antes de que existiera ${BT}fecha_fin${BT} y todos quedaban en 0).
-- **${BT}teams: activar${BT} ya no escribe en ${BT}CLAUDE.md${BT}:** su bloque de recuperación hacía que ${BT}akdd update${BT} viera «cambios propios» y dejara ${BT}CLAUDE.md${BT} sin actualizar. La regla viaja ahora en el CLAUDE.md que gestiona Agentix y ${BT}activar${BT} retira el bloque que escribieron las versiones 3.21–3.22.1.
+- **El registro en el núcleo ya no se «abandona» por un fallo transitorio:** en glowly 3 tareas aceptadas agotaron sus 5 reintentos en 1 segundo (base ocupada) y quedaron fuera de Agentix. Ahora hay espera progresiva entre intentos (1, 2, 4, 8, 15 min), enfriamiento de 30 min tras agotarlos y `teams observar --reintentar` para forzarlo.
+- **El reloj de Agentix mide también los ciclos de TEAMS:** `post-cycle` deduce la duración otra vez TRAS cerrar el ciclo (el paso previo corría antes de que existiera `fecha_fin` y todos quedaban en 0).
+- **`teams: activar` ya no escribe en `CLAUDE.md`:** su bloque de recuperación hacía que `akdd update` viera «cambios propios» y dejara `CLAUDE.md` sin actualizar. La regla viaja ahora en el CLAUDE.md que gestiona Agentix y `activar` retira el bloque que escribieron las versiones 3.21–3.22.1.
 - **Migración desde el TEAMS anterior:** `teams: activar` detecta un canal del motor viejo y lo archiva (`.legion/ANTIGUO-v3-vista.md`) en vez de adoptarlo, y detiene los vigilantes viejos que seguían vivos tras `akdd update` reescribiendo el canal. `teams: comprobar` los avisa.
 
 ## [3.22.0] — 2026-10-04

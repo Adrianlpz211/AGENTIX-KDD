@@ -803,3 +803,166 @@ test('REGISTRO — un fallo transitorio (base ocupada) no gasta los 5 intentos e
     assert.equal(require(path.join(G, 'teams-registro.cjs')).resumen(root).registradas, 1, 'el reintento manual ignora la espera y lo registra');
   } finally { delete process.env.AKDD_TEAMS_POSTCYCLE; }
 });
+
+// ───────────────────────────── los dos modelos se quedaron parados (glowly, 22:16) ─────────────────────────────
+
+test('PARADOS-1 — una tarea PARCIAL sin avance pasa a decisión del Director: el constructor no gira en vacío y el Director recibe aviso', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Esquema reproducible', '--criterio=exportar', '--criterio=reconstruir BD vacía', '--sin-contexto');
+  salida(root, 'tarea', 'Otra independiente', '--criterio=x', '--sin-contexto');
+  salida(root, 'reportar', 'T-001', '--estado=PARCIAL', '--detalle=exportado; la BD vacía no se pudo reconstruir porque el daemon de Docker no responde');
+  const t0 = Date.now();
+  const ya = T.calcular(root, { ahora: t0 });
+  assert.equal(ya.tareas[0].estado, 'PENDIENTE', 'recién reportada PARCIAL: el constructor aún puede seguir');
+  const tarde = T.calcular(root, { ahora: t0 + 12 * 60000 });
+  assert.equal(tarde.tareas[0].estado, 'DEVUELTA');
+  assert.equal(tarde.tareas[0].estancada, true);
+  assert.deepEqual(tarde.tareasPend.map((t) => t.id), ['T-002'], 'lo propio del constructor es solo lo que sí puede avanzar');
+  const dir = T.accionable(tarde, 'director');
+  assert.ok(dir.razones.some((r) => /PARCIAL ESTANCADA T-001 \(sin avance hace 1\d min\).*Docker.*decide/.test(r)), dir.razones.join(' | '));
+  assert.notEqual(dir.digest, '');
+  const b = T.textoRondaBuilder(tarde);
+  assert.match(b, /EN ESPERA DE DECISIÓN DEL DIRECTOR \(1\)/);
+  assert.match(b, /T-001 PARCIAL: exportado/);
+  assert.doesNotMatch((b.split('TAREAS PENDIENTES')[1] || '').split('EN ESPERA')[0], /T-001/, 'no figura entre sus tareas pendientes');
+  assert.equal(tarde.listo, false);
+  // si el constructor vuelve a reportar, se renueva el plazo (no se devuelve a la fuerza)
+  salida(root, 'reportar', 'T-001', '--estado=PARCIAL', '--detalle=avancé: Docker ya responde, falta correr el rebuild');
+  assert.equal(T.calcular(root, { ahora: Date.now() }).tareas[0].estado, 'PENDIENTE');
+});
+
+test('PARADOS-2 — el loop de respaldo deja huella: comprobar dice cuándo fue la última ronda y la ronda avisa si el loop no figura', () => {
+  const root = proyecto(); arrancado(root);
+  assert.match(salida(root, 'comprobar'), /director: loop de respaldo NO FIGURA \(sin rondas registradas\)/);
+  salida(root, 'revisar'); salida(root, 'ronda', '--rol=builder');
+  const c = salida(root, 'comprobar');
+  assert.match(c, /director: loop de respaldo ACTIVO \(última ronda hace 0 min\)/);
+  assert.match(c, /builder: loop de respaldo ACTIVO/);
+  const est = T.leerEstado(root); est.rondas.director = Date.now() - 25 * 60000; fs.writeFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), JSON.stringify(est));
+  assert.match(salida(root, 'comprobar'), /director: loop de respaldo NO FIGURA \(última ronda hace 25 min\)/);
+  const r = salida(root, 'revisar');
+  assert.match(r, /Tu ronda anterior fue hace 25 min/);
+  assert.match(r, /LOOP DE RESPALDO de ~3 min NO está activo/);
+  assert.match(r, /TEAMS director — corre "node \.agentic\/grafo\/teams\.cjs revisar"/);
+  assert.doesNotMatch(salida(root, 'revisar'), /Tu ronda anterior fue hace/, 'tras la ronda ya está al día');
+});
+
+test('PARADOS-3 — los protocolos dan el texto EXACTO del loop de cada rol y prohíben terminar el turno «a la espera»', () => {
+  const P = require(path.join(G, 'teams-prompts.cjs'));
+  const d = P.prompt('director', {}); const b = P.prompt('builder', {});
+  assert.match(d, /Loop de respaldo — prográmalo AHORA, es el segundo vigilante/);
+  assert.match(d, /CronCreate con `cron: "\*\/3 \* \* \* \*"`/);
+  assert.ok(d.includes(P.LOOP_PROMPT('director')) && b.includes(P.LOOP_PROMPT('builder')));
+  assert.match(d, /Nunca termines tu turno diciendo que «quedas a la espera»/);
+  assert.match(d, /PARCIAL ESTANCADA[\s\S]*DECIDE/);
+  const mdc = fs.readFileSync(path.join(__dirname, '..', '.cursor', 'rules', 'teams.mdc'), 'utf8');
+  assert.match(mdc, /Tus DOS vigilantes \(obligatorios, los dos\)/);
+  assert.match(mdc, /EN ESPERA DE DECISIÓN DEL DIRECTOR/);
+});
+
+test('PARADOS-4 — vigilante continuo: si el aviso no se atiende lo REPITE (recordatorio), y se calla en cuanto el rol hace su ronda', async () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo', '--criterio=a', '--sin-contexto');
+  const p = spawn(process.execPath, [TEAMS_CLI, '--root=' + root, 'esperar', '--rol=builder', '--despertar', '--continuo'], { env: Object.assign({}, process.env, { AKDD_TEAMS_SONDEO_MS: '200', AKDD_TEAMS_LOOP_MS: '1200', AKDD_TEAMS_MAX_MS: '60000' }) });
+  let out = ''; p.stdout.on('data', (d) => { out += d; });
+  const hasta = async (cond, ms = 9000) => { const t0 = Date.now(); while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 100)); return cond(); };
+  try {
+    assert.ok(await hasta(() => /AGENT_LOOP_WAKE_builder\n/.test(out)), 'aviso inicial: ' + out);
+    assert.ok(await hasta(() => /RECORDATORIO 2: sigue sin atenderse/.test(out)), 'repite el aviso mientras nadie lo atiende: ' + out);
+    salida(root, 'ronda', '--rol=builder');
+    const antes = (out.match(/RECORDATORIO/g) || []).length;
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.equal((out.match(/RECORDATORIO/g) || []).length, antes, 'atendido: deja de recordar');
+  } finally { try { p.kill(); } catch { /* ya terminó */ } }
+});
+
+// ───────────────────────────── salud: ¿están vivos?, ¿alguien parado?, ¿esperan los dos? ─────────────────────────────
+
+function vigilanteFalso(root, rol, extra) {
+  const dir = path.join(root, '.agentic', '_teams', 'vigilantes'); fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, rol + '.json'), JSON.stringify(Object.assign({ rol, pid: process.pid, desde: new Date().toISOString(), latido: new Date().toISOString(), sondeo_s: 10 }, extra || {})));
+}
+function rondaReciente(root, rol, minAtras) {
+  const est = T.leerEstado(root); est.rondas = est.rondas || {}; est.rondas[rol] = Date.now() - (minAtras || 0) * 60000;
+  fs.mkdirSync(path.join(root, '.agentic', '_teams'), { recursive: true }); fs.writeFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), JSON.stringify(est));
+}
+
+test('SALUD-1 — VERDE solo si los dos roles tienen vigilante vivo y loop; sin ellos el semáforo lo dice con nombre y apellido', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo', '--criterio=a', '--sin-contexto');
+  let s = T.salud(root);
+  assert.equal(s.semaforo, 'ROJO', 'con trabajo en cola y sin vigilantes no está bien');
+  assert.ok(s.alertas.some((a) => /Constructor \(Cursor\): su vigilante NO está vivo y tiene trabajo esperando/.test(a.msg)));
+  assert.ok(s.alertas.some((a) => /Director \(Claude Code\): su loop de respaldo no figura \(sin rondas registradas\)/.test(a.msg)));
+  for (const rol of ['director', 'builder']) { vigilanteFalso(root, rol); rondaReciente(root, rol, 1); }
+  s = T.salud(root);
+  assert.equal(s.semaforo, 'VERDE', JSON.stringify(s.alertas));
+  assert.equal(s.roles.builder.vigilante.vivo, true);
+  assert.equal(s.roles.director.loop, 'ACTIVO');
+  assert.equal(s.cola.tareas[0].id, 'T-001');
+  // un latido viejo no cuenta como vivo
+  vigilanteFalso(root, 'director', { latido: new Date(Date.now() - 10 * 60000).toISOString() });
+  assert.equal(T.salud(root).roles.director.vigilante.vivo, false);
+});
+
+test('SALUD-2 — un aviso sin atender sube de amarillo a rojo con los minutos, y avisa que solo el dueño puede despertarlo', () => {
+  const root = proyecto(); arrancado(root);
+  for (const rol of ['director', 'builder']) { vigilanteFalso(root, rol); rondaReciente(root, rol, 1); }
+  const est = T.leerEstado(root); const t0 = Date.now();
+  est.wakes = [{ rol: 'director', at: new Date(t0 - 4 * 60000).toISOString(), digest: 'x' }]; fs.writeFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), JSON.stringify(est));
+  assert.equal(T.salud(root, { ahora: t0 }).semaforo, 'AMARILLO');
+  const rojo = T.salud(root, { ahora: t0 + 9 * 60000 });
+  assert.equal(rojo.semaforo, 'ROJO');
+  assert.ok(rojo.alertas.some((a) => /Director \(Claude Code\): aviso sin atender hace 13 min.*solo tú puedes despertarlo/.test(a.msg)));
+  assert.equal(rojo.roles.director.aviso_sin_atender_min, 13);
+});
+
+test('SALUD-3 — «los dos esperando al otro» ya no es silencioso: el OCIOSO se repite y el semáforo avisa de que nadie avanza', () => {
+  const root = proyecto(); arrancado(root);
+  for (const rol of ['director', 'builder']) { vigilanteFalso(root, rol); rondaReciente(root, rol, 1); }
+  salida(root, 'tarea', 'A', '--criterio=a', '--sin-contexto'); salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo'); salida(root, 'aceptar', 'T-001');
+  salida(root, 'tarea', 'B', '--criterio=b', '--sin-contexto'); salida(root, 'reportar', 'T-002', '--estado=NO_HECHO', '--detalle=falta una decisión de negocio sobre B que el Director debe tomar');
+  salida(root, 'cancelar', 'T-002', 'se aplaza');
+  salida(root, 'tarea', 'C', '--criterio=c', '--sin-contexto');
+  salida(root, 'reportar', 'T-003', '--estado=PARCIAL', '--detalle=bloqueada: el servicio externo no responde');
+  const t0 = Date.now();
+  const e1 = T.calcular(root, { ahora: t0 + 12 * 60000 });
+  assert.equal(e1.tareas.find((t) => t.id === 'T-003').estado, 'DEVUELTA');
+  const d1 = T.accionable(e1, 'director'); const d2 = T.accionable(T.calcular(root, { ahora: t0 + 32 * 60000 }), 'director');
+  assert.ok(d1.razones.some((r) => /CONSTRUCTOR_OCIOSO/.test(r)), d1.razones.join(' | '));
+  assert.ok(d2.razones.some((r) => /CONSTRUCTOR_OCIOSO/.test(r)));
+  assert.notEqual(d1.digest, d2.digest, 'el aviso de ocioso se REPITE cada 10 min mientras nadie actúe (antes: una sola vez)');
+  const s = T.salud(root, { ahora: t0 + 25 * 60000 });
+  assert.equal(s.semaforo, 'ROJO');
+  assert.ok(s.alertas.some((a) => /Nadie avanza: hay \d+ cosa\(s\) pendiente\(s\) y el canal lleva 2\d min sin cambios/.test(a.msg)), JSON.stringify(s.alertas));
+  assert.equal(s.cola.devueltas[0].estancada, true);
+});
+
+test('SALUD-4 — fuera de ACTIVO no hay alarma: PAUSADO, PREPARADO y CERRADO se muestran como lo que son; y comprobar pone el semáforo primero', () => {
+  const root = proyecto(); arrancado(root);
+  assert.match(salida(root, 'comprobar').split('\n')[0], /SEMÁFORO (AMARILLO|ROJO):/);
+  salida(root, 'pausa');
+  const p = T.salud(root); assert.equal(p.semaforo, 'PAUSADO'); assert.deepEqual(p.alertas, []);
+  assert.doesNotMatch(salida(root, 'comprobar'), /SEMÁFORO/);
+  const r2 = proyecto(); salida(r2, 'activar'); assert.equal(T.salud(r2).semaforo, 'PREPARADO');
+  assert.equal(T.salud(proyecto()), null, 'sin canal no hay salud');
+  assert.match(JSON.parse(salida(root, 'salud')).semaforo, /PAUSADO/);
+});
+
+test('TORMENTA — relanzar el vigilante tras un aviso NO lo dispara de nuevo por el mismo aviso; lo recuerda pasado el plazo; y la ronda atiende TODOS los avisos', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Una', '--criterio=a', '--sin-contexto');
+  const env = { AKDD_TEAMS_SONDEO_MS: '200', AKDD_TEAMS_MAX_MS: '1500', AKDD_TEAMS_LOOP_MS: '700' };
+  assert.match(lanzar(root, ['esperar', '--rol=builder', '--despertar'], env).stdout, /AGENT_LOOP_WAKE_builder\n/);
+  const re = lanzar(root, ['esperar', '--rol=builder', '--despertar'], Object.assign({}, env, { AKDD_TEAMS_LOOP_MS: '60000' }));
+  assert.match(re.stdout, /RELAUNCH/, 'el vigilante relanzado enseguida NO vuelve a disparar por el mismo aviso (antes: tormenta de avisos cada pocos ms)');
+  const t0 = Date.now(); while (Date.now() - t0 < 900) { /* pasa el plazo del recordatorio */ }
+  const rec = lanzar(root, ['esperar', '--rol=builder', '--despertar'], env);
+  assert.match(rec.stdout, /AGENT_LOOP_WAKE_builder \(RECORDATORIO: el aviso anterior sigue sin atenderse\)/);
+  // varios avisos acumulados: la ronda los marca TODOS como atendidos
+  const est = T.leerEstado(root); const dir = path.join(root, '.agentic', '_teams');
+  est.wakes = [1, 2, 3].map((n) => ({ rol: 'builder', at: new Date(Date.now() - n * 60000).toISOString(), digest: 'd' + n })); fs.writeFileSync(path.join(dir, 'estado.json'), JSON.stringify(est));
+  salida(root, 'ronda', '--rol=builder');
+  assert.ok(T.leerEstado(root).wakes.every((w) => w.visto_at), 'ningún aviso viejo queda «sin atender» (daba falsas alarmas de «31 min» en el semáforo)');
+  assert.equal(T.salud(root).roles.builder.aviso_sin_atender_min, null);
+});

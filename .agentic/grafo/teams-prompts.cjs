@@ -123,13 +123,18 @@ function metodologia() {
   ].join('\n');
 }
 
+/** Texto exacto del loop de respaldo de cada rol: es lo que el host dispara cada ~3 min aunque ningún aviso llegue. */
+const LOOP_PROMPT = (rol) => rol === 'director'
+  ? `TEAMS director — corre "${CMD} revisar" y actúa con lo que imprima: revisar y auditar entregas (aceptar o corregir), resolver lo devuelto o estancado, encolar el siguiente lote. Si dice que tu vigilante no está vivo, relánzalo primero. NUNCA termines tu turno esperando: si no hay nada para ti, adelanta el siguiente lote.`
+  : `TEAMS constructor — corre "${CMD} ronda --rol=builder" y trabaja COMPLETO lo que imprima (correcciones primero); cierra con "${CMD} ronda --rol=builder --cierre". Si dice que tu vigilante no está vivo, relánzalo primero. Si no hay nada nuevo, no inventes trabajo.`;
+
 const VIGILANTE = (rol) => [
   `**Vigilante (lo despierta el HOST, no un archivo):** lanza \`${CMD} esperar --rol=${rol} --despertar\` como TAREA EN SEGUNDO PLANO del host`,
   `(Claude Code: Bash con run_in_background o Monitor; Cursor: proceso en segundo plano). Imprime \`AGENT_LOOP_WAKE_${rol}\` y termina cuando hay algo para ti;`,
   `entonces RELÁNZALO PRIMERO (antes de hacer la ronda: si trabajas sin vigilante, una corrección o una pausa que llegue a mitad de tarea no te despierta; \`ronda\`/\`revisar\` te lo recuerdan en su primera línea) y luego haz tu ronda.`,
   `En Claude Code, con la herramienta Monitor, lánzalo con \`--continuo\`: no termina al avisar, sigue vivo y cada aviso nuevo llega solo (no hay que relanzarlo). Si imprime \`AGENT_LOOP_END_${rol}\`: el canal está CERRADO → no relances, no sondees, informa al dueño y detente.`,
   `Si imprime \`AGENT_LOOP_PAUSE_${rol}\`: el canal está PAUSADO → no relances el vigilante y CANCELA tu loop de respaldo (así no gastas tokens); vuelve solo cuando el dueño escriba \`teams: continuar\` en tu chat.`,
-  `Respaldo independiente (se apaga solo con PAUSA o CIERRE): el loop de tu host cada ~3 minutos corriendo \`${CMD} ronda --rol=${rol}\`.`,
+  `**Loop de respaldo — prográmalo AHORA, es el segundo vigilante (se apaga solo con PAUSA o CIERRE):** un disparo cada ~3 min que no depende de ningún aviso. En Claude Code: herramienta CronCreate con \`cron: "*/3 * * * *"\` (o \`/loop 3m\`) y este prompt: «${LOOP_PROMPT(rol)}». En Cursor y otros: el loop de tu host con ese mismo texto. Sin él, si un aviso no te llega o no lo atiendes te quedas dormido (pasó en la primera campaña real: el Director pasó >10 min con entregas sin revisar). \`comprobar\` te dice cuándo fue tu última ronda.`,
   `Honestidad: \`${CMD} comprobar\` dice qué está vivo y qué no; no anuncies autonomía que no figure ahí.`,
 ].join('\n');
 
@@ -184,7 +189,8 @@ function promptDirector(ctx = {}) {
     `3. Hallazgos → \`${CMD} corregir "texto" --sev=HALLAZGO --archivo=src/a.ts:12 --tarea=T-001\` EN EL INSTANTE en que salen, sin esperar a que el constructor termine. Nunca frenan el avance (solo --sev=BLOQUEANTE real).`,
     `4. Entrega buena → \`${CMD} aceptar T-001 --verifico="npm test: 120 pass" --tests=120\`. Eso la registra sola en el núcleo de Agentix (ciclo origen teams, memoria, contratos, AST, diseño, preservación, tablero). Si el registro falla no te frena: queda pendiente y se reintenta.`,
     `5. **Adelántate 1–2 lotes**: \`${CMD} tarea "título" --criterio="…" --criterio="…" --archivos=a,b\`. La cola nunca queda en cero mientras haya trabajo; si el constructor está ocioso, es tu responsabilidad ponerle algo (el vigilante te avisa).`,
-    '6. Nunca escribas «espera a que se audite lo anterior». El ORDEN de la cola resuelve conflictos de archivos.',
+    '6. **Nunca termines tu turno diciendo que «quedas a la espera»**: esperar es trabajo de tus dos vigilantes, no tuyo. Si no hay nada que revisar, tu trabajo es ir 1–2 lotes por delante (investigar y encolar el siguiente). Si algo está devuelto o PARCIAL ESTANCADA (el constructor no puede avanzarla solo: entorno caído, credenciales, una decisión), DECIDE: aceptarla así anotando lo que queda, desbloquear lo que falta, reformular o cancelar.',
+    '6b. Nunca escribas «espera a que se audite lo anterior». El ORDEN de la cola resuelve conflictos de archivos.',
     '7. Una ENTREGA que lleva más de ~8 min sin aceptar ni corregir te la vuelve a avisar el vigilante («ENTREGA SIN REVISAR hace N min»): no la dejes dormir. Los resultados de tus 3 sub-agentes NO se pierden: léelos al volver y conviértelos en `corregir`/`aceptar` antes de dar la ronda por cerrada.',
     '8. Al encolar con `tarea`, Agentix anota en el bloque el «Contexto Agentix»: riesgo estimado y lo que el proyecto ya sabe (errores previos con su cura, decisiones, contratos). Léelo: es lo que evita romper lo que ya funcionaba.',
     '',
@@ -228,4 +234,4 @@ function prompt(rol, ctx) {
   return rol === 'director' ? promptDirector(ctx) : promptConstructor();
 }
 
-module.exports = { CMD, lineaDireccion, canalPlantilla, metodologia, prompt, promptDirector, promptConstructor, promptIndividual };
+module.exports = { CMD, LOOP_PROMPT, lineaDireccion, canalPlantilla, metodologia, prompt, promptDirector, promptConstructor, promptIndividual };

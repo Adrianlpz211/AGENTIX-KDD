@@ -20,8 +20,8 @@ const fuente = fs.readFileSync(path.join(__dirname, '..', 'dashboard.cjs'), 'utf
 test('es la cuarta pestaña de la barra superior', () => {
   const tabs = [...fuente.matchAll(/class="mode-tab[^"]*"\s+onclick="setMode\('([a-z]+)'/g)]
     .map((m) => m[1]);
-  // Línea de Tiempo sigue siendo la cuarta; Memoria, Contexto y Actualización se muestran dentro del layout a continuación.
-  assert.deepEqual(tabs, ['graph', 'docs', 'intel', 'tiempos', 'memoria', 'contexto', 'actualizacion'],
+  // Línea de Tiempo sigue siendo la cuarta; Memoria, Contexto, TEAMS y Actualización se muestran dentro del layout a continuación.
+  assert.deepEqual(tabs, ['graph', 'docs', 'intel', 'tiempos', 'memoria', 'contexto', 'teams', 'actualizacion'],
     'las pestañas de primer nivel, en ese orden');
   assert.equal(tabs.indexOf('tiempos'), 3, 'Línea de Tiempo sigue siendo la cuarta pestaña');
 });
