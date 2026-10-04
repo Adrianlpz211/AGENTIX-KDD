@@ -489,6 +489,11 @@ test('FLUJO 4 — builder (Cursor): queda conectado, se prepara solo y espera; s
   const r = salida(root, 'builder');
   assert.match(r, /CONSTRUCTOR CONECTADO/);
   assert.match(r, /LISTO y a la espera de `teams: iniciar`/);
+  assert.match(r, /activar tus DOS vigilantes/);
+  assert.match(r, /vigilante de archivo en segundo plano: +node \.agentic\/grafo\/teams\.cjs esperar --rol=builder --despertar/);
+  assert.match(r, /loop de respaldo cada ~3 minutos/);
+  assert.match(r, /comprobar\s+\(debe decir builder: VIGILANTE_VIVO\)/);
+  assert.match(r, /ACTIVA YA tus DOS vigilantes/);
   assert.match(salida(root, 'estado'), /constructor conectado/);
   salida(root, 'tarea', 'Lote anticipado', '--criterio=x');
   const ronda = salida(root, 'ronda', '--rol=builder');

@@ -506,7 +506,12 @@ function ejecutar(argv, root) {
   if (cmd === 'builder' || cmd === 'conectar') {
     const e = necesitaCanal(); if (!e) return salida(1);
     const est = leerEstado(root); est.builder = { at: iso() }; guardarEstado(root, est);
-    say('CONSTRUCTOR CONECTADO — el Director verá `constructor conectado` en el estado.', '', P.prompt('builder', {}));
+    say('CONSTRUCTOR CONECTADO — el Director verá `constructor conectado` en el estado.', '',
+      'LO PRIMERO QUE HACES (obligatorio): activar tus DOS vigilantes y confirmarlo —',
+      `  1) vigilante de archivo en segundo plano:  ${P.CMD} esperar --rol=builder --despertar`,
+      '  2) loop de respaldo cada ~3 minutos de tu host corriendo:  ' + P.CMD + ' ronda --rol=builder',
+      `  3) confirmar:  ${P.CMD} comprobar   (debe decir builder: VIGILANTE_VIVO)`,
+      'Después NO construyas nada hasta que el Director inicie. El protocolo completo:', '', P.prompt('builder', {}));
     if (e.canal === 'PAUSADO') say('', 'AVISO: el canal está PAUSADO. No trabajes ni lances vigilantes hasta que el dueño escriba `teams: continuar`.');
     if (e.canal === 'CERRADO') say('', 'AVISO: el canal está CERRADO. No hay nada que hacer.');
     return salida();
@@ -526,7 +531,7 @@ function ejecutar(argv, root) {
       say(est.builder || vivo ? '  Constructor: ' + (vivo ? 'conectado con vigilante vivo' : 'conectado (su vigilante no figura vivo: puede que despierte por su loop de respaldo)') : '  ⚠ Constructor NO conectado todavía: el dueño debe escribir `teams: builder` en el chat de Cursor.');
     }
     if (!est.plan && !e.tareas.length) say('  ⚠ No hay plan ni tareas: pídele al dueño `teams: plan …` antes de seguir.');
-    say('', 'AHORA, Director:', '  1) lee .legion/PLAN.md y sus documentos fuente, y descompón el plan en lotes;', '  2) encola los 2 primeros con `tarea "…" --criterio="…" --archivos=…` (después te adelantas 1–2 lotes siempre);', est.modo === 'completo' ? '  3) lanza tus vigilantes (`prompt director`); el de Cursor lo despertará solo al ver la primera tarea.' : '  3) construye tú siguiendo `prompt individual` (bucle: construir → reportar → auditar con 3 sub-agentes → aceptar).');
+    say('', 'AHORA, Director:', '  1) lee .legion/PLAN.md y sus documentos fuente, y descompón el plan en lotes;', '  2) encola los 2 primeros con `tarea "…" --criterio="…" --archivos=…` (después te adelantas 1–2 lotes siempre);', est.modo === 'completo' ? `  3) activa tus DOS vigilantes: \`${P.CMD} esperar --rol=director --despertar\` en segundo plano + loop de respaldo de ~3 min con \`${P.CMD} revisar\`; confírmalo con \`${P.CMD} comprobar\`. El de Cursor lo despertará solo al ver la primera tarea.` : '  3) construye tú siguiendo `prompt individual` (bucle: construir → reportar → auditar con 3 sub-agentes → aceptar).');
     return salida();
   }
 
