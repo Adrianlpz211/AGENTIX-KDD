@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.22.0] — 2026-10-04
+
+**TEAMS arranca como se usaba a mano: activar → modo → plan → builder → iniciar → pausa / continuar.**
+- `teams: activar`: Claude Code asimila el protocolo y **pregunta al dueño** el modo: **completo** (Director + 3 sub-agentes auditores, Cursor construye) o **individual** (Claude Code también construye), y si quiere un auditor extra. El agente ya no elige la mecánica por su cuenta.
+- `teams: plan`: el dueño le pasa todo lo ya aterrizado (docs y detalles); se asimila y se guarda en `.legion/PLAN.md`.
+- `teams: builder` (en Cursor): queda conectado, se prepara solo, lanza sus vigilantes y espera. Sin `iniciar` no recibe trabajo ni lo despiertan.
+- `teams: iniciar`: el canal pasa a ACTIVO y el Director empieza; el vigilante de Cursor lo despierta solo.
+- `teams: pausa`: el canal pasa a PAUSADO; los vigilantes de los dos roles terminan solos (`AGENT_LOOP_PAUSE`) y el constructor recibe la orden de parar y cancelar su loop de respaldo, así nadie gasta tokens consultando sin instrucciones. `teams: continuar` (en Claude Code y en Cursor) lo reactiva.
+- Un canal nuevo nace PREPARADO; uno adoptado que ya venía trabajando sigue ACTIVO.
+- Arreglo: una opción `--constructor` ausente se leía como la función heredada de Object; el nombre del constructor salía roto en el canal.
+
 ## [3.21.0] — 2026-10-04
 
 **TEAMS reconstruido desde cero siguiendo el protocolo manual que ya funcionaba en producción.**

@@ -204,14 +204,17 @@ Every answer carries explicit states (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSI
 
 ### TEAMS — Claude Code directs, Cursor builds (one MD channel)
 
-The protocol many people run by hand, now a command wired into Agentix. Everything is by chat:
+The protocol many people run by hand, now a command wired into Agentix. Everything is by chat, in this order:
 
 ```
-teams: activar                  ← creates .legion/ (or ADOPTS the one you already have, untouched)
-teams: arrancar director        ← in Claude Code: it reads its own protocol; nothing to paste
-teams: arrancar builder         ← in Cursor: same, as the builder
-teams: vigilar · comprobar      ← background watchers · what is really alive
-teams: estado · avance · reporte · cerrar
+teams: activar        ← Claude Code assimilates the protocol and ASKS you: COMPLETE mode (Director + 3 sub-agents, Cursor builds)
+                         or INDIVIDUAL mode (Claude Code builds too), and whether you want an extra auditor
+teams: plan <all you already have laid out in docs, plus extra details>   ← Claude Code reads it all and assimilates it
+teams: builder        ← in Cursor: it prepares itself, launches its watchers and waits ("READY, waiting for iniciar")
+teams: iniciar        ← in Claude Code: it starts; Cursor wakes up on its own
+teams: pausa          ← stops everything: both watchers end and nobody spends tokens polling
+teams: continuar      ← in Claude Code and, above all, in Cursor: relaunch watchers and keep going
+teams: estado · avance · reporte · comprobar · cerrar
 ```
 
 | Piece | What it does |

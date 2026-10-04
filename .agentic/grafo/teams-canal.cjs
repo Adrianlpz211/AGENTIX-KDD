@@ -82,8 +82,8 @@ function analizar(texto) {
     }
   }
   if (actual) actual.fin = limpias.length;
-  const estado = (() => { const m = /ESTADO DEL CANAL:\s*\**\s*(ACTIVO|CERRADO|PAUSADO)/i.exec(texto); return m ? m[1].toUpperCase() : 'ACTIVO'; })();
-  const mec = /MEC[ÁA]NICA:\s*(BASE|INVERTIDA)/i.exec(texto);
+  const estado = (() => { const m = /ESTADO DEL CANAL:\s*\**\s*(ACTIVO|CERRADO|PAUSADO|PREPARADO)/i.exec(texto); return m ? m[1].toUpperCase() : 'ACTIVO'; })();
+  const mec = /MEC[ÁA]NICA:\s*(BASE|INVERTIDA|INDIVIDUAL|POR DEFINIR)/i.exec(texto);
   return { crlf, lineas, limpias, secciones, estado, texto, mecanica: mec ? mec[1].toUpperCase() : null };
 }
 

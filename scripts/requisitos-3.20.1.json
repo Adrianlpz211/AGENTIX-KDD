@@ -1148,6 +1148,102 @@
       "alcance": "host real NO_EJECUTADO",
       "pruebas": [],
       "nota": "Se prueba con el proyecto del dueño; el despertar solo cuenta como verificado tras `teams: comprobar`."
+    },
+    {
+      "id": "TEAMS-v4-flujo-1",
+      "doc": "TEAMS",
+      "requisito": "activar deja el canal PREPARADO y manda preguntar el modo; el agente no lo elige solo",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-2",
+      "doc": "TEAMS",
+      "requisito": "Modo completo (Director + 3 sub-agentes + Cursor) e individual (Claude Code también construye), con auditor extra opcional",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-3",
+      "doc": "TEAMS",
+      "requisito": "plan guarda lo asimilado con sus documentos fuente y avisa de los que no existen",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-4",
+      "doc": "TEAMS",
+      "requisito": "builder deja a Cursor conectado y a la espera; sin iniciar no se le pide trabajo ni lo despiertan",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-5",
+      "doc": "TEAMS",
+      "requisito": "iniciar activa el canal y el vigilante del constructor despierta solo",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 5"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-6",
+      "doc": "TEAMS",
+      "requisito": "pausa termina los vigilantes de los dos roles y ordena parar y cancelar el loop de respaldo",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 6"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-7",
+      "doc": "TEAMS",
+      "requisito": "continuar reactiva el canal y el rol relanza vigilante y loop",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 7"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-flujo-8",
+      "doc": "TEAMS",
+      "requisito": "continuar no salta etapas (preparado pide iniciar; cerrado pide reabrir)",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "FLUJO 8"
+        ]
+      ]
     }
   ]
 }
