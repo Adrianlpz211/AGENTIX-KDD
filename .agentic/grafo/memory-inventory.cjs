@@ -225,7 +225,11 @@ function compare(antes, despues, opts = {}) {
 
 // ───────────────────────────── archivos del proyecto ───────────────────
 const OMITIR_DIR = new Set(['node_modules', '.git', '_update', '_cache', '.model_cache', '_pipeline', '_executions', '_teams', '_restore', '_whatsapp', '_effort', '_context', '_hooks', 'telemetria', 'worktrees']);
-const OMITIR_ARCHIVO = /^(memoria\.db(-wal|-shm)?|memoria\.db\.bak-.*|_.*\.json|_.*\.jsonl)$/;
+// Los acompañantes TRANSITORIOS de SQLite (-journal en modo clásico, -wal/-shm en WAL) los crea y los borra SQLite solo, en cualquier
+// momento: no son archivos del proyecto y su aparición o desaparición no es una pérdida. Antes solo se omitían los de memoria.db y
+// faltaba -journal: una base antigua con una escritura en curso al inventariar (caso real: komerza) hacía fallar la verificación
+// posterior con «el archivo propio .agentic/memoria.db-journal desapareció». También los temporales de editores (.tmp, .swp, ~).
+const OMITIR_ARCHIVO = /^(memoria\.db(-wal|-shm|-journal)?|memoria\.db\.bak-.*|_.*\.json|_.*\.jsonl|.*\.(db|sqlite|sqlite3)-(journal|wal|shm)|.*\.(tmp|swp)|.*~)$/;
 
 function hashArchivo(f) {
   const h = crypto.createHash('sha256');
@@ -271,16 +275,17 @@ function inventoryFiles(root, opts = {}) {
 
 /** Cada archivo propio de antes debe seguir idéntico, salvo los cambios esperados y declarados. */
 function compareFiles(antes, despues, esperados = {}) {
-  const problemas = [], cambiosEsperados = [];
+  const problemas = [], cambiosEsperados = [], detalle = [];
   for (const [rel, a] of Object.entries(antes)) {
     const d = despues[rel];
-    if (!d) { problemas.push(`el archivo propio ${rel} desapareció`); continue; }
+    if (!d) { problemas.push(`el archivo propio ${rel} desapareció`); detalle.push({ rel, tipo: 'desapareció' }); continue; }
     if (a.sha256 !== d.sha256) {
       if (esperados[rel]) cambiosEsperados.push({ file: rel, reason: esperados[rel] });
-      else problemas.push(`el archivo propio ${rel} cambió`);
+      else { problemas.push(`el archivo propio ${rel} cambió`); detalle.push({ rel, tipo: 'cambió' }); }
     }
   }
-  return { ok: problemas.length === 0, problems: problemas, expected_changes: cambiosEsperados, compared: Object.keys(antes).length };
+  // `detail` dice QUÉ archivo y qué le pasó: quien llama decide si fue el update (fallo) u otro programa (aviso).
+  return { ok: problemas.length === 0, problems: problemas, detail: detalle, expected_changes: cambiosEsperados, compared: Object.keys(antes).length };
 }
 
 module.exports = {

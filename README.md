@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.20.2-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.20.3-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -398,8 +398,8 @@ Options: `--check` (plan only), `--json` (one JSON document on stdout), `--no-mi
 |---|---|
 | Range-error direction (vs real parser, 1,989 symbols) | 99.75% safe side |
 | Graph of a real project (~414 TS+JS files) | 3,757 symbols · ~4,900 edges · 100% with line ranges |
-| **3.20.2 release check** (2026-10-04, Windows, Node 24 — the only platform measured) | Full suite 938/939 (the one not run is a smoke inside real Cursor/Claude hosts, declared `NO_EJECUTADO`) · tarball (243 files) with no private data · 528 adversarial probes, 0 failures · the **installed tarball** is what gets tested |
-| **Real upgrades 3.19.0 → 3.20.2 and 3.20.0 → 3.20.2** (consumers built by running the published engines) | `akdd update` alone: `VERIFIED` (25 and 9 migrations applied) · memory preserved by **content** (30–31 tables, 567–572 rows compared, plus 500 private rows in a user table) · second update `NO_CHANGES_VERIFIED` · `--rollback` reverts files and keeps newer memory · the previous engine still reads the migrated database · MCP `initialize` / `remember` / `recall` over stdio |
+| **3.20.3 release check** (2026-10-04, Windows, Node 24 — the only platform measured) | Full suite 942/943 (the one not run is a smoke inside real Cursor/Claude hosts, declared `NO_EJECUTADO`) · tarball (243 files) with no private data · 528 adversarial probes, 0 failures · the **installed tarball** is what gets tested |
+| **Real upgrades 3.19.0 → 3.20.3 and 3.20.0 → 3.20.3** (consumers built by running the published engines) | `akdd update` alone: `VERIFIED` (25 and 9 migrations applied) · memory preserved by **content** (30–31 tables, 567–572 rows compared, plus 500 private rows in a user table) · second update `NO_CHANGES_VERIFIED` · `--rollback` reverts files and keeps newer memory · the previous engine still reads the migrated database · MCP `initialize` / `remember` / `recall` over stdio |
 | Effort router (15 fixtures, threshold fixed before running) | LOW: −90% context bytes, −54% steps · MEDIUM: −25 to −32% · HIGH keeps tdd, preservation, QA and reviewer. *Proxy: bytes Agentix asks to load; host tokens not measured* |
 | 19-phase benchmark (multi-tenant SaaS, with/without Agentix) | errors per phase 2.6→~0 · tests passing first try 79%→100% · refactor cascade 4/7→11/11 |
 

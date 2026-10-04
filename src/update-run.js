@@ -560,9 +560,17 @@ async function validar(ctx, plan, migracion) {
   const noEsFramework = (rel) => !manifest.esManaged(rel);
   const despuesF = motor.inventory.inventoryFiles(projectPath, { incluir: noEsFramework });
   const cmpF = motor.inventory.compareFiles(ctx.archivosAntes, despuesF, {});
-  R.preservation = Object.assign(R.preservation || {}, { files: { status: cmpF.ok ? 'PASS' : 'FAIL', compared: cmpF.compared, problems: cmpF.problems } });
-  if (!cmpF.ok) problemas.push(...cmpF.problems);
-  else R.coverage.verified.push(`archivos propios: ${cmpF.compared} sin cambios`);
+  // Solo es un FALLO si el update tocó ese archivo (el journal anota todo lo que escribe, antes de escribirlo). Si cambió o desapareció
+  // un archivo que el update nunca tocó, lo hizo otro programa mientras corría (un editor, Claude Code, Cursor, SQLite): se avisa y
+  // se conserva como quedó, pero NO se revierte una actualización correcta por algo que no hizo.
+  const tocados = new Set(((ctx.journal && ctx.journal.datos && ctx.journal.datos.entradas) || []).map((e) => e.rel));
+  const detalleF = cmpF.detail || [];
+  const porUpdate = detalleF.filter((x) => tocados.has(x.rel));
+  const ajenos = detalleF.filter((x) => !tocados.has(x.rel));
+  R.preservation = Object.assign(R.preservation || {}, { files: { status: porUpdate.length ? 'FAIL' : 'PASS', compared: cmpF.compared, problems: porUpdate.map((x) => `el archivo propio ${x.rel} ${x.tipo}`), external_changes: ajenos } });
+  if (porUpdate.length) problemas.push(...porUpdate.map((x) => `el archivo propio ${x.rel} ${x.tipo}`));
+  else R.coverage.verified.push(`archivos propios: ${cmpF.compared - ajenos.length} sin cambios`);
+  for (const x of ajenos) warnings.push(`el archivo ${x.rel} ${x.tipo} mientras corría la actualización, pero el update no lo tocó (lo cambió otro programa): se conserva como quedó`);
 
   // Motor nuevo cargado: sus archivos esenciales existen y compilan.
   for (const rel of classify.ESENCIALES) {

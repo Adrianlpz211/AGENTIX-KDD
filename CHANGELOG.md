@@ -1,5 +1,10 @@
 # Changelog — Agentic KDD
 
+## [3.20.3] — 2026-10-04
+
+**Corrección: un `akdd update` correcto ya no se revierte por archivos que no tocó.**
+En una base antigua (comprobado con la de un proyecto real) la verificación posterior fallaba con «el archivo propio .agentic/memoria.db-journal desapareció» y revertía una actualización buena: el `-journal` es el archivo transitorio que SQLite crea y borra solo, y la lista de exclusiones del inventario solo cubría `-wal` y `-shm`. Cambios: (1) los acompañantes transitorios de SQLite de cualquier base (`-journal`, `-wal`, `-shm`) y los temporales (`.tmp`, `.swp`, `~`) no son archivos del proyecto; (2) un archivo propio que cambia o desaparece SIN que el update lo haya tocado (el journal anota todo lo que escribe antes de escribirlo) es un aviso y se conserva como quedó, no un fallo; si el update SÍ lo tocó, sigue siendo fallo y se revierte. Pruebas nuevas: inventario, journal que desaparece, cambio ajeno, y el caso en que el update sí toca un archivo propio. Verificado con dos bases reales de 3.19 (40 tablas, 41.554 y 23.891 filas) dentro de proyectos 3.19.0 reales: `VERIFIED`, ninguna fila existente cambió, y un segundo update da `NO_CHANGES_VERIFIED`.
+
 ## [3.20.2] — 2026-10-04
 
 **Corrección: `akdd update` ya no se detiene en bases de 3.19 con registros en `gate_events`.**

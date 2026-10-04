@@ -1,6 +1,6 @@
 # Agentic KDD — Configuración del proyecto
 CONFIGURADO: SI
-VERSION: 3.20.2
+VERSION: 3.20.3
 
 ---
 <!-- Configuración autodetectada por aa: configurar -->
@@ -43,6 +43,7 @@ Agentes: .agentic/agentes/ (10 roles + harness)
 
 ## Módulos
 ### Implementados
+- **general** — 0 tests ✅
 - bin/akdd.js — CLI principal (471 líneas)
 - src/init.js — Inicialización interactiva
 - src/update.js — Actualización de agentes
