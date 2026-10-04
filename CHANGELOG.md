@@ -1,6 +1,6 @@
 # Changelog — Agentic KDD
 
-## [3.22.3] — 2026-10-04
+## [3.22.4] — 2026-10-04
 
 **Blindaje tras la primera campaña real (glowly): lo que falló al usar TEAMS con Cursor y Claude Code a la vez.**
 - **Cursor ya sabe qué es `teams:`.** Faltaba la regla que se lo enseña: ahora viaja con Agentix (`.cursor/rules/teams.mdc`, siempre activa) y define `teams: constructor`, `continuar` y `pausa`. La palabra del comando pasa a español: `teams: constructor` (`builder` sigue valiendo en la CLI).
