@@ -113,6 +113,8 @@ function marcaDeArranque(db, ciclo) {
       WHERE verdict = 'CICLO_INICIO' AND cycle_id = ? AND ts <= ?
       ORDER BY ts ASC LIMIT 1`
   ).get(String(ciclo.ciclo_id), aTexto(fin)), null) : null;
+  // Un ciclo de TEAMS (teams_…) sin marca propia queda «sin dato»: la «última marca» sería de otro flujo y daría una duración inventada.
+  if (!propia && String(ciclo.ciclo_id || '').startsWith('teams_')) return null;
   const fila = propia || safe(() => db.prepare(
     `SELECT ts FROM gate_events
       WHERE verdict = 'CICLO_INICIO' AND ts <= ?
