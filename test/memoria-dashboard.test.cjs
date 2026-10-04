@@ -631,9 +631,11 @@ test('páginas /memoria y /contexto: servidas con CSP; el tablero de grafos no c
     assert.match((await get(d, '/memoria')).texto, /memory-health/);
     assert.equal((await get(d, '/memoria/../../etc/passwd')).status, 404);
     const raiz = (await get(d, '/')).texto;
-    // El tablero solo ENLAZA a las páginas desde su barra de pestañas (anclas); no carga sus scripts, su SSE ni su API dentro de los grafos.
-    assert.match(raiz, /<a class="mode-link" href="\/memoria"/, 'la barra de pestañas enlaza a /memoria');
-    assert.match(raiz, /<a class="mode-link" href="\/contexto"/, 'y a /contexto');
+    // Memoria y Contexto son pestañas del tablero: se muestran DENTRO del layout (iframe del mismo origen, cargado al abrir la pestaña);
+    // el tablero no carga sus scripts, su SSE ni su API dentro de los grafos.
+    assert.match(raiz, /onclick="setMode\('memoria',this\)"/, 'pestaña Memoria dentro del layout');
+    assert.match(raiz, /onclick="setMode\('contexto',this\)"/, 'pestaña Contexto dentro del layout');
+    assert.match(raiz, /<iframe data-src="\/memoria\?embed=1"/, 'la página se carga embebida');
     assert.ok(!/memoria-pagina|topics=memory|api\/v1\/memory/.test(raiz), 'los grafos no cargan nada de la memoria con procedencia');
     assert.equal((await fetch(d.url + 'api/v1/memory', { method: 'DELETE' })).status, 405);
     assert.equal((await fetch(d.url + 'api/v1/memory', { method: 'PUT', body: '{}' })).status, 405);

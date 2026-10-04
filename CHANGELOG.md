@@ -1,5 +1,10 @@
 # Changelog — Agentic KDD
 
+## [3.20.4] — 2026-10-04
+
+**Dashboard: Memoria, Contexto y esfuerzo, TEAMS y Actualización se abren DENTRO del tablero.**
+Antes eran enlaces que llevaban a otra página; ahora son pestañas del propio tablero, como Línea de Tiempo o Preservation Intel: la barra superior se mantiene y la página se muestra en el área de contenido (se carga al abrir la pestaña y se refresca si pasaron más de 30 s). Las páginas siguen existiendo por su URL y, con `?embed=1`, ocultan su cabecera y su menú. Seguridad: las cuatro páginas pueden ser embebidas solo por el mismo origen (`frame-ancestors 'self'`); el tablero embebe únicamente su propio origen (`frame-src 'self'`) y sigue sin poder ser embebido por nadie (`frame-ancestors 'none'`). Los grafos no cambian. Pruebas actualizadas y una nueva para el embebido y las cabeceras; verificado además en un navegador real.
+
 ## [3.20.3] — 2026-10-04
 
 **Corrección: un `akdd update` correcto ya no se revierte por archivos que no tocó.**

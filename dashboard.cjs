@@ -1161,8 +1161,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .mode-tab{padding:11px 18px;font-size:13px;font-weight:500;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .mode-tab:hover{color:var(--text2)}
 .mode-tab.active{color:var(--pl);border-bottom-color:var(--purple)}
-.mode-link{padding:11px 18px;font-size:13px;font-weight:500;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s;display:flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none}
-.mode-link:hover{color:var(--text2)}
 
 .content{flex:1;overflow:hidden;display:flex}
 
@@ -1294,6 +1292,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 /* ════════ PROJECT DOCS MODE ════════ */
 #mode-docs{flex:1;display:none;overflow:hidden}
 #mode-tiempos{flex:1;display:none;overflow:hidden}
+.mode-embed{flex:1;display:none;overflow:hidden;min-height:0}
+.mode-embed iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
 .docs-layout{display:flex;height:100%;width:100%;overflow:hidden;flex:1;min-width:0}
 .docs-nav{width:210px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;padding:12px}
 .docs-nav::-webkit-scrollbar{width:3px}
@@ -1473,10 +1473,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('docs',this)">📚 <span data-i="tab_docs">Project Docs</span></div>
   <div class="mode-tab" onclick="setMode('intel',this)">🛡️ Preservation Intel</div>
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
-  <a class="mode-link" href="/memoria" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</a>
-  <a class="mode-link" href="/contexto" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</a>
-  <a class="mode-link" href="/teams" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</a>
-  <a class="mode-link" href="/actualizacion" title="Estado de la última actualización y de la memoria">🔄 Actualización</a>
+  <div class="mode-tab" onclick="setMode('memoria',this)" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</div>
+  <div class="mode-tab" onclick="setMode('contexto',this)" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</div>
+  <div class="mode-tab" onclick="setMode('teams',this)" title="Campaña TEAMS: plan, constructor, revisores, correcciones y avance medido">👥 TEAMS</div>
+  <div class="mode-tab" onclick="setMode('actualizacion',this)" title="Estado de la última actualización y de la memoria">🔄 Actualización</div>
 </div>
 
 <div class="content">
@@ -2305,6 +2305,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 </div>
 
+<div id="mode-memoria" class="mode-embed"><iframe data-src="/memoria?embed=1" title="Memoria"></iframe></div>
+<div id="mode-contexto" class="mode-embed"><iframe data-src="/contexto?embed=1" title="Contexto y esfuerzo"></iframe></div>
+<div id="mode-teams" class="mode-embed"><iframe data-src="/teams?embed=1" title="TEAMS"></iframe></div>
+<div id="mode-actualizacion" class="mode-embed"><iframe data-src="/actualizacion?embed=1" title="Actualización"></iframe></div>
+
 <div id="mode-tiempos">
   <div class="docs-main">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
@@ -2947,6 +2952,16 @@ function setMode(mode,el){
   // que responde «cuánto costó esto», que es lo primero que pregunta un jefe.
   const mt=document.getElementById('mode-tiempos');
   if(mt)mt.style.display=mode==='tiempos'?'flex':'none';
+  // Memoria, Contexto, TEAMS y Actualización: la página se muestra DENTRO del layout (como Línea de Tiempo o Preservation Intel).
+  // Se carga al abrir la pestaña y se refresca si pasaron más de 30 s desde la última carga.
+  ['memoria','contexto','teams','actualizacion'].forEach(function(m){
+    var p=document.getElementById('mode-'+m); if(!p) return;
+    p.style.display=mode===m?'flex':'none';
+    if(mode!==m) return;
+    var f=p.querySelector('iframe'); if(!f) return;
+    var t=Number(f.getAttribute('data-t')||0);
+    if(!f.getAttribute('src')||Date.now()-t>30000){ f.setAttribute('src',f.getAttribute('data-src')); f.setAttribute('data-t',String(Date.now())); }
+  });
   if(mode==='docs')setTimeout(renderModuleGraph,100);
 }
 
@@ -5114,6 +5129,12 @@ const CSP = [
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
+// Las páginas propias (/memoria, /contexto, /teams, /actualizacion) se muestran dentro del tablero: pueden ser embebidas SOLO por el
+// mismo origen. La raíz (el tablero) sigue sin poder ser embebida por nadie y solo puede embeber su propio origen.
+const CSP_EMBEBIBLE = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'");
+const CSP_RAIZ = CSP + "; frame-src 'self'";
+// Con ?embed=1 la página oculta su cabecera y su menú: el tablero ya los trae.
+const paraEmbeber = (html, url) => (url.searchParams.get('embed') === '1' ? String(html).replace('</head>', '<style>header,nav{display:none!important}</style></head>') : html);
 
 // Solo loopback: un Host ajeno es otra página intentando leer el tablero
 // mediante un nombre que apunta a 127.0.0.1 (rebinding de DNS).
@@ -5148,25 +5169,25 @@ const server = require('http').createServer((req, res) => {
   }
   if (ruta === '/actualizacion') {
     // Página propia (solo lectura) de actualización y memoria. No toca el tablero de grafos.
-    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
-    res.end(req.method === 'HEAD' ? undefined : cargarGrafo('update-panel.cjs').HTML);
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
+    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('update-panel.cjs').HTML, url));
     return;
   }
   if (ruta === '/memoria' || ruta === '/contexto') {
     // Páginas propias de memoria visible y de contexto/esfuerzo (solo lectura). No tocan el tablero de grafos.
     const pag = cargarGrafo('memoria-pagina.cjs');
-    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
-    res.end(req.method === 'HEAD' ? undefined : (ruta === '/memoria' ? pag.MEMORIA_HTML : pag.CONTEXTO_HTML));
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
+    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(ruta === '/memoria' ? pag.MEMORIA_HTML : pag.CONTEXTO_HTML, url));
     return;
   }
   if (ruta === '/teams') {
     // Página propia (solo lectura) de la campaña TEAMS: etapas, cobertura de registro, vigilancia y auditoría. No toca el tablero de grafos.
-    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
-    res.end(req.method === 'HEAD' ? undefined : cargarGrafo('teams-pagina.cjs').TEAMS_HTML);
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
+    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('teams-pagina.cjs').TEAMS_HTML, url));
     return;
   }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
-  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP }, base));
+  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_RAIZ }, base));
   res.end(req.method === 'HEAD' ? undefined : HTML);
 });
 

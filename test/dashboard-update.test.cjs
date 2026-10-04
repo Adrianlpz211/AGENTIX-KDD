@@ -115,6 +115,31 @@ test('dashboard: es de SOLO LECTURA, paginado, sin SQL del navegador y sin expon
   } finally { d.cerrar(); }
 });
 
+test('dashboard: las cuatro páginas propias se muestran DENTRO del tablero (?embed=1 sin cabecera ni menú); solo el mismo origen puede embeberlas', async () => {
+  const p = legacy.proyectoReal('3.20.0', 'dash-embed');
+  assert.ok((await actualizar(p.root)).ok);
+  const d = await arrancarDashboard(p.root);
+  try {
+    for (const ruta of ['/memoria', '/contexto', '/teams', '/actualizacion']) {
+      const normal = await pedir(base(d) + ruta);
+      const embebida = await pedir(base(d) + ruta + '?embed=1');
+      assert.equal(embebida.status, 200, ruta);
+      assert.match(normal.texto, /<header>/, ruta + ': de forma independiente conserva su cabecera');
+      assert.ok(!/header,nav{display:none/.test(normal.texto), ruta + ': sin embed no se oculta nada');
+      assert.match(embebida.texto, /header,nav{display:none!important}/, ruta + ': embebida oculta cabecera y menú (el tablero ya los trae)');
+      for (const r of [normal, embebida]) {
+        assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'self'/, ruta + ': solo el mismo origen la embebe');
+        assert.ok(!/frame-ancestors 'none'/.test(r.headers.get('content-security-policy')), ruta);
+      }
+    }
+    const raiz = await pedir(base(d) + '/');
+    const csp = raiz.headers.get('content-security-policy');
+    assert.match(csp, /frame-src 'self'/, 'el tablero puede embeber solo su propio origen');
+    assert.match(csp, /frame-ancestors 'none'/, 'pero el tablero en sí no puede ser embebido por nadie');
+    assert.ok(!csp.includes('frame-src *') && !/frame-src[^;]*https?:/.test(csp), 'sin comodines ni orígenes externos');
+  } finally { d.cerrar(); }
+});
+
 test('dashboard: la página /actualizacion se sirve con CSP, sin tocar el tablero de grafos', async () => {
   const p = legacy.proyectoReal('3.20.0', 'dash-pag');
   assert.ok((await actualizar(p.root)).ok);
@@ -127,7 +152,8 @@ test('dashboard: la página /actualizacion se sirve con CSP, sin tocar el tabler
     assert.match(pag.texto, /Actualización y memoria/);
     assert.match(pag.texto, /\/api\/v1\/update/);
     const raiz = await pedir(base(d) + '/');
-    assert.match(raiz.texto, /<a class="mode-link" href="\/actualizacion"/, 'la barra de pestañas solo ENLAZA a la página (una ancla)');
+    assert.match(raiz.texto, /onclick="setMode\('actualizacion',this\)"/, 'Actualización es una pestaña del tablero (dentro del layout)');
+    assert.match(raiz.texto, /<iframe data-src="\/actualizacion\?embed=1"/, 'la página se carga embebida');
     assert.ok(!/Actualización y memoria|api\/v1\/update/i.test(raiz.texto), 'el tablero de grafos no cargó nada de la página: ni su contenido ni su API');
     assert.equal((await pedir(base(d) + '/actualizacion/../../etc/passwd')).status, 404);
   } finally { d.cerrar(); }
