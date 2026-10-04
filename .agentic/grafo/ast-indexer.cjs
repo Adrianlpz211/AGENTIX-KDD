@@ -28,15 +28,20 @@ const path = require('path');
 
 // ─── DB HELPER (compatible con mejor-sqlite3 y node:sqlite) ──────────────────
 
+// Espera máxima por un bloqueo de otro escritor (post-cycle, MCP, tablero). Sin esto el indexador chocaba al instante.
+const BUSY_MS = Number(process.env.AKDD_AST_BUSY_MS) || 20000;
+
 function openDB(projectRoot) {
   const dbPath = path.join(projectRoot, '.agentic/memoria.db');
   try {
     const Database = require('better-sqlite3');
-    return new Database(dbPath);
+    const db = new Database(dbPath);
+    try { db.pragma('busy_timeout = ' + BUSY_MS); } catch { /* sin pragma */ }
+    return db;
   } catch {
     try {
       const { DatabaseSync } = require('node:sqlite');
-      return new DatabaseSync(dbPath);
+      return new DatabaseSync(dbPath, { timeout: BUSY_MS });
     } catch {
       throw new Error('Ningún driver SQLite disponible (better-sqlite3 o node:sqlite)');
     }
@@ -1210,12 +1215,15 @@ function computePageRank(db, iterations = 20, dampingFactor = 0.85) {
   // Actualizar scores en DB
   const updateSym = db.prepare('UPDATE ast_symbols SET pagerank = ? WHERE file = ?');
   const updateEdge = db.prepare('UPDATE ast_edges SET pagerank_src = ? WHERE from_file = ?');
+  let tx = false;
+  try { db.exec('BEGIN IMMEDIATE'); tx = true; } catch { /* sin transacción: cae al modo anterior */ }
   for (const [file, score] of Object.entries(scores)) {
     try {
       updateSym.run(score, file);
       updateEdge.run(score, file);
     } catch {}
   }
+  if (tx) { try { db.exec('COMMIT'); } catch { try { db.exec('ROLLBACK'); } catch { /* ya cerrada */ } } }
 
   return scores;
 }
@@ -1308,9 +1316,36 @@ function getAllSourceFiles(dir, projectRoot, results = []) {
 // completa y automática la primera vez que el motor nuevo indexa.
 const INDEX_VERSION = 4;
 
+// Un solo indexado por proyecto a la vez: post-commit, post-cycle y los hooks lo disparaban en paralelo y se
+// peleaban por la base (medido en glowly: un indexado de ~10 min dejó sin servicio al tablero y a los MCP).
+const procesoVivo = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+function tomarLockIndexado(projectRoot) {
+  const lock = path.join(projectRoot, '.agentic', '_ast-indexing.lock');
+  const dato = JSON.stringify({ pid: process.pid, at: Date.now() });
+  for (let i = 0; i < 2; i++) {
+    try { fs.writeFileSync(lock, dato, { flag: 'wx' }); return lock; } catch (e) {
+      if (e.code !== 'EEXIST') return lock; // sin poder crear el lock no se bloquea el trabajo
+      let j = null; try { j = JSON.parse(fs.readFileSync(lock, 'utf8')); } catch { /* ilegible: se toma por viejo */ }
+      if (j && procesoVivo(j.pid) && Date.now() - j.at < 20 * 60000) return null;
+      try { fs.rmSync(lock, { force: true }); } catch { /* otro lo quitó */ }
+    }
+  }
+  return null;
+}
+
 function indexProject(projectRoot, targetDir = null) {
+  const lock = tomarLockIndexado(projectRoot);
+  if (!lock) {
+    console.log('[AST-INDEXER] ya hay un indexado en curso en este proyecto: omito (el otro hará el trabajo; es incremental)');
+    return { indexed: 0, cached: 0, skipped: 0, errors: 0, changedFiles: [], enCurso: true };
+  }
+  try { return indexProjectInterno(projectRoot, targetDir); } finally { try { fs.rmSync(lock, { force: true }); } catch { /* ya quitado */ } }
+}
+
+function indexProjectInterno(projectRoot, targetDir = null) {
   const db = openDB(projectRoot);
   initASTSchema(db);
+  let reconstruccionCompleta = false;
 
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS project_settings (
@@ -1320,6 +1355,7 @@ function indexProject(projectRoot, targetDir = null) {
     if (!v || parseInt(v.value, 10) !== INDEX_VERSION) {
       console.log(`[AST-INDEXER] Versión de índice ${v ? v.value : '(ninguna)'} → ${INDEX_VERSION}: reconstrucción completa automática (una sola vez)`);
       db.exec('DELETE FROM ast_symbols; DELETE FROM ast_edges;');
+      reconstruccionCompleta = true;
       db.prepare(`INSERT OR REPLACE INTO project_settings (key, value, updated_at) VALUES ('index_version', ?, datetime('now'))`)
         .run(String(INDEX_VERSION));
     }
@@ -1347,7 +1383,19 @@ function indexProject(projectRoot, targetDir = null) {
   const changedFiles = [];
   const alertas = [];
 
+  // Lotes: una transacción por ~10 archivos en vez de un commit (y su fsync) por cada INSERT; el bloqueo se suelta entre lotes.
+  // Presupuesto de tiempo: si se agota se para ordenadamente y la próxima corrida sigue (el índice es incremental).
+  const MAX_MS = Number(process.env.AKDD_AST_MAX_MS) || 90000;
+  const LOTE = Number(process.env.AKDD_AST_LOTE) || 10;
+  const inicioIdx = Date.now();
+  let txAbierta = false; let enLote = 0; let hechos = 0; let pendientesPorTiempo = 0;
+  const abrirTx = () => { if (!txAbierta) { try { db.exec('BEGIN IMMEDIATE'); txAbierta = true; } catch { /* sin tx: autocommit como antes */ } } };
+  const cerrarTx = () => { if (txAbierta) { try { db.exec('COMMIT'); } catch { try { db.exec('ROLLBACK'); } catch { /* ya cerrada */ } } txAbierta = false; } enLote = 0; };
+
   for (const file of files) {
+    if (Date.now() - inicioIdx > MAX_MS) { pendientesPorTiempo = files.length - hechos; break; }
+    hechos++;
+    abrirTx();
     // v3.16.9 — defensa en profundidad: un archivo con algo verdaderamente
     // inesperado (no solo el schema desalineado que indexFile ya blinda) no
     // debe tumbar la corrida completa de cientos de archivos — se salta ESE
@@ -1364,7 +1412,10 @@ function indexProject(projectRoot, targetDir = null) {
       changedFiles.push(path.relative(projectRoot, file));
       if (indexed % 50 === 0) process.stdout.write(`\r[AST-INDEXER] ${indexed}/${files.length}...`);
     }
+    if (++enLote >= LOTE) cerrarTx();
   }
+  cerrarTx();
+  if (pendientesPorTiempo) console.log(`\n[AST-INDEXER] presupuesto de ${Math.round(MAX_MS / 1000)} s agotado: quedan ~${pendientesPorTiempo} archivo(s) para la próxima corrida (incremental)`);
 
   if (alertas.length) {
     console.log(`\n⚠️  ${alertas.length} archivo(s) con símbolos que no persistieron del todo (anti-éxito-falso):`);
@@ -1385,16 +1436,18 @@ function indexProject(projectRoot, targetDir = null) {
     const s = importResolver.stats;
     console.log(`[AST-INDEXER] importMap: ${s.resolved} resueltos (${s.aliasResolved} por alias) · ${s.unresolved} sin resolver · ${s.cacheHits} cache hits`);
   }
-  console.log('[AST-INDEXER] Calculando PageRank...');
-  computePageRank(db);
+  if (indexed > 0 || reconstruccionCompleta) {
+    console.log('[AST-INDEXER] Calculando PageRank...');
+    computePageRank(db);
+  } else console.log('[AST-INDEXER] Sin cambios en el código: PageRank vigente, no se reescribe');
 
   try {
     db.prepare('INSERT INTO ast_index_runs (changed_files) VALUES (?)').run(JSON.stringify(changedFiles));
   } catch {}
 
-  console.log(`[AST-INDEXER] ✅ Completado: ${indexed} indexados, ${cached} en caché, ${skipped} omitidos`);
+  console.log(`[AST-INDEXER] ✅ Completado: ${indexed} indexados, ${cached} en caché, ${skipped} omitidos${pendientesPorTiempo ? ' (parcial por tiempo)' : ''}`);
   try { db.close(); } catch {}
-  return { indexed, cached, skipped, errors, changedFiles };
+  return { indexed, cached, skipped, errors, changedFiles, parcial: !!pendientesPorTiempo, pendientes: pendientesPorTiempo };
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────

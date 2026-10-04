@@ -124,7 +124,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     return r.data ? hash(r.data) : 'sin-dato-' + (r.reason_code || r.status);
   }
 
-  function sobre(res, req, { status, data, errors, coverage, window, reason_code, extraEtag, source, cause, accion, incompletos }, http) {
+  function sobre(res, req, { status, data, errors, coverage, window, reason_code, extraEtag, source, cause, accion, incompletos, stale }, http) {
     const snapshot_revision = data ? hash(data) : 'sin-dato';
     const cuerpo = {
       schema_version: SCHEMA_VERSION, status, project_id: projectId, snapshot_revision,
@@ -138,6 +138,8 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     if (cause) cuerpo.cause = cause;
     if (accion) cuerpo.accion = accion;
     if (incompletos) cuerpo.incompletos = incompletos;
+    // Dato servido desde la última lectura buena porque la base estaba ocupada (otro proceso escribiendo): se dice, no se oculta.
+    if (stale) { cuerpo.stale = true; cuerpo.stale_since = stale.since; cuerpo.stale_reason = stale.reason; }
     const etag = `"${hash(snapshot_revision + '|' + (extraEtag || ''))}"`;
     const base = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
     if ((http || 200) === 200 && req.headers['if-none-match'] === etag) { res.writeHead(304, base); return res.end(); }
@@ -390,6 +392,9 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     });
   }
 
+  // Última respuesta buena por ruta+consulta: si la base está bloqueada por un escritor largo se sirve esto marcado como `stale`.
+  const ultimoBueno = new Map();
+
   function manejar(req, res, ruta, qs) {
     if (!ruta.startsWith('/api/v1/')) return false;
     const nombre = ruta.slice('/api/v1/'.length);
@@ -411,7 +416,13 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       sobre(res, req, { status: 'UNAVAILABLE', data: null, errors: [{ code: e.code, message: e.message }], reason_code: e.code }, e.status);
       return true;
     }
-    const r = def.fn(q);
+    let r = def.fn(q);
+    const claveCache = nombre + '?' + [...qs].sort().join('&');
+    if (r && (r.status === 'OK' || r.status === 'EMPTY')) ultimoBueno.set(claveCache, { r, at: Date.now() });
+    else if (r && r.status === 'UNAVAILABLE' && r.reason_code === 'DB_BLOQUEADA') {
+      const previo = ultimoBueno.get(claveCache);
+      if (previo && Date.now() - previo.at < 15 * 60000) r = Object.assign({}, previo.r, { stale: { since: new Date(previo.at).toISOString(), reason: 'DB_BLOQUEADA' } });
+    }
     sobre(res, req, Object.assign({ window: ventana(q), extraEtag: JSON.stringify([nombre, [...qs].sort()]) }, r), r.http);
     return true;
   }

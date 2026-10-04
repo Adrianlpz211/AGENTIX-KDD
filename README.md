@@ -210,7 +210,7 @@ The protocol many people run by hand, now a command wired into Agentix. Everythi
 teams: activar        ← Claude Code assimilates the protocol and ASKS you: COMPLETE mode (Director + 3 sub-agents, Cursor builds)
                          or INDIVIDUAL mode (Claude Code builds too), and whether you want an extra auditor
 teams: plan <all you already have laid out in docs, plus extra details>   ← Claude Code reads it all and assimilates it
-teams: builder        ← in Cursor: it prepares itself, launches its watchers and waits ("READY, waiting for iniciar")
+teams: constructor        ← in Cursor: it prepares itself, launches its watchers and waits ("READY, waiting for iniciar")
 teams: iniciar        ← in Claude Code: it starts; Cursor wakes up on its own
 teams: pausa          ← stops everything: both watchers end and nobody spends tokens polling
 teams: continuar      ← in Claude Code and, above all, in Cursor: relaunch watchers and keep going

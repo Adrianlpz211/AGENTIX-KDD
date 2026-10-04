@@ -106,7 +106,14 @@ function asegurarColumna(db) {
 function marcaDeArranque(db, ciclo) {
   const fin = aMs(ciclo.fecha_fin);
   if (fin == null) return null;
-  const fila = safe(() => db.prepare(
+  // Primero la marca DEL PROPIO ciclo (cycle_id exacto): cualquier otro flujo que corra el enricher entre el arranque y el
+  // cierre (p. ej. TEAMS, que lo corre al encolar cada tarea) dejaría una marca más reciente que robaría el arranque.
+  const propia = ciclo.ciclo_id ? safe(() => db.prepare(
+    `SELECT ts FROM gate_events
+      WHERE verdict = 'CICLO_INICIO' AND cycle_id = ? AND ts <= ?
+      ORDER BY ts ASC LIMIT 1`
+  ).get(String(ciclo.ciclo_id), aTexto(fin)), null) : null;
+  const fila = propia || safe(() => db.prepare(
     `SELECT ts FROM gate_events
       WHERE verdict = 'CICLO_INICIO' AND ts <= ?
       ORDER BY ts DESC LIMIT 1`

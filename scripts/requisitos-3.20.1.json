@@ -1244,6 +1244,114 @@
           "FLUJO 8"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-1",
+      "doc": "TEAMS",
+      "requisito": "El vigilante continuo no termina al avisar y termina con la pausa",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-2",
+      "doc": "TEAMS",
+      "requisito": "Sin vigilante vivo, ronda/revisar lo dicen en su primera línea",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-3",
+      "doc": "TEAMS",
+      "requisito": "Una entrega sin revisar se recuerda al Director cada ~8 min",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-4",
+      "doc": "TEAMS",
+      "requisito": "Al encolar, Agentix anota el aviso previo (riesgo, antecedentes, curas) y registra la predicción",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-5",
+      "doc": "TEAMS",
+      "requisito": "La duración de un ciclo de TEAMS se sella y el reloj la prefiere a marcas ajenas",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-5"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-glowly-6",
+      "doc": "TEAMS",
+      "requisito": "activar archiva el canal del TEAMS anterior y detiene sus vigilantes",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "GLOWLY-6"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-cursor",
+      "doc": "TEAMS",
+      "requisito": "La regla de Cursor para los comandos teams: viaja con Agentix",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "CURSOR"
+        ]
+      ]
+    },
+    {
+      "id": "AST-blindaje-1",
+      "doc": "TEAMS",
+      "requisito": "El indexador AST espera bloqueos, es de un solo indexado a la vez, por lotes y con presupuesto de tiempo",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "ast-indexer-blindaje",
+          "espera el bloqueo de otro escritor"
+        ]
+      ]
+    },
+    {
+      "id": "AST-blindaje-2",
+      "doc": "TEAMS",
+      "requisito": "El tablero sirve la última lectura buena marcada stale cuando la base está ocupada",
+      "alcance": "proceso real (CLI, archivos y procesos)",
+      "pruebas": [
+        [
+          "dashboard-bloqueo",
+          "base bloqueada por un escritor"
+        ]
+      ]
     }
   ]
 }

@@ -123,38 +123,11 @@ function metodologia() {
   ].join('\n');
 }
 
-function snippetClaude() {
-  return [
-    '## PROTOCOLO TEAMS — recuperación de contexto AUTOMÁTICA E INCONDICIONAL',
-    '',
-    '**Regla dura: si existe `.legion/AUDITORIA-CURSOR.md` y su `ESTADO DEL CANAL` es ACTIVO, el Protocolo TEAMS está en marcha** — sesión nueva, compactada o reiniciada. No esperes a que la persona lo mencione ni preguntes si seguir: léelo y retoma en el primer turno. (PREPARADO = todavía no se inició: espera `teams: iniciar`; PAUSADO = no hagas nada ni lances vigilantes hasta `teams: continuar`; CERRADO = terminó.)',
-    '',
-    `1. Ejecuta \`${CMD} estado\` y lee \`.legion/CONTINUIDAD.md\` (foto del último estado).`,
-    '2. Lee `.legion/METODOLOGIA.md` y `.legion/AUDITORIA-CURSOR.md` completo: el archivo en disco es la fuente de verdad, no tu memoria.',
-    `3. Si eres el Director: \`${CMD} prompt director\` y síguelo. Si eres el constructor: \`${CMD} prompt builder\` y síguelo.`,
-    '4. Si el canal está PAUSADO o CERRADO: no hay nada que vigilar. No lances vigilantes ni loops.',
-    '',
-  ].join('\n');
-}
-
-function reglaCursor() {
-  return [
-    '---',
-    'description: Protocolo TEAMS — el constructor retoma el canal en cualquier sesión',
-    'alwaysApply: true',
-    '---',
-    '',
-    'Si existe `.legion/AUDITORIA-CURSOR.md` y su ESTADO DEL CANAL es ACTIVO, eres el CONSTRUCTOR del Protocolo TEAMS (si el dueño ya te conectó con `teams: builder`). Si es PREPARADO, espera `teams: iniciar`; si es PAUSADO o CERRADO, no trabajes ni lances vigilantes ni loops.',
-    `Al empezar (y tras cualquier compactación): ejecuta \`${CMD} prompt builder\` y sigue ese protocolo. Tu ruta es SIEMPRE: \`${CMD} ronda --rol=builder\` → trabajar lo que imprime → reportar por tarea → \`ronda --cierre\` hasta RONDA_COMPLETA.`,
-    'No te saltes secciones del canal: la ronda te imprime todo lo pendiente. Si el vigilante imprime AGENT_LOOP_END_builder, el canal está CERRADO: no relances nada.',
-    '',
-  ].join('\n');
-}
-
 const VIGILANTE = (rol) => [
   `**Vigilante (lo despierta el HOST, no un archivo):** lanza \`${CMD} esperar --rol=${rol} --despertar\` como TAREA EN SEGUNDO PLANO del host`,
   `(Claude Code: Bash con run_in_background o Monitor; Cursor: proceso en segundo plano). Imprime \`AGENT_LOOP_WAKE_${rol}\` y termina cuando hay algo para ti;`,
-  `entonces haz tu ronda y RELÁNZALO. Si imprime \`AGENT_LOOP_END_${rol}\`: el canal está CERRADO → no relances, no sondees, informa al dueño y detente.`,
+  `entonces RELÁNZALO PRIMERO (antes de hacer la ronda: si trabajas sin vigilante, una corrección o una pausa que llegue a mitad de tarea no te despierta; \`ronda\`/\`revisar\` te lo recuerdan en su primera línea) y luego haz tu ronda.`,
+  `En Claude Code, con la herramienta Monitor, lánzalo con \`--continuo\`: no termina al avisar, sigue vivo y cada aviso nuevo llega solo (no hay que relanzarlo). Si imprime \`AGENT_LOOP_END_${rol}\`: el canal está CERRADO → no relances, no sondees, informa al dueño y detente.`,
   `Si imprime \`AGENT_LOOP_PAUSE_${rol}\`: el canal está PAUSADO → no relances el vigilante y CANCELA tu loop de respaldo (así no gastas tokens); vuelve solo cuando el dueño escriba \`teams: continuar\` en tu chat.`,
   `Respaldo independiente (se apaga solo con PAUSA o CIERRE): el loop de tu host cada ~3 minutos corriendo \`${CMD} ronda --rol=${rol}\`.`,
   `Honestidad: \`${CMD} comprobar\` dice qué está vivo y qué no; no anuncies autonomía que no figure ahí.`,
@@ -166,10 +139,10 @@ function promptConstructor() {
     '',
     'Tu único canal es `.legion/AUDITORIA-CURSOR.md`. Lo que no está ahí, no pasó. No diseñas: ejecutas lo decidido por el Director, y si algo no cuadra, PARAS y lo reportas.',
     '',
-    '## Al conectarte (`teams: builder`) — te preparas SOLO y quedas a la espera',
+    '## Al conectarte (`teams: constructor`) — te preparas SOLO y quedas a la espera',
     '1. Lee `.legion/METODOLOGIA.md` y `.legion/AUDITORIA-CURSOR.md` y entiende cómo vas a trabajar.',
     '2. **ACTIVA YA tus DOS vigilantes — los dos, no uno (esto es obligatorio, sin ellos nadie te despierta):**',
-    `   a) **Vigilante de archivo** (el proceso en segundo plano que avisa solo cuando el canal cambia, como un FileSystemWatcher): lanza como TAREA EN SEGUNDO PLANO \`${CMD} esperar --rol=builder --despertar\`. Vigila \`.legion/AUDITORIA-CURSOR.md\`; cuando hay algo para ti escribe \`AGENT_LOOP_WAKE_builder\` y termina, y ese aviso te despierta. RELÁNZALO después de cada aviso. Es el preferido frente a un watcher propio porque además se detiene solo con la PAUSA (\`AGENT_LOOP_PAUSE_builder\`) y el CIERRE (\`AGENT_LOOP_END_builder\`).`,
+    `   a) **Vigilante de archivo** (el proceso en segundo plano que avisa solo cuando el canal cambia, como un FileSystemWatcher): lanza como TAREA EN SEGUNDO PLANO \`${CMD} esperar --rol=builder --despertar\`. Vigila \`.legion/AUDITORIA-CURSOR.md\`; cuando hay algo para ti escribe \`AGENT_LOOP_WAKE_builder\` y termina, y ese aviso te despierta. RELÁNZALO PRIMERO tras cada aviso (antes de trabajar). Es el preferido frente a un watcher propio porque además se detiene solo con la PAUSA (\`AGENT_LOOP_PAUSE_builder\`) y el CIERRE (\`AGENT_LOOP_END_builder\`).`,
     `   b) **Loop de respaldo cada ~3 minutos** (por si el de archivo falla en silencio): programa el loop de tu host para que cada ~3 min corra \`${CMD} ronda --rol=builder\`. Sin backoff innecesario. Se cancela cuando llegue la PAUSA o el CIERRE.`,
     `   c) **Confírmalo:** corre \`${CMD} comprobar\`; debe decir \`builder: VIGILANTE_VIVO\`. Si dice NO_HAY_VIGILANTE, no lo lanzaste bien: repítelo antes de seguir.`,
     '3. NO empieces a construir: todavía no hay orden. Responde al dueño: «Constructor LISTO y a la espera de `teams: iniciar` del Director — vigilante de archivo: ACTIVO, loop de 3 min: ACTIVO». Cuando el Director inicie y encole el primer lote, tu vigilante te despierta y arrancas por tu cuenta.',
@@ -201,7 +174,7 @@ function promptDirector(ctx = {}) {
     ctx.objetivo ? '\n**Objetivo del dueño (nivel de autonomía: objetivo)** — el dueño dio las bases en `.legion/OBJETIVO.md`; tú planificas, encolas y avanzas por lotes hasta cumplirlo, y solo lo molestas con lo que de verdad es suyo.\n' : '',
     '## Cómo se arranca (el flujo del dueño)',
     `1. \`teams: activar\` → asimilas este protocolo y PREGUNTAS al dueño el modo: **completo** (tú director + 3 sub-agentes auditores; Cursor construye) o **individual** (tú también construyes). Pregunta además si quiere un agente auditor EXTRA; se registra con \`${CMD} modo completo|individual [--extra="nombre: enfoque"]\`.`,
-    `2. \`teams: plan …\` → el dueño te pasa todo lo ya aterrizado (docs, rutas, detalles extra). LÉELO COMPLETO, asimílalo y guárdalo con \`${CMD} plan "resumen de lo entendido" --docs=ruta1,ruta2\`. En modo completo, dile que active a Cursor con \`teams: builder\` (y dale el prompt de \`${CMD} prompt builder\` por si su Cursor no reconoce el comando).`,
+    `2. \`teams: plan …\` → el dueño te pasa todo lo ya aterrizado (docs, rutas, detalles extra). LÉELO COMPLETO, asimílalo y guárdalo con \`${CMD} plan "resumen de lo entendido" --docs=ruta1,ruta2\`. En modo completo, dile que active a Cursor con \`teams: constructor\` (y dale el prompt de \`${CMD} prompt builder\` por si su Cursor no reconoce el comando).`,
     `3. \`teams: iniciar\` → empiezas: descompón el plan en lotes, encola los 2 primeros con \`tarea\`, lanza tus vigilantes y sigue la ronda de abajo.`,
     `4. \`teams: pausa\` → \`${CMD} pausa\`: el canal pasa a PAUSADO, los vigilantes de los dos terminan solos y nadie gasta tokens. \`teams: continuar\` (en tu chat y, sobre todo, en el de Cursor) lo reactiva.`,
     '',
@@ -212,6 +185,8 @@ function promptDirector(ctx = {}) {
     `4. Entrega buena → \`${CMD} aceptar T-001 --verifico="npm test: 120 pass" --tests=120\`. Eso la registra sola en el núcleo de Agentix (ciclo origen teams, memoria, contratos, AST, diseño, preservación, tablero). Si el registro falla no te frena: queda pendiente y se reintenta.`,
     `5. **Adelántate 1–2 lotes**: \`${CMD} tarea "título" --criterio="…" --criterio="…" --archivos=a,b\`. La cola nunca queda en cero mientras haya trabajo; si el constructor está ocioso, es tu responsabilidad ponerle algo (el vigilante te avisa).`,
     '6. Nunca escribas «espera a que se audite lo anterior». El ORDEN de la cola resuelve conflictos de archivos.',
+    '7. Una ENTREGA que lleva más de ~8 min sin aceptar ni corregir te la vuelve a avisar el vigilante («ENTREGA SIN REVISAR hace N min»): no la dejes dormir. Los resultados de tus 3 sub-agentes NO se pierden: léelos al volver y conviértelos en `corregir`/`aceptar` antes de dar la ronda por cerrada.',
+    '8. Al encolar con `tarea`, Agentix anota en el bloque el «Contexto Agentix»: riesgo estimado y lo que el proyecto ya sabe (errores previos con su cura, decisiones, contratos). Léelo: es lo que evita romper lo que ya funcionaba.',
     '',
     '## Decisiones — la escalera (no te limites a los links del dueño)',
     '1. Si tras analizar sabes la respuesta → decide e IMPLEMENTA, y deja el porqué escrito.',
@@ -253,4 +228,4 @@ function prompt(rol, ctx) {
   return rol === 'director' ? promptDirector(ctx) : promptConstructor();
 }
 
-module.exports = { CMD, lineaDireccion, canalPlantilla, metodologia, snippetClaude, reglaCursor, prompt, promptDirector, promptConstructor, promptIndividual };
+module.exports = { CMD, lineaDireccion, canalPlantilla, metodologia, prompt, promptDirector, promptConstructor, promptIndividual };

@@ -44,7 +44,9 @@ function clasificarError(err) {
  */
 // AKDD_DB_DRIVERS=node-sqlite,sqljs limita los drivers (pruebas y diagnóstico).
 const driversEnv = () => (process.env.AKDD_DB_DRIVERS ? process.env.AKDD_DB_DRIVERS.split(',').map((s) => s.trim()).filter(Boolean) : undefined);
-const abrirPorDefecto = (p) => adapter.openReadOnly(p, { drivers: driversEnv() });
+// Espera corta por un escritor: el tablero prefiere servir lo último bueno (ver dashboard-api) a colgarse 5 s por consulta.
+const BUSY_LECTURA_MS = Number(process.env.AKDD_DASH_BUSY_MS) || 2000;
+const abrirPorDefecto = (p) => adapter.openReadOnly(p, { drivers: driversEnv(), busyTimeout: BUSY_LECTURA_MS });
 
 function conLectura(dbPath, fn, { abrir = abrirPorDefecto } = {}) {
   if (!fs.existsSync(dbPath)) return sobre('UNAVAILABLE', null, 'DB_AUSENTE');

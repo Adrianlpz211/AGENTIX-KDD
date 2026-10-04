@@ -38,19 +38,21 @@ function lanzar(root, args, env) {
 
 // ───────────────────────────── activar ──────────────────────────────────────
 
-test('activar crea el canal, la metodología y la regla de recuperación; repetirlo no duplica ni pisa nada', () => {
+test('activar crea el canal y la metodología; NO toca CLAUDE.md ni INSTRUCCIONES-PROYECTO (si no, akdd update lo vería como cambio propio); repetirlo no pisa nada', () => {
   const root = proyecto();
   assert.match(salida(root, 'activar'), /canal creado/);
   assert.ok(fs.existsSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md')));
   assert.ok(fs.existsSync(path.join(root, '.legion', 'METODOLOGIA.md')));
   assert.ok(fs.existsSync(path.join(root, '.legion', 'CONTINUIDAD.md')));
-  const instr = fs.readFileSync(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), 'utf8');
-  assert.match(instr, /PROTOCOLO TEAMS — recuperación de contexto/);
+  assert.equal(fs.existsSync(path.join(root, 'CLAUDE.md')), false, 'no crea ni escribe CLAUDE.md');
+  assert.equal(fs.existsSync(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md')), false, 'ni INSTRUCCIONES-PROYECTO.md');
+  const claudeGestionado = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+  assert.match(claudeGestionado, /### Recuperación de contexto \(sesión nueva, compactada o reiniciada\)/, 'la regla de recuperación viaja en el CLAUDE.md gestionado');
   fs.appendFileSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md'), '\nTEXTO DEL USUARIO\n');
   const otra = salida(root, 'activar');
   assert.match(otra, /ADOPTADO/);
   assert.match(fs.readFileSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md'), 'utf8'), /TEXTO DEL USUARIO/);
-  assert.equal((fs.readFileSync(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), 'utf8').match(/PROTOCOLO TEAMS — recuperación/g) || []).length, 1);
+  assert.equal(fs.existsSync(path.join(root, 'CLAUDE.md')), false);
 });
 
 test('adopta el canal de la carpeta manual del dueño (plantilla con comentarios y marcas de ejemplo) sin falsos pendientes', () => {
@@ -447,7 +449,7 @@ test('FLUJO 2 — modo completo: Director + 3 sub-agentes + Cursor como construc
   const r = salida(root, 'modo', 'completo');
   assert.match(r, /Modo COMPLETO \(mecánica INVERTIDA\)/);
   assert.match(r, /teams: plan/);
-  assert.match(r, /teams: builder/);
+  assert.match(r, /teams: constructor/);
   assert.match(r, /Eres el CONSTRUCTOR/);
   assert.ok(fs.existsSync(path.join(root, '.legion', 'PROMPT-builder.md')));
   const txt = fs.readFileSync(canal.rutaCanal(root), 'utf8');
@@ -461,7 +463,7 @@ test('FLUJO 2b — modo individual: Claude Code también construye, sin Cursor n
   const r = salida(root, 'modo', 'individual', '--extra=seguridad: authz y secretos');
   assert.match(r, /Modo INDIVIDUAL/);
   assert.match(r, /auditores extra: seguridad: authz y secretos/);
-  assert.doesNotMatch(r, /teams: builder/);
+  assert.doesNotMatch(r, /teams: constructor/);
   assert.match(fs.readFileSync(canal.rutaCanal(root), 'utf8'), /MECÁNICA: INDIVIDUAL[\s\S]*modo INDIVIDUAL/);
   salida(root, 'tarea', 'X', '--criterio=a');
   assert.match(salida(root, 'auditar', 'T-001'), /4\) EXTRA — seguridad: authz y secretos/);
@@ -475,7 +477,7 @@ test('FLUJO 3 — plan: se guarda lo asimilado con sus documentos fuente, avisa 
   const r = salida(root, 'plan', 'Construir el módulo de citas en 3 lotes: agenda, recordatorios, reportes', '--docs=docs/spec.md,docs/falta.md');
   assert.match(r, /Plan guardado/);
   assert.match(r, /no encuentro docs\/falta\.md/);
-  assert.match(r, /teams: builder/);
+  assert.match(r, /teams: constructor/);
   const plan = fs.readFileSync(path.join(root, '.legion', 'PLAN.md'), 'utf8');
   assert.match(plan, /módulo de citas/);
   assert.match(plan, /docs\/spec\.md/);
@@ -569,8 +571,200 @@ test('FLUJO 8 — continuar no salta etapas: preparado pide iniciar primero; cer
 
 test('FLUJO 9 — los comandos del chat (activar, modo, plan, builder, iniciar, pausa, continuar) están en la tabla de CLAUDE.md y en el protocolo del Director', () => {
   const claude = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
-  for (const c of ['teams: activar', 'teams: plan', 'teams: builder', 'teams: iniciar', 'teams: pausa', 'teams: continuar']) assert.ok(claude.includes(c), c);
+  for (const c of ['teams: activar', 'teams: plan', 'teams: constructor', 'teams: iniciar', 'teams: pausa', 'teams: continuar']) assert.ok(claude.includes(c), c);
   const d = require(path.join(G, 'teams-prompts.cjs')).prompt('director', {});
   for (const c of ['teams: activar', 'teams: plan', 'teams: iniciar', 'teams: pausa', 'teams: continuar']) assert.ok(d.includes(c), 'el prompt del Director no menciona ' + c);
   assert.match(d, /PREGUNTAS al dueño el modo/);
+});
+
+test('CURSOR — la regla que le enseña a Cursor los comandos teams: viaja con Agentix, siempre activa, y define teams: constructor', () => {
+  const f = path.join(__dirname, '..', '.cursor', 'rules', 'teams.mdc');
+  assert.ok(fs.existsSync(f), 'falta .cursor/rules/teams.mdc: sin ella Cursor responde «teams: constructor no está definido»');
+  const t = fs.readFileSync(f, 'utf8');
+  assert.match(t, /alwaysApply: true/);
+  assert.match(t, /teams: constructor/);
+  assert.match(t, /node \.agentic\/grafo\/teams\.cjs constructor/);
+  assert.match(t, /DOS vigilantes/);
+  for (const c of ['teams: continuar', 'teams: pausa']) assert.ok(t.includes(c), c);
+  const pk = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.ok(pk.files.includes('.cursor/rules/'), 'la regla se empaqueta');
+  const mm = fs.readFileSync(path.join(__dirname, '..', 'src', 'managed-manifest.js'), 'utf8');
+  assert.match(mm, /\.cursor\/rules/, 'y el actualizador la distribuye');
+});
+
+test('la palabra del comando es «constructor» (builder sigue entendiéndose), y --rol=constructor vale', () => {
+  const root = proyecto(); salida(root, 'activar'); salida(root, 'modo', 'completo');
+  assert.match(salida(root, 'constructor'), /CONSTRUCTOR CONECTADO/);
+  assert.match(salida(root, 'builder'), /CONSTRUCTOR CONECTADO/);
+  salida(root, 'iniciar'); salida(root, 'pausa');
+  assert.match(salida(root, 'continuar', '--rol=constructor'), /CONTINÚAS como CONSTRUCTOR/);
+  const claude = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+  assert.ok(claude.includes('teams: constructor'));
+  assert.ok(!claude.includes('teams: builder'));
+});
+
+test('el vigilante deja su propia bitácora (inicio, fin) para poder diagnosticar un despertar que no llega', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo', '--criterio=a');
+  lanzar(root, ['esperar', '--rol=builder', '--despertar'], { AKDD_TEAMS_SONDEO_MS: '200', AKDD_TEAMS_MAX_MS: '3000' });
+  const log = fs.readFileSync(path.join(root, '.agentic', '_teams', 'vigilantes', 'builder.log'), 'utf8');
+  assert.match(log, /INICIO sondeo=200ms/);
+  assert.match(log, /FIN AGENT_LOOP_WAKE_builder/);
+});
+
+// ───────────────────────────── blindaje tras la prueba real en glowly ─────────────────────────────
+
+test('GLOWLY-1 — vigilante CONTINUO: no termina al avisar, avisa de lo siguiente solo, y termina con la pausa', async () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Primera', '--criterio=a', '--sin-contexto');
+  const p = spawn(process.execPath, [TEAMS_CLI, '--root=' + root, 'esperar', '--rol=builder', '--despertar', '--continuo'], { env: Object.assign({}, process.env, { AKDD_TEAMS_SONDEO_MS: '200', AKDD_TEAMS_MAX_MS: '60000' }) });
+  let out = ''; p.stdout.on('data', (d) => { out += d; });
+  let salio = null; p.on('exit', (c) => { salio = c; });
+  const esperarHasta = async (cond, ms = 8000) => { const t0 = Date.now(); while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 100)); return cond(); };
+  try {
+    assert.ok(await esperarHasta(() => /AGENT_LOOP_WAKE_builder[\s\S]*Primera/.test(out)), 'primer aviso: ' + out);
+    assert.equal(salio, null, 'sigue vivo tras avisar');
+    assert.match(out, /NO relances este vigilante: sigue vivo/);
+    salida(root, 'corregir', 'algo urgente', '--sev=HALLAZGO');
+    assert.ok(await esperarHasta(() => /CORRECCION C-001/.test(out)), 'segundo aviso sin relanzar: ' + out);
+    assert.equal(salio, null);
+    salida(root, 'pausa');
+    assert.ok(await esperarHasta(() => salio !== null, 6000), 'termina con la pausa');
+    assert.match(out, /AGENT_LOOP_PAUSE_builder/);
+    assert.equal(salio, 0);
+  } finally { try { p.kill(); } catch { /* ya terminó */ } }
+});
+
+test('GLOWLY-2 — sin vigilante vivo, la ronda lo dice en su PRIMERA línea (y no lo dice si lo hay, ni en modo individual)', () => {
+  const root = proyecto(); arrancado(root);
+  const sin = salida(root, 'ronda', '--rol=builder');
+  assert.match(sin.split('\n')[0], /TU VIGILANTE \(builder\) NO ESTÁ VIVO\. Relánzalo AHORA, ANTES de trabajar/);
+  assert.match(salida(root, 'revisar').split('\n')[0], /TU VIGILANTE \(director\) NO ESTÁ VIVO/);
+  const dir = path.join(root, '.agentic', '_teams', 'vigilantes'); fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'builder.json'), JSON.stringify({ rol: 'builder', pid: process.pid, desde: new Date().toISOString(), latido: new Date().toISOString(), sondeo_s: 10 }));
+  assert.doesNotMatch(salida(root, 'ronda', '--rol=builder'), /NO ESTÁ VIVO/);
+  fs.writeFileSync(path.join(dir, 'builder.json'), JSON.stringify({ rol: 'builder', pid: process.pid, latido: new Date(Date.now() - 10 * 60000).toISOString(), sondeo_s: 10 }));
+  assert.match(salida(root, 'ronda', '--rol=builder'), /NO ESTÁ VIVO/, 'un latido viejo no cuenta como vivo');
+  const ind = proyecto(); salida(ind, 'activar'); salida(ind, 'modo', 'individual'); salida(ind, 'iniciar');
+  assert.doesNotMatch(salida(ind, 'ronda', '--rol=builder'), /NO ESTÁ VIVO/);
+});
+
+test('GLOWLY-3 — una ENTREGA sin revisar se le recuerda al Director cada ~8 min (huella nueva = vigilante lo despierta otra vez)', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Entrega olvidada', '--criterio=a', '--sin-contexto');
+  salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo');
+  const t0 = Date.now();
+  const a0 = T.accionable(T.calcular(root, { ahora: t0 }), 'director');
+  assert.ok(a0.razones.some((r) => /ENTREGA T-001 por revisar/.test(r)));
+  assert.ok(!a0.razones.some((r) => /SIN REVISAR/.test(r)), 'recién entregada: sin recordatorio');
+  const a1 = T.accionable(T.calcular(root, { ahora: t0 + 9 * 60000 }), 'director');
+  const a2 = T.accionable(T.calcular(root, { ahora: t0 + 18 * 60000 }), 'director');
+  assert.ok(a1.razones.some((r) => /ENTREGA SIN REVISAR hace \d+ min: T-001/.test(r)));
+  assert.notEqual(a1.digest, a0.digest);
+  assert.notEqual(a2.digest, a1.digest, 'cada tanda de 8 min es un aviso nuevo');
+  salida(root, 'aceptar', 'T-001');
+  assert.ok(!T.accionable(T.calcular(root, { ahora: t0 + 30 * 60000 }), 'director').razones.some((r) => /SIN REVISAR/.test(r)), 'aceptada: se acaba el recordatorio');
+});
+
+test('GLOWLY-4 — al encolar, Agentix anota en la tarea su aviso previo (riesgo, antecedentes, curas) y el constructor lo ve en su ronda', () => {
+  const root = proyecto(); salida(root, 'activar'); salida(root, 'modo', 'completo'); salida(root, 'iniciar');
+  const g = path.join(root, '.agentic', 'grafo'); fs.mkdirSync(g, { recursive: true });
+  fs.writeFileSync(path.join(g, 'context-enricher.cjs'), "console.log('## Context Enricher');console.log('**Riesgo estimado:** ALTO');console.log('**Contexto relevante encontrado en memoria:**');console.log('- [error/ALTA] #9 Credenciales dev en el cliente (seguridad)');console.log('  - **Solución que funcionó:** moverlas al servidor');console.log('- 🔮 Predicción: auth falló 2/2 veces');require('fs').writeFileSync(require('path').join(process.cwd(),'enricher-llamado.txt'), process.argv[2]);");
+  const r = salida(root, 'tarea', 'Tocar el login', '--criterio=valida', '--criterio=redirige', '--archivos=src/login.js');
+  assert.match(r, /Aviso previo de Agentix: riesgo ALTO · 3 dato\(s\)/);
+  assert.match(r, /RIESGO ALTO/);
+  assert.match(fs.readFileSync(path.join(root, 'enricher-llamado.txt'), 'utf8'), /Tocar el login\. valida\. redirige/, 'el enricher recibe título + criterios');
+  const txt = fs.readFileSync(canal.rutaCanal(root), 'utf8');
+  assert.match(txt, /> 🧠 Contexto Agentix \(riesgo ALTO\)/);
+  assert.match(txt, /> - \[error\/ALTA\] #9 Credenciales dev en el cliente/);
+  const t = T.calcular(root).tareas[0];
+  assert.equal(t.casillas.total, 2, 'el aviso no se confunde con criterios');
+  assert.match(salida(root, 'ronda', '--rol=builder'), /Contexto Agentix \(riesgo ALTO\)[\s\S]*Credenciales dev/);
+  fs.rmSync(path.join(root, 'enricher-llamado.txt'));
+  salida(root, 'tarea', 'Sin aviso', '--criterio=x', '--sin-contexto');
+  assert.equal(fs.existsSync(path.join(root, 'enricher-llamado.txt')), false, '--sin-contexto no lo corre');
+});
+
+test('GLOWLY-5 — la duración de un ciclo de TEAMS se sella en la libreta (de que el constructor quedó libre a que se aceptó) y el reloj la prefiere a marcas ajenas', () => {
+  const root = proyecto(); const restaurar = stubPostCycle(root);
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    new DatabaseSync(path.join(root, '.agentic', 'memoria.db')).close();
+    arrancado(root);
+    salida(root, 'tarea', 'Larga', '--criterio=a', '--sin-contexto');
+    const est = T.leerEstado(root); const hace = new Date(Date.now() - 40 * 60000).toISOString();
+    est.creadas['T-001'] = hace; fs.writeFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), JSON.stringify(est));
+    salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo'); salida(root, 'aceptar', 'T-001');
+    const db = new DatabaseSync(path.join(root, '.agentic', 'memoria.db'));
+    try {
+      const f = db.prepare("SELECT ts, cycle_id, event_id FROM gate_events WHERE verdict = 'CICLO_INICIO'").all();
+      assert.equal(f.length, 1);
+      assert.match(f[0].cycle_id, /^teams_/);
+      assert.equal(f[0].ts, new Date(hace).toISOString().replace('T', ' ').slice(0, 19));
+      // el reloj usa ESA marca aunque otro flujo (el enricher al encolar la siguiente tarea) deje una más reciente
+      const gt = require(path.join(G, 'gate-telemetry.cjs')); gt.ensureTelemetrySchema(db);
+      gt.recordGateEvent(db, { gate: 'reloj', verdict: 'CICLO_INICIO', source: 'mechanical', cycle_id: 'otro-ciclo', event_id: 'ajeno-1' });
+      const reloj = require(path.join(G, 'reloj-derivado.cjs'));
+      const fin = new Date(Date.now() + 60000).toISOString().replace('T', ' ').slice(0, 19);
+      const m = reloj.marcaDeArranque(db, { ciclo_id: f[0].cycle_id, fecha_fin: fin });
+      assert.ok(m && (m.fin - m.ini) >= 39 * 60000 && (m.fin - m.ini) <= 42 * 60000, 'duración ≈ 40 min, no la de la marca ajena: ' + (m && (m.fin - m.ini)));
+      const sinPropia = reloj.marcaDeArranque(db, { ciclo_id: 'sin-marca-propia', fecha_fin: fin });
+      assert.ok(sinPropia, 'sin marca propia sigue funcionando como antes (la última)');
+    } finally { db.close(); }
+  } finally { restaurar(); }
+});
+
+test('GLOWLY-6 — activar archiva solo el canal del TEAMS anterior y detiene a sus vigilantes, que seguían vivos pisando el canal nuevo', async () => {
+  const root = proyecto();
+  fs.mkdirSync(path.join(root, '.legion'), { recursive: true });
+  const viejo = '<!-- Vista generada por akdd teams. No editar -->\n# Canal TEAMS — vista\n\n## 2. Control de campaña\n- Estado: **PAUSADA**\n\n```\n<<<AKDD-TEAMS v1\n{"kind":"EVENT"}\nAKDD-TEAMS>>>\n```\n';
+  fs.writeFileSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md'), viejo);
+  const falso = spawn(process.execPath, ['-e', 'setTimeout(function(){},60000)', path.join(root, '.agentic', 'grafo', 'teams-watch.cjs'), '--rol=builder'], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.match(salida(root, 'comprobar'), /PROCESO DEL TEAMS ANTERIOR VIVO/);
+  const r = salida(root, 'activar');
+  assert.match(r, /detenido un proceso del TEAMS anterior/);
+  assert.match(r, /archivado como \.legion\/ANTIGUO-v3-vista\.md/);
+  const muerto = await new Promise((res) => { if (falso.exitCode !== null) return res(true); falso.on('exit', () => res(true)); setTimeout(() => res(false), 4000); });
+  assert.ok(muerto, 'el proceso viejo se detuvo');
+  assert.ok(fs.existsSync(path.join(root, '.legion', 'ANTIGUO-v3-vista.md')));
+  assert.equal(fs.readFileSync(path.join(root, '.legion', 'ANTIGUO-v3-vista.md'), 'utf8'), viejo, 'el archivo viejo queda intacto');
+  assert.equal(T.calcular(root).canal, 'PREPARADO', 'y el canal nuevo nace limpio');
+  assert.doesNotMatch(fs.readFileSync(canal.rutaCanal(root), 'utf8'), /AKDD-TEAMS v1/);
+  // un canal NUEVO (v4) existente jamás se archiva
+  salida(root, 'tarea', 'Mía', '--criterio=a', '--sin-contexto');
+  assert.doesNotMatch(salida(root, 'activar'), /archivado/);
+  assert.equal(T.calcular(root).tareas.length, 1);
+  // segundo canal viejo: no pisa el archivo anterior
+  fs.writeFileSync(canal.rutaCanal(root), viejo);
+  salida(root, 'activar');
+  assert.ok(fs.existsSync(path.join(root, '.legion', 'ANTIGUO-v3-vista.2.md')));
+});
+
+test('MIGRACIÓN — activar retira el bloque de recuperación que escribían las versiones 3.21–3.22.1 (solo el nuestro) para que akdd update no lo vea como cambio propio', () => {
+  const root = proyecto(); fs.mkdirSync(path.join(root, '.agentic'), { recursive: true });
+  const bloque = '## PROTOCOLO TEAMS — recuperación de contexto AUTOMÁTICA E INCONDICIONAL\n\n**Regla dura: si existe `.legion/AUDITORIA-CURSOR.md` y su ESTADO es ACTIVO...**\n\n1. Ejecuta algo.\n';
+  fs.writeFileSync(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), '# Mis reglas\n\nUsar siempre pnpm.\n\n' + bloque + '\n## Otra sección mía\n\nTexto del usuario.\n');
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), '# Reglas\n\ntexto\n\n' + bloque);
+  const r = salida(root, 'activar');
+  assert.match(r, /retirado el bloque de recuperación[^\n]*INSTRUCCIONES-PROYECTO\.md y CLAUDE\.md/);
+  const instr = fs.readFileSync(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), 'utf8');
+  assert.doesNotMatch(instr, /PROTOCOLO TEAMS/);
+  assert.match(instr, /Usar siempre pnpm\./);
+  assert.match(instr, /## Otra sección mía\n\nTexto del usuario\./);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), /PROTOCOLO TEAMS/);
+  // un bloque con el mismo título que NO es el nuestro (no habla del canal) se respeta
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), '# R\n\n## PROTOCOLO TEAMS — recuperación de contexto\n\nalgo del usuario sin relación\n');
+  assert.doesNotMatch(salida(root, 'activar'), /retirado el bloque/);
+  assert.match(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), /algo del usuario sin relación/);
+});
+
+test('post-cycle deduce la duración TAMBIÉN tras cerrar el ciclo (el paso 2.75 corre antes de que exista fecha_fin: así todos los ciclos quedaban en 0)', () => {
+  const src = fs.readFileSync(path.join(G, 'post-cycle.cjs'), 'utf8');
+  const cierre = src.indexOf('results.cierre = cerrarCicloConGates(db, results);');
+  const segunda = src.indexOf('6.95 Reloj (tras el cierre)');
+  const primera = src.indexOf('2.75 Reloj...');
+  assert.ok(cierre > 0 && segunda > cierre, 'la segunda pasada del reloj va DESPUÉS del cierre del ciclo');
+  assert.ok(primera > 0 && primera < cierre, 'la primera pasada sigue donde estaba');
+  assert.match(src.slice(segunda - 300, segunda + 200), /completarUltimo\(ROOT\)/);
 });

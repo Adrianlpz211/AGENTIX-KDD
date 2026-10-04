@@ -7,9 +7,9 @@
  * Diseño: Agentix OBSERVA y ayuda, no manda. No hay máquina de estados, ni compuertas, ni fencing: el avance lo
  * decide el Director en el canal, y nada de lo que se mide aquí lo frena (la auditoría nunca gatea el avance).
  *
- *   FLUJO DEL DUEÑO:  activar → modo completo|individual → plan → (en Cursor) builder → iniciar → pausa / continuar
+ *   FLUJO DEL DUEÑO:  activar → modo completo|individual → plan → (en Cursor) constructor → iniciar → pausa / continuar
  *   activar | init            modo completo|individual [--extra="nombre: enfoque"]      plan "resumen" [--docs=a,b]
- *   builder (Cursor)          iniciar                       pausa                       continuar [--rol=builder|director]
+ *   constructor (Cursor)      iniciar                       pausa                       continuar [--rol=builder|director]
  *   estado [--json]            ronda --rol=builder|director [--cierre]        revisar  (= ronda --rol=director)
  *   tarea "t" [--criterio=…]   corregir "t" [--sev=] [--archivo=] [--tarea=]  resolver C-001 "qué se hizo"
  *   reportar T-001 --estado=HECHO|PARCIAL|NO_HECHO --detalle=… [--verif=] [--archivos=]
@@ -29,6 +29,7 @@ const P = require('./teams-prompts.cjs');
 const SONDEO_MS = 10000;
 const MAX_ESPERA_MS = 105 * 60 * 1000;
 const OCIOSO_MS = 6 * 60 * 1000;
+const REVISION_MS = 8 * 60 * 1000; // una entrega sin revisar se recuerda al Director cada tanto
 
 // ───────────────────────────── utilidades ───────────────────────────────────
 
@@ -42,6 +43,57 @@ function parseArgs(argv) {
   }
   return { opt, libres };
 }
+const VIEJO_CMD = /teams-watch|teams-md-session|teams-vigilancia/;
+
+/** Procesos del motor TEAMS anterior que siguen vivos EN ESTE proyecto (siguen reescribiendo el canal con su formato). */
+function procesosViejos(root) {
+  const out = [];
+  try {
+    const fragmento = path.resolve(root).toLowerCase().replace(/\\/g, '/');
+    let filas = [];
+    if (process.platform === 'win32') {
+      const r = spawnSync('powershell', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }"], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+      filas = String(r.stdout || '').split(/\r?\n/).filter(Boolean);
+    } else {
+      const r = spawnSync('ps', ['-eo', 'pid,args'], { encoding: 'utf8', timeout: 20000 });
+      filas = String(r.stdout || '').split(/\r?\n/).map((l) => l.trim().replace(/^(\d+)\s+/, '$1|'));
+    }
+    for (const l of filas) {
+      const i = l.indexOf('|'); if (i < 0) continue;
+      const pid = Number(l.slice(0, i)); const cmd = l.slice(i + 1);
+      if (pid && pid !== process.pid && VIEJO_CMD.test(cmd) && cmd.toLowerCase().replace(/\\/g, '/').includes(fragmento)) out.push({ pid, cmd: cmd.slice(0, 200) });
+    }
+  } catch { /* sin lista de procesos: no se puede comprobar */ }
+  return out;
+}
+
+/** Un canal escrito por el motor anterior (vista generada, sobres AKDD-TEAMS) no se adopta: se archiva y se empieza limpio. */
+const esCanalViejo = (txt) => /Vista generada por akdd teams|<<<AKDD-TEAMS v1|^## 2\. Control de campaña/m.test(String(txt));
+
+/** Brief previo de Agentix para una tarea: corre el context-enricher del proyecto (el de `aa:`). null si no hay o falla. */
+function briefAgentix(root, texto) {
+  try {
+    const script = path.join(root, '.agentic', 'grafo', 'context-enricher.cjs');
+    if (!fs.existsSync(script)) return null;
+    const r = spawnSync(process.execPath, [script, String(texto).slice(0, 600)], { cwd: root, encoding: 'utf8', timeout: 45000, windowsHide: true });
+    if (r.status !== 0) return null;
+    const out = String(r.stdout || '');
+    const riesgo = (/Riesgo estimado:\*{0,2}\s*(\w+)/i.exec(out) || [])[1] || null;
+    const lineas = out.split(/\r?\n/).filter((l) => /^\s*-\s+\S/.test(l)).filter((l) => !/Grafo al día/.test(l)).slice(0, 12)
+      .map((l) => l.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 230));
+    return { riesgo, lineas };
+  } catch { return null; }
+}
+
+/** ¿Hay un vigilante vivo de este rol? (su archivo + proceso vivo + latido reciente). */
+function vigilanteVivo(root, rol) {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(canal.dirEstado(root), 'vigilantes', rol + '.json'), 'utf8'));
+    process.kill(v.pid, 0);
+    return Date.now() - Date.parse(v.latido) < Math.max(60000, (v.sondeo_s || 10) * 4000);
+  } catch { return false; }
+}
+
 /** Valor de texto de una opción; ojo: `opt.constructor` heredado de Object NO es una opción. */
 const nombreOpt = (opt, k, d) => (Object.prototype.hasOwnProperty.call(opt, k) && typeof opt[k] === 'string' && opt[k] ? opt[k] : d);
 const lista = (v) => (v === undefined || v === true ? [] : [].concat(v).map(String));
@@ -143,7 +195,12 @@ function accionable(e, rol) {
     for (const t of e.tareasPend) { razones.push(`TAREA ${t.id}: ${corto(t.titulo, 110)}`); claves.push('T:' + t.id + ':' + canal.sha(t.texto).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
   } else {
-    for (const t of e.hechasSinAceptar) { razones.push(`ENTREGA ${t.id} por revisar: ${corto(t.titulo, 90)}`); claves.push('E:' + t.id + ':' + canal.sha((t.reporte ? t.reporte.detalle + t.reporte.estado : '') + t.casillas.hechas).slice(0, 8)); }
+    for (const t of e.hechasSinAceptar) {
+      razones.push(`ENTREGA ${t.id} por revisar: ${corto(t.titulo, 90)}`); claves.push('E:' + t.id + ':' + canal.sha((t.reporte ? t.reporte.detalle + t.reporte.estado : '') + t.casillas.hechas).slice(0, 8));
+      // Recordatorio: una entrega sin aceptar ni corregir NO se queda dormida. Cada REVISION_MS que pasa sin revisarla, el aviso se repite (huella nueva).
+      const edad = t.reporte && t.reporte.at ? e.ahora - t.reporte.at : 0;
+      if (edad >= REVISION_MS) { razones.push(`ENTREGA SIN REVISAR hace ${Math.round(edad / 60000)} min: ${t.id} — audítala (auditar ${t.id}) y acéptala o corrígela; el constructor no puede avanzar su cierre sin tu veredicto`); claves.push('R:' + t.id + ':' + Math.floor(edad / REVISION_MS)); }
+    }
     for (const t of e.devueltas) { razones.push(`DEVUELTA ${t.id} (${t.reporte.estado}): ${corto(t.reporte.detalle, 100)} — decide: reformular, desbloquear o cancelar`); claves.push('V:' + t.id + ':' + canal.sha(t.reporte.detalle).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION del constructor ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
@@ -253,21 +310,40 @@ function escribirReporte(root, e, final) {
 
 const MARCA_SNIPPET = '## PROTOCOLO TEAMS — recuperación de contexto';
 
-function anexar(f, texto, crearSi = true) {
-  let actual = '';
-  try { actual = fs.readFileSync(f, 'utf8'); } catch { if (!crearSi) return false; }
-  if (actual.includes(MARCA_SNIPPET)) return false;
-  const crlf = /\r\n/.test(actual);
-  const nuevo = (actual && !/\n$/.test(actual) ? '\n' : '') + (actual ? '\n' : '') + texto;
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, actual + (crlf ? nuevo.replace(/\n/g, '\r\n') : nuevo));
-  return true;
+/** Versiones 3.21–3.22.1 de `activar` escribían un bloque de recuperación en INSTRUCCIONES-PROYECTO.md y CLAUDE.md (y por eso `akdd update` veía
+ *  «cambios propios» en CLAUDE.md y lo dejaba sin actualizar). Esa regla ya viaja en el CLAUDE.md que gestiona Agentix: se retira el bloque viejo. */
+function retirarBloqueViejo(f) {
+  try {
+    const txt = fs.readFileSync(f, 'utf8'); const crlf = txt.includes('\r\n'); const t = txt.replace(/\r\n/g, '\n');
+    const i = t.indexOf(MARCA_SNIPPET); if (i < 0) return false;
+    let fin = t.indexOf('\n## ', i + 5); if (fin < 0) fin = t.length;
+    const bloque = t.slice(i, fin);
+    if (!bloque.includes('.legion/AUDITORIA-CURSOR.md')) return false; // no es el nuestro: no se toca
+    const nuevo = (t.slice(0, i).replace(/\n+$/, '\n') + t.slice(fin).replace(/^\n+/, '')).replace(/\n{3,}/g, '\n\n');
+    fs.writeFileSync(f, crlf ? nuevo.replace(/\n/g, '\r\n') : nuevo);
+    return true;
+  } catch { return false; }
 }
 
 function activar(root, opt) {
   const out = []; const dir = path.join(root, canal.DIR);
   fs.mkdirSync(dir, { recursive: true });
-  const existente = fs.existsSync(canal.rutaCanal(root));
+  // 0. El motor TEAMS anterior: sus vigilantes siguen vivos tras un `akdd update` (el código ya cargado no se descarga) y
+  //    reescriben el canal con su formato. Se paran ANTES de tocar el canal; si no, pisan el nuevo.
+  for (const p of procesosViejos(root)) {
+    try { process.kill(p.pid); out.push(`✔ detenido un proceso del TEAMS anterior (pid ${p.pid}) que seguía reescribiendo el canal`); } catch (e) { out.push(`⚠ no pude detener el proceso del TEAMS anterior pid ${p.pid} (${e.code || e.message}): ciérralo a mano o reinicia el IDE`); }
+  }
+  let existente = fs.existsSync(canal.rutaCanal(root));
+  if (existente) {
+    let txt = ''; try { txt = fs.readFileSync(canal.rutaCanal(root), 'utf8'); } catch { /* ilegible */ }
+    if (esCanalViejo(txt)) {
+      let destino = path.join(dir, 'ANTIGUO-v3-vista.md'); let n = 1;
+      while (fs.existsSync(destino)) destino = path.join(dir, `ANTIGUO-v3-vista.${++n}.md`);
+      fs.renameSync(canal.rutaCanal(root), destino);
+      existente = false;
+      out.push(`✔ el canal era del TEAMS anterior (formato incompatible): archivado como .legion/${path.basename(destino)} — pásalo como documento fuente en \`teams: plan\` si quieres reutilizar su plan`);
+    }
+  }
   const fecha = new Date().toISOString().slice(0, 10);
   if (!existente) {
     fs.writeFileSync(canal.rutaCanal(root), P.canalPlantilla({ mecanica: 'POR DEFINIR', constructor: nombreOpt(opt, 'constructor', 'Cursor'), director: nombreOpt(opt, 'director', 'Claude Code'), fecha }));
@@ -290,14 +366,11 @@ function activar(root, opt) {
   }
   const e = calcular(root);
   if (e) escribirContinuidad(root, e);
-  const s = P.snippetClaude();
-  const a = anexar(path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), s);
-  const b = fs.existsSync(path.join(root, 'CLAUDE.md')) ? anexar(path.join(root, 'CLAUDE.md'), s, false) : false;
-  out.push(a || b ? '✔ regla de recuperación de contexto añadida (INSTRUCCIONES-PROYECTO.md' + (b ? ' y CLAUDE.md' : '') + ')' : '· la regla de recuperación de contexto ya estaba');
-  if (fs.existsSync(path.join(root, '.cursor')) || fs.existsSync(path.join(root, '.cursorrules'))) {
-    const rc = path.join(root, '.cursor', 'rules', 'protocolo-teams.mdc');
-    if (!fs.existsSync(rc)) { fs.mkdirSync(path.dirname(rc), { recursive: true }); fs.writeFileSync(rc, P.reglaCursor()); out.push('✔ regla de Cursor: .cursor/rules/protocolo-teams.mdc'); }
-  }
+  const retirados = [path.join(root, '.agentic', 'INSTRUCCIONES-PROYECTO.md'), path.join(root, 'CLAUDE.md')].filter((f) => retirarBloqueViejo(f));
+  if (retirados.length) out.push('✔ retirado el bloque de recuperación que versiones anteriores escribían en ' + retirados.map((f) => path.basename(f)).join(' y ') + ' (ahora viaja en el CLAUDE.md de Agentix; así `akdd update` no lo ve como cambio propio)');
+  // La regla que le enseña a Cursor los comandos `teams:` viaja con Agentix (.cursor/rules/teams.mdc); sin ella Cursor no reconoce `teams: constructor`.
+  if (!fs.existsSync(path.join(root, '.cursor', 'rules', 'teams.mdc'))) out.push('⚠ Falta .cursor/rules/teams.mdc (la regla que le enseña a Cursor los comandos `teams:`): ejecuta `akdd update` o Cursor no sabrá qué es `teams: constructor`.');
+  else out.push('✔ regla de Cursor presente: .cursor/rules/teams.mdc');
   const est = leerEstado(root); guardarEstado(root, est);
   const modo = est.modo || null;
   out.push('');
@@ -331,9 +404,17 @@ const SIN_CANAL = 'No hay canal TEAMS en este proyecto. Ejecuta `teams: activar`
 function observar(root, e, say) {
   const detalles = aceptacionesDetalle(e.c);
   const res = [];
+  const est = leerEstado(root);
+  const aceps = (est.aceptaciones || []).map((a) => ({ id: a.id, at: Date.parse(a.at) })).filter((a) => Number.isFinite(a.at));
   for (const t of e.tareas.filter((x) => x.estado === 'ACEPTADA')) {
     const ac = detalles[t.id] || { fecha: '', tests: 0 };
-    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte });
+    // Inicio del ciclo = cuando el constructor quedó libre para ella: lo último entre «se encoló» y «se aceptó la anterior».
+    // Sin ninguno de los dos datos NO se inventa (el ciclo queda «sin dato», como manda el reloj de hierro).
+    const creada = Date.parse((est.creadas || {})[t.id]);
+    const miAcept = aceps.filter((a) => a.id === t.id).map((a) => a.at).sort((x, y) => x - y)[0];
+    const previa = Math.max(0, ...aceps.filter((a) => a.id !== t.id && (!miAcept || a.at < miAcept)).map((a) => a.at));
+    const inicio = Number.isFinite(creada) ? Math.max(creada, previa) : null;
+    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio });
     res.push({ id: t.id, ...r });
   }
   const nuevos = res.filter((x) => !['YA_REGISTRADA'].includes(x.estado));
@@ -378,6 +459,11 @@ function ejecutar(argv, root) {
   if (cmd === 'ronda' || cmd === 'revisar') {
     const rol = cmd === 'revisar' || opt.rol === 'director' ? 'director' : 'builder';
     const e = necesitaCanal(); if (!e) return salida(1);
+    // Primera línea, siempre: sin vigilante vivo una corrección o una pausa que llegue mientras trabajas NO te despierta.
+    // (Medido en glowly: ambos roles dejaron de relanzarlo tras el primer aviso y pasaron media hora sin él.)
+    if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual' && !vigilanteVivo(root, rol)) {
+      say(`⚠ TU VIGILANTE (${rol}) NO ESTÁ VIVO. Relánzalo AHORA, ANTES de trabajar, como tarea en segundo plano:  ${P.CMD} esperar --rol=${rol} --despertar${rol === 'director' ? '   (Claude Code con Monitor: añade --continuo)' : ''}`, '');
+    }
     if (rol === 'director') {
       say(textoRondaDirector(e));
       const rs = observar(root, e, (x) => say(x)); void rs;
@@ -399,16 +485,22 @@ function ejecutar(argv, root) {
     if (!necesitaCanal()) return salida(1);
     const titulo = arg.join(' ').trim(); if (!titulo) { say('Uso: teams.cjs tarea "título" --criterio="…" [--criterio=…] [--archivos=a,b] [--detalle="…"] [--lote=L1]'); return salida(2); }
     const crit = lista(opt.criterio); let id = '';
+    // Aviso previo de Agentix (el mismo cerebro de `aa:`): riesgo, lo que ya pasó en esto y su cura, avisos. Apunta además la
+    // predicción de riesgo para calificarla al aceptar. Fail-soft; --sin-contexto lo omite.
+    const brief = opt['sin-contexto'] ? null : briefAgentix(root, [titulo, ...crit].join('. '));
     canal.mutar(root, (lineas, c) => {
       id = canal.siguienteId(c.limpias.join(String.fromCharCode(10)), 'T');
       const bloque = [`### [${id}] ${titulo}${opt.lote && opt.lote !== true ? ' — lote ' + opt.lote : ''}`];
       if (opt.archivos && opt.archivos !== true) bloque.push('Archivos: ' + lista(opt.archivos).join(', '));
+      if (brief && brief.lineas.length) bloque.push(`> 🧠 Contexto Agentix (riesgo ${brief.riesgo || 'n/d'}) — lo que el proyecto ya sabe sobre esto:`, ...brief.lineas.map((l) => '> ' + l));
       if (opt.detalle && opt.detalle !== true) bloque.push(String(opt.detalle));
       for (const k of crit) bloque.push('- [ ] ' + k);
       let L = lineas.slice(); L = canal.__asegurar(L, 'tareas', 'Tareas para el constructor'); L = canal.__quitarPlaceholder(L, 'tareas');
       const fin = canal.__finSeccion(L, 'tareas'); L.splice(fin, 0, '', ...bloque); return L;
     });
     say(`✔ ${id} encolada${crit.length ? ' con ' + crit.length + ' criterio(s)' : ''}`);
+    if (brief) say(`  🧠 Aviso previo de Agentix: riesgo ${brief.riesgo || 'n/d'}${brief.lineas.length ? ' · ' + brief.lineas.length + ' dato(s) del proyecto anotados en la tarea' : ' · sin antecedentes'}${/ALTO/i.test(brief.riesgo || '') ? ' — RIESGO ALTO: revisa ese contexto antes de darla por buena' : ''}`);
+    { const est = leerEstado(root); est.creadas = est.creadas || {}; est.creadas[id] = iso(); guardarEstado(root, est); }
     for (const a of canal.lintTexto([titulo, ...crit, opt.detalle || ''].join('\n'))) say('  ⚠ ' + a);
     return salida();
   }
@@ -481,7 +573,7 @@ function ejecutar(argv, root) {
     if (m === 'completo') {
       const f = path.join(root, canal.DIR, 'PROMPT-builder.md'); fs.writeFileSync(f, P.prompt('builder', {}));
       say('', 'LISTO. Siguiente paso del dueño: `teams: plan …` (pásame todo lo ya aterrizado: docs, rutas, detalles).',
-        'Para Cursor (modo completo): el dueño escribe en el chat de Cursor `teams: builder`. Si su Cursor no reconociera el comando, le pegas este prompt (también guardado en .legion/PROMPT-builder.md):', '', P.prompt('builder', {}));
+        'Para Cursor (modo completo): el dueño escribe en el chat de Cursor `teams: constructor`. Si su Cursor no reconociera el comando, le pegas este prompt (también guardado en .legion/PROMPT-builder.md):', '', P.prompt('builder', {}));
     } else say('', 'LISTO. Siguiente paso del dueño: `teams: plan …` (todo lo que hay que construir) y luego `teams: iniciar`. Trabajas tú solo, con tus 3 sub-agentes auditando lo que construyes.');
     return salida();
   }
@@ -497,13 +589,13 @@ function ejecutar(argv, root) {
     const est = leerEstado(root); est.plan = { at: iso(), docs }; est.nivel = 'objetivo'; guardarEstado(root, est);
     say(`✔ Plan guardado en .legion/PLAN.md${docs.length ? ' (' + docs.length + ' documento(s) fuente)' : ''}.`);
     for (const d of faltan) say('  ⚠ no encuentro ' + d);
-    if (est.modo === 'completo') say('', 'Siguiente: activa Cursor con `teams: builder` en SU chat. Cuando Cursor diga «LISTO y a la espera», escribe aquí `teams: iniciar`.');
+    if (est.modo === 'completo') say('', 'Siguiente: activa Cursor con `teams: constructor` en SU chat. Cuando Cursor diga «LISTO y a la espera», escribe aquí `teams: iniciar`.');
     else if (est.modo === 'individual') say('', 'Siguiente: `teams: iniciar` y empiezo a construir.');
     else say('', 'Falta elegir el modo: pregunta al dueño completo o individual y ejecuta `modo`.');
     return salida();
   }
 
-  if (cmd === 'builder' || cmd === 'conectar') {
+  if (cmd === 'constructor' || cmd === 'builder' || cmd === 'conectar') {
     const e = necesitaCanal(); if (!e) return salida(1);
     const est = leerEstado(root); est.builder = { at: iso() }; guardarEstado(root, est);
     say('CONSTRUCTOR CONECTADO — el Director verá `constructor conectado` en el estado.', '',
@@ -528,7 +620,7 @@ function ejecutar(argv, root) {
     say(`✔ INICIADO — modo ${est.modo.toUpperCase()}, canal ACTIVO.`);
     if (est.modo === 'completo') {
       let vivo = false; try { const v = JSON.parse(fs.readFileSync(path.join(canal.dirEstado(root), 'vigilantes', 'builder.json'), 'utf8')); process.kill(v.pid, 0); vivo = true; } catch { /* sin vigilante */ }
-      say(est.builder || vivo ? '  Constructor: ' + (vivo ? 'conectado con vigilante vivo' : 'conectado (su vigilante no figura vivo: puede que despierte por su loop de respaldo)') : '  ⚠ Constructor NO conectado todavía: el dueño debe escribir `teams: builder` en el chat de Cursor.');
+      say(est.builder || vivo ? '  Constructor: ' + (vivo ? 'conectado con vigilante vivo' : 'conectado (su vigilante no figura vivo: puede que despierte por su loop de respaldo)') : '  ⚠ Constructor NO conectado todavía: el dueño debe escribir `teams: constructor` en el chat de Cursor.');
     }
     if (!est.plan && !e.tareas.length) say('  ⚠ No hay plan ni tareas: pídele al dueño `teams: plan …` antes de seguir.');
     say('', 'AHORA, Director:', '  1) lee .legion/PLAN.md y sus documentos fuente, y descompón el plan en lotes;', '  2) encola los 2 primeros con `tarea "…" --criterio="…" --archivos=…` (después te adelantas 1–2 lotes siempre);', est.modo === 'completo' ? `  3) activa tus DOS vigilantes: \`${P.CMD} esperar --rol=director --despertar\` en segundo plano + loop de respaldo de ~3 min con \`${P.CMD} revisar\`; confírmalo con \`${P.CMD} comprobar\`. El de Cursor lo despertará solo al ver la primera tarea.` : '  3) construye tú siguiendo `prompt individual` (bucle: construir → reportar → auditar con 3 sub-agentes → aceptar).');
@@ -547,7 +639,7 @@ function ejecutar(argv, root) {
 
   if (cmd === 'continuar') {
     const e = necesitaCanal(); if (!e) return salida(1);
-    const rol = opt.rol === 'builder' ? 'builder' : 'director';
+    const rol = ['builder', 'constructor'].includes(opt.rol) ? 'builder' : 'director';
     if (e.canal === 'CERRADO') { say('El canal está CERRADO. Si hay más trabajo: `teams: reabrir`.'); return salida(2); }
     if (e.canal === 'PREPARADO') { say('El canal aún no se inició: el Director debe escribir `teams: iniciar` (modo, plan y constructor primero).'); return salida(2); }
     if (e.canal === 'PAUSADO') { canal.fijarEstado(root, 'ACTIVO', 'continuado ' + canal.sello()); say('✔ Canal ACTIVO otra vez.'); } else say('· El canal ya estaba ACTIVO.');
@@ -703,6 +795,7 @@ function ejecutar(argv, root) {
     const est = leerEstado(root); const dir = path.join(canal.dirEstado(root), 'vigilantes');
     const ec = calcular(root);
     say(`Canal ${ec ? ec.canal : 'inexistente'} · modo ${est.modo ? est.modo.toUpperCase() : 'POR DEFINIR'}${est.modo === 'individual' ? ' (sin vigilantes: no hacen falta)' : ''}`);
+    for (const p of procesosViejos(root)) say(`⚠ PROCESO DEL TEAMS ANTERIOR VIVO (pid ${p.pid}): reescribe el canal con el formato viejo. Ejecuta \`teams: activar\` para detenerlo.`);
     for (const rol of ['builder', 'director']) {
       let v = null; try { v = JSON.parse(fs.readFileSync(path.join(dir, rol + '.json'), 'utf8')); } catch { /* sin vigilante */ }
       let vivo = false; if (v) { try { process.kill(v.pid, 0); vivo = true; } catch { vivo = false; } }
@@ -720,8 +813,8 @@ function ejecutar(argv, root) {
 
   say([
     'teams.cjs — TEAMS v4 (Claude Code dirige, Cursor construye, un canal MD)',
-    '  flujo: activar → modo completo|individual → plan → (Cursor) builder → iniciar → pausa / continuar',
-    '  activar | modo | plan | builder | iniciar | pausa | continuar | estado | ronda --rol=builder [--cierre] | revisar | tarea | corregir | resolver | reportar | auditar | aceptar',
+    '  flujo: activar → modo completo|individual → plan → (Cursor) constructor → iniciar → pausa / continuar',
+    '  activar | modo | plan | constructor | iniciar | pausa | continuar | estado | ronda --rol=builder [--cierre] | revisar | tarea | corregir | resolver | reportar | auditar | aceptar',
     '  cancelar | decision | decidir | objetivo | avance | reporte | cerrar | reabrir | observar | esperar --rol= --despertar | comprobar | prompt director|builder',
   ].join('\n'));
   return salida(cmd === 'ayuda' ? 0 : 2);
@@ -738,8 +831,14 @@ function esperar(root, opt) {
   const archivoV = path.join(dir, rol + '.json');
   const desde = iso(); let ultimoLatido = 0; let terminado = false; let watcher = null; let timer = null;
   const latir = () => { try { fs.writeFileSync(archivoV, JSON.stringify({ rol, pid: process.pid, desde, latido: iso(), sondeo_s: sondeoMs / 1000 })); ultimoLatido = Date.now(); } catch { /* sin latido */ } };
+  // Bitácora propia del vigilante (arranque, avisos, fin): sin ella un despertar que no llega es imposible de diagnosticar.
+  const continuo = !!opt.continuo; let ultimoEmitido = '';
+  const archivoLog = path.join(dir, rol + '.log');
+  const log = (m) => { try { let t = ''; try { t = fs.readFileSync(archivoLog, 'utf8'); } catch { /* nuevo */ } if (t.length > 120000) t = t.slice(-60000); fs.writeFileSync(archivoLog, t + new Date().toISOString() + ' pid=' + process.pid + ' ' + m + '\n'); } catch { /* sin bitácora */ } };
+  log('INICIO sondeo=' + sondeoMs + 'ms max=' + Math.round(maxMs / 60000) + 'min' + (continuo ? ' CONTINUO' : ''));
   const fin = (texto) => {
     if (terminado) return; terminado = true;
+    log('FIN ' + String(texto).split('\n').slice(0, 3).join(' | ').slice(0, 300));
     try { if (watcher) watcher.close(); } catch { /* ya cerrado */ } if (timer) clearInterval(timer);
     try { fs.rmSync(archivoV, { force: true }); } catch { /* sin archivo */ }
     console.log(texto); process.exit(0);
@@ -752,10 +851,15 @@ function esperar(root, opt) {
     if (e.canal === 'PAUSADO') return fin(`AGENT_LOOP_PAUSE_${rol}\nEl canal está PAUSADO por el Director. NO relances este vigilante y CANCELA tu loop de respaldo: así no gastas tokens consultando mientras no hay instrucciones. Para seguir, el dueño escribe \`teams: continuar\` en tu chat.`);
     if (e.canal === 'CERRADO') return fin(`AGENT_LOOP_END_${rol}\nEl canal está CERRADO: el trabajo terminó. NO relances este vigilante ni sigas sondeando; informa al dueño (ver .legion/REPORTE.md) y detente.`);
     const a = accionable(e, rol); const est = leerEstado(root);
-    if (a.digest && a.digest !== (est.seen || {})[rol]) {
+    if (a.digest && a.digest !== (est.seen || {})[rol] && !(continuo && a.digest === ultimoEmitido)) {
       est.wakes = (est.wakes || []).concat({ rol, at: iso(), digest: a.digest }).slice(-200); guardarEstado(root, est);
-      return fin([`AGENT_LOOP_WAKE_${rol}`, ...a.razones.slice(0, 12).map((r) => '  · ' + r),
-        `Ahora: ${P.CMD} ${rol === 'director' ? 'revisar' : 'ronda --rol=builder'}   (imprime TODO lo pendiente; trabájalo completo y luego RELANZA este vigilante)`].join('\n'));
+      const ahora = `${P.CMD} ${rol === 'director' ? 'revisar' : 'ronda --rol=builder'}`;
+      const bloque = [`AGENT_LOOP_WAKE_${rol}`, ...a.razones.slice(0, 12).map((r) => '  · ' + r),
+        continuo
+          ? `Ahora: ${ahora}   (imprime TODO lo pendiente; trabájalo completo. NO relances este vigilante: sigue vivo y avisará de lo siguiente)`
+          : `Ahora: ${ahora}   (imprime TODO lo pendiente). PRIMERO relanza este vigilante (antes de trabajar): si no, una corrección o una pausa que llegue mientras trabajas no te despierta`].join('\n');
+      if (!continuo) return fin(bloque);
+      ultimoEmitido = a.digest; log('AVISO ' + bloque.split('\n').slice(0, 2).join(' | ').slice(0, 200)); console.log(bloque);
     }
     if (Date.now() - inicio > maxMs) return fin(`AGENT_LOOP_RELAUNCH_${rol}\nSigo sin novedades tras ${Math.round(maxMs / 60000)} min; relánzame para renovar la espera (no es un aviso de trabajo).`);
   };

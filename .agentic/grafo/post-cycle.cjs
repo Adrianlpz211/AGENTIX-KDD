@@ -1434,6 +1434,15 @@ async function main() {
     const st = results.cierre.stops || {};
     console.log(`  6.9 Cierre del ciclo... ${results.cierre.estado} · STOP: ${st.status === 'OK' ? st.incidentes + ' (' + st.eventos + ' eventos)' : 'sin dato (' + st.status + ')'}`);
   }
+  // Reloj, SEGUNDA pasada (6.95): el paso 2.75 corre antes de que el ciclo tenga fecha_fin y, sin ella, no puede deducir la
+  // duración (medido en glowly: todos los ciclos de TEAMS quedaban con duracion_ms = 0). Idempotente: solo actúa si sigue sin duración.
+  try {
+    const relojPath2 = path.join(GRAFO_DIR, 'reloj-derivado.cjs');
+    if (fs.existsSync(relojPath2)) {
+      const d2 = require(relojPath2).completarUltimo(ROOT);
+      if (!silent && d2) console.log(`  6.95 Reloj (tras el cierre)... duracion deducida: ${Math.round(d2.ms / 60000)} min (${d2.origen})`);
+    }
+  } catch { /* la medición es un plus: perderla no cuesta trabajo */ }
   if (!silent) process.stdout.write('  7. Escribiendo log... ');
   escribirLog(results);
   results.log = true;

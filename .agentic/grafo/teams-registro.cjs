@@ -62,6 +62,25 @@ const areaDe = (archivos) => {
   return (seg || 'global').replace(/[^\w.-]+/g, '-').slice(0, 60) || 'global';
 };
 
+/** Sella en la libreta CUÁNDO empezó el ciclo (el reloj de Agentix lo usa para la duración). Sin dato → no se inventa. */
+function estamparInicio(root, ciclo, inicioMs, titulo) {
+  // Por el adaptador común (respeta la exclusión de escritura de un `akdd update` en curso, como todo lo que escribe la base).
+  let db = null;
+  try {
+    if (!Number.isFinite(inicioMs)) return false;
+    const dbPath = path.join(root, '.agentic', 'memoria.db');
+    if (!fs.existsSync(dbPath)) return false;
+    db = require('./db-adapter.cjs').openWrite(dbPath, { busyTimeout: 8000 });
+    require('./gate-telemetry.cjs').ensureTelemetrySchema(db); // solo usa exec: idempotente y compatible con el adaptador
+    const cols = db.all('PRAGMA table_info(gate_events)').map((c) => c.name);
+    if (!cols.includes('cycle_id') || !cols.includes('event_id')) return false; // la libreta aún no tiene el esquema: sin dato, no se inventa
+    const ts = new Date(inicioMs).toISOString().replace('T', ' ').slice(0, 19);
+    db.run("INSERT OR IGNORE INTO gate_events (ts, gate, verdict, detalle, source, cycle_id, event_id) VALUES (?, 'reloj', 'CICLO_INICIO', ?, 'mechanical', ?, ?)",
+      ts, JSON.stringify({ tarea: String(titulo).slice(0, 160), origen: 'teams' }), String(ciclo), 'teams-inicio:' + ciclo);
+    return true;
+  } catch { return false; } finally { try { if (db) db.close(); } catch { /* ya cerrada */ } }
+}
+
 /** Una tarea aceptada → ciclo en el núcleo común. Devuelve {estado, ...} y deja constancia en el registro local. */
 function registrarTarea(root, tarea, acept, opts = {}) {
   const reg = leerRegistro(root);
@@ -81,6 +100,7 @@ function registrarTarea(root, tarea, acept, opts = {}) {
     guardarRegistro(root, reg);
     return { estado: 'PENDIENTE', causa: 'POST_CYCLE_AUSENTE', clave };
   }
+  if (acept.inicio) estamparInicio(root, ciclo, acept.inicio, tarea.titulo);
   const tests = Number.isInteger(acept.tests) && acept.tests >= 0 ? acept.tests : 0;
   const tipo = /\b(fix|arregl|corrig|bug|error|hotfix)/i.test(tarea.titulo) ? 'fix' : 'feature';
   const args = [script, area, '--silent', '--origen=teams', '--tests=' + tests, '--tests-total=' + tests,
@@ -127,4 +147,4 @@ function resumen(root) {
   };
 }
 
-module.exports = { registrarTarea, recordar, pendientes, resumen, leerRegistro, archivosDe, REINTENTOS_MAX };
+module.exports = { estamparInicio, registrarTarea, recordar, pendientes, resumen, leerRegistro, archivosDe, REINTENTOS_MAX };

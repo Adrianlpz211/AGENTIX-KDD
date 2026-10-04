@@ -1,5 +1,17 @@
 # Changelog — Agentic KDD
 
+## [3.22.2] — 2026-10-04
+
+**Blindaje tras la primera campaña real (glowly): lo que falló al usar TEAMS con Cursor y Claude Code a la vez.**
+- **Cursor ya sabe qué es `teams:`.** Faltaba la regla que se lo enseña: ahora viaja con Agentix (`.cursor/rules/teams.mdc`, siempre activa) y define `teams: constructor`, `continuar` y `pausa`. La palabra del comando pasa a español: `teams: constructor` (`builder` sigue valiendo en la CLI).
+- **Los vigilantes ya no mueren en silencio.** Antes terminaban al avisar y el modelo debía relanzarlos: los dos roles lo olvidaron y pasaron media hora sin vigilante. Ahora: el protocolo manda relanzar PRIMERO; `ronda`/`revisar` lo dicen en su primera línea si el vigilante no está vivo; hay modo `--continuo` (no termina al avisar; Claude Code lo lee con Monitor); y cada vigilante guarda su bitácora (`.agentic/_teams/vigilantes/<rol>.log`).
+- **El Director no deja dormir una entrega:** si una entrega lleva ~8 min sin aceptar ni corregir, el vigilante se la vuelve a avisar (cada 8 min).
+- **Aviso previo de Agentix al encolar:** `teams tarea` corre el context-enricher de `aa:` y anota en la tarea el riesgo, lo que el proyecto ya sabe (errores previos con su cura, decisiones) y registra la predicción de riesgo, que se califica al aceptar. Antes TEAMS no alimentaba la gestión predictiva (0 filas).
+- **Duración de los ciclos de TEAMS:** se sella el inicio (cuando el constructor quedó libre para la tarea) y el reloj de Agentix prefiere la marca del propio ciclo a marcas ajenas. Antes salían con duración 0.
+- **Indexador del mapa de código (AST) que dejaba la base bloqueada ~10 min:** ahora espera por los bloqueos de otros escritores (antes chocaba al instante), solo corre UN indexado por proyecto a la vez, escribe por lotes cortos, tiene presupuesto de tiempo (la siguiente corrida sigue donde quedó) y no reescribe el PageRank si el código no cambió.
+- **Tablero:** si la base está ocupada por un escritor largo sirve la última lectura buena marcada `stale` (y lo dice) en vez de `DB_BLOQUEADA` o colgarse; espera 2 s por consulta en lugar de 5.
+- **Migración desde el TEAMS anterior:** `teams: activar` detecta un canal del motor viejo y lo archiva (`.legion/ANTIGUO-v3-vista.md`) en vez de adoptarlo, y detiene los vigilantes viejos que seguían vivos tras `akdd update` reescribiendo el canal. `teams: comprobar` los avisa.
+
 ## [3.22.0] — 2026-10-04
 
 **TEAMS arranca como se usaba a mano: activar → modo → plan → builder → iniciar → pausa / continuar.**

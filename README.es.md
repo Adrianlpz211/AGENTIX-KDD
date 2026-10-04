@@ -210,7 +210,7 @@ El protocolo que mucha gente corre a mano, ahora un comando conectado a Agentix.
 teams: activar        ← Claude Code asimila el protocolo y TE PREGUNTA: modo COMPLETO (Director + 3 sub-agentes, Cursor construye)
                          o modo INDIVIDUAL (Claude Code también construye), y si quieres un auditor extra
 teams: plan <todo lo que ya tienes aterrizado en docs, más detalles extra>   ← Claude Code lo lee todo y lo asimila
-teams: builder        ← en Cursor: se prepara solo, lanza sus vigilantes y espera («LISTO, a la espera de iniciar»)
+teams: constructor        ← en Cursor (el constructor): se prepara solo, lanza sus vigilantes y espera («LISTO, a la espera de iniciar»)
 teams: iniciar        ← en Claude Code: empieza; Cursor despierta solo
 teams: pausa          ← detiene todo: los dos vigilantes terminan y nadie gasta tokens consultando
 teams: continuar      ← en Claude Code y, sobre todo, en Cursor: relanzan vigilantes y siguen

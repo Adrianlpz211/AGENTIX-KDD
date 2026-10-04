@@ -145,9 +145,12 @@ function reportes(c) {
   const s = c.secciones.reporte;
   const out = {};
   if (!s) return out;
+  let fechaRonda = null; // hora (ms) de la última cabecera «### Ronda N — AAAA-MM-DD HH:MM» vista más arriba
   for (let i = s.ini + 1; i < s.fin; i++) {
     const l = c.limpias[i];
     if (!l.trim() || esPlaceholder(l)) continue;
+    const cab = /^###\s+Ronda\s+\d+\s+—\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(l);
+    if (cab) { const t = Date.parse(cab[1] + 'T' + cab[2] + ':00'); fechaRonda = Number.isNaN(t) ? null : t; continue; }
     const ids = [...l.matchAll(ID_TAREA)].map((m) => m[1]);
     if (!ids.length) continue;
     const e = ESTADO_REPORTE.exec(l);
@@ -155,7 +158,7 @@ function reportes(c) {
     for (const id of new Set(ids)) {
       if (out[id]) continue;
       const detalle = l.replace(/^[-*\s]+/, '').replace(/\[?T-[\w.]+\]?/, '').replace(ESTADO_REPORTE, '').replace(/^[\s:—–|-]+/, '').trim();
-      out[id] = { estado: e ? e[1].toUpperCase().replace(' ', '_') : null, detalle, archivos: arch ? arch[1].split(/[,;]\s*/).map((x) => x.trim()).filter(Boolean) : [], linea: i };
+      out[id] = { estado: e ? e[1].toUpperCase().replace(' ', '_') : null, detalle, archivos: arch ? arch[1].split(/[,;]\s*/).map((x) => x.trim()).filter(Boolean) : [], linea: i, at: fechaRonda };
     }
   }
   return out;
