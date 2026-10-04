@@ -64,7 +64,11 @@ ESPERA_HUMANA se reporta una vez y no se repite la pregunta. Goal solo por sprin
 
 | Chat | Correr |
 |---|---|
-| `teams: prompt director` / `builder` | `node .agentic/grafo/teams-prompts.cjs <director\|builder\|frontend\|backend\|negocio>` — el del constructor se pega UNA vez en Cursor |
+| `teams: prompt director` / `builder` | `node .agentic/grafo/teams-prompts.cjs <director\|builder\|frontend\|backend\|negocio>` — solo IMPRIME el prompt (para leerlo o guardarlo con `--guardar`); para actuar con él usa `teams: arrancar` |
+| `teams: arrancar director` (en Claude Code) | correr `node .agentic/grafo/teams-prompts.cjs director`, leer el prompt completo y **seguirlo como tu protocolo** (eres el director): la persona NO tiene que pegar nada |
+| `teams: arrancar builder` (en Cursor) | correr `node .agentic/grafo/teams-prompts.cjs builder`, leer el prompt completo y **seguirlo como tu protocolo** (eres el constructor): incorporación (connect-builder), vigilantes y rondas, sin que la persona pegue nada |
+| `teams: vigilar` | en TU rol: `node .agentic/grafo/teams-vigilancia.cjs iniciar --rol=<rol>`; lanzar `esperar --rol=<rol> --despertar` como TAREA EN SEGUNDO PLANO del host (y relanzarla tras cada aviso); y el loop del host cada 180 s |
+| `teams: comprobar` | `node .agentic/grafo/teams-vigilancia.cjs capacidades --rol=<rol>`: decir TAL CUAL qué hay vivo y qué no (EVENT_WAKE_POR_TAREA_DEL_HOST / VERIFICADO / MANUAL_ONLY); nunca anunciar autonomía que no figure ahí |
 | `teams: conectar builder` | lo hace Cursor con su prompt (`teams-manager.cjs connect-builder`); registrar no demuestra que esté activo |
 | `teams: avance` | `teams-manager.cjs progress` — decir «el proyecto quedó en X % por estas decisiones tuyas» y listarlas; X sale del plan, nunca se inventa |
 | `teams: corrección <hallazgo>` | `teams-correcciones.cjs añadir` y `publicar` (solo el director publica) |

@@ -192,3 +192,15 @@ test('CLI: genera el prompt por rol y comprueba los comandos', () => {
   const r = spawnSync(process.execPath, [path.join(G, 'teams-prompts.cjs'), 'comprobar'], { cwd: REPO, encoding: 'utf8' });
   assert.equal(JSON.parse(r.stdout).ok, true); assert.equal(r.status, 0);
 });
+
+test('todo se maneja desde el chat: CLAUDE.md, .cursorrules y ambos README documentan teams: arrancar / vigilar / comprobar, y los scripts que invocan existen', () => {
+  const raiz = path.resolve(__dirname, '..');
+  for (const f of ['CLAUDE.md', '.cursorrules', 'README.md', 'README.es.md']) {
+    const t = fs.readFileSync(path.join(raiz, f), 'utf8');
+    for (const c of ['teams: arrancar director', 'teams: arrancar builder', 'teams: vigilar', 'teams: comprobar']) assert.ok(t.includes(c), f + ' no documenta «' + c + '»');
+  }
+  const claude = fs.readFileSync(path.join(raiz, 'CLAUDE.md'), 'utf8');
+  assert.match(claude, /seguirlo como tu protocolo/, 'arrancar: el agente SIGUE el prompt, la persona no lo pega');
+  assert.match(claude, /esperar --rol=<rol> --despertar/);
+  for (const s of ['teams-prompts.cjs', 'teams-vigilancia.cjs']) assert.ok(fs.existsSync(path.join(raiz, '.agentic', 'grafo', s)), s);
+});

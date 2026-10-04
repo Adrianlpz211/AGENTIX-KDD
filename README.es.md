@@ -210,6 +210,10 @@ Abre ambos en el mismo proyecto y, en el chat:
 ```
 teams: activar
 teams: plan <objetivo>
+teams: arrancar director      ← en Claude Code: lee su propio protocolo; no hay nada que pegar
+teams: arrancar builder       ← en Cursor: igual, como constructor
+teams: vigilar                ← arranca tus vigilantes (loop del host + tarea de aviso)
+teams: comprobar              ← te dice exactamente qué está vivo y qué no
 teams: ejecutar
 teams: estado · teams: pendientes · teams: pausa · teams: continuar · teams: avance · teams: cerrar
 ```
@@ -398,7 +402,7 @@ Opciones: `--check` (solo el plan), `--json` (un único documento JSON por stdou
 |---|---|
 | Dirección del error de rango (vs parser real, 1.989 símbolos) | 99,75 % del lado seguro |
 | Grafo de un proyecto real (~414 archivos TS+JS) | 3.757 símbolos · ~4.900 aristas · 100 % con rangos de línea |
-| **Release check 3.20.4** (2026-10-04, Windows, Node 24 — la única plataforma medida) | Suite completa 943/944 (la que no corrió es un smoke dentro de hosts reales Cursor/Claude, declarada `NO_EJECUTADO`) · tarball (243 archivos) sin datos privados · 528 sondas adversariales, 0 fallas · se prueba el **tarball instalado** |
+| **Release check 3.20.4** (2026-10-04, Windows, Node 24 — la única plataforma medida) | Suite completa 944/945 (la que no corrió es un smoke dentro de hosts reales Cursor/Claude, declarada `NO_EJECUTADO`) · tarball (243 archivos) sin datos privados · 528 sondas adversariales, 0 fallas · se prueba el **tarball instalado** |
 | **Upgrades reales 3.19.0 → 3.20.4 y 3.20.0 → 3.20.4** (consumidores construidos ejecutando los motores publicados) | `akdd update` solo: `VERIFIED` (25 y 9 migraciones aplicadas) · memoria preservada por **contenido** (30–31 tablas, 567–572 filas comparadas, más 500 filas privadas en una tabla del usuario) · segundo update `NO_CHANGES_VERIFIED` · `--rollback` revierte archivos y conserva la memoria nueva · el motor anterior sigue leyendo la base migrada · MCP `initialize` / `remember` / `recall` por stdio |
 | Router de esfuerzo (15 fixtures, umbral fijado antes de correr) | LOW: −90 % bytes de contexto, −54 % pasos · MEDIUM: −25 a −32 % · HIGH conserva tdd, preservación, QA y revisor. *Proxy: bytes que Agentix pide cargar; no se midieron tokens del host* |
 | Benchmark de 19 fases (SaaS multi-tenant, con/sin Agentix) | errores por fase 2,6→~0 · tests que pasan a la primera 79 %→100 % · cascada de refactor 4/7→11/11 |
