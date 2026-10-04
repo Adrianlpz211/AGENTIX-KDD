@@ -372,3 +372,31 @@ test('continuidad y reporte se generan solos con la hora real del sistema', () =
   assert.match(c, /Backlog pendiente[\s\S]*T-001/);
   assert.match(c, /\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(reloj del sistema\)/);
 });
+
+test('canal real con historial en texto libre (sin ids): no inventa pendientes, muestra lo vivo al adoptar y «heredar» deja limpio al constructor', () => {
+  const root = proyecto();
+  fs.mkdirSync(path.join(root, '.legion'));
+  fs.writeFileSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md'), [
+    '# Canal de trabajo — Protocolo TEAMS (MECÁNICA: INVERTIDA)', '',
+    '## Correcciones pendientes', '', '### HALLAZGO — api/citas.ts:40', 'Falta validar la fecha. ✅ RESUELTO 2026-10-01 — hecho', '',
+    '### BLOQUEANTE — api/pagos.ts:12', 'Se pierde el recibo al reintentar.', '',
+    '## Tareas para Cursor', '', '### Lote 14 — Agenda semanal', 'Vista semanal. ✅ HECHO', '',
+    '### Lote 15 — Recordatorios', 'Enviar 24 h antes.', '',
+    '## Reporte de Cursor', '', 'Ronda 31: terminé el lote 14.', '',
+    '## Auditoría del Director (interna, no la llena Cursor)', '', 'Lote 14 revisado.', '',
+  ].join(String.fromCharCode(10)));
+  const r = salida(root, 'activar');
+  assert.match(r, /ADOPTADO/);
+  assert.ok(r.includes('1 corrección(es) sin resolver · 1 tarea(s) en cola · 1 hecha(s) sin aceptar'), r);
+  assert.match(r, /teams: heredar/);
+  const e = T.calcular(root);
+  assert.equal(e.omisiones.length, 0, 'un RESUELTO corto («hecho») no es una omisión');
+  assert.ok(salida(root, 'heredar').includes('2 elemento(s)'));
+  const e2 = T.calcular(root);
+  assert.equal(e2.corrPend.length, 0);
+  assert.equal(e2.tareasPend.length, 0);
+  assert.equal(e2.tareas.find((t) => /Lote 15/.test(t.titulo)).estado, 'HEREDADA');
+  assert.ok(!e2.tareas.some((t) => t.estado === 'HEREDADA' && T.accionable(e2, 'builder').razones.some((x) => x.includes(t.id))));
+  assert.match(salida(root, 'tarea', 'Lote 17 nuevo', '--criterio=x'), /encolada/);
+  assert.equal(T.calcular(root).tareasPend.length, 1, 'lo nuevo sí cuenta');
+});

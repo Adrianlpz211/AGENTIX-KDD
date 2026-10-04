@@ -2,16 +2,17 @@
 
 ## [3.21.0] — 2026-10-04
 
-**TEAMS reconstruido desde cero siguiendo el protocolo manual del dueño.**
-El TEAMS anterior se retiró por completo (19 módulos, su CLI, su herramienta MCP, su pestaña y sus pruebas): su flujo no seguía el protocolo que de verdad funcionó 6 días seguidos en producción — tenía un motor con estados, compuertas y reparaciones que frenaba lo que debía fluir. El nuevo son 4 archivos pequeños (`teams.cjs`, `teams-canal.cjs`, `teams-registro.cjs`, `teams-prompts.cjs`) que **observan** y no mandan.
+**TEAMS reconstruido desde cero siguiendo el protocolo manual que ya funcionaba en producción.**
+El TEAMS anterior se retiró por completo (19 módulos, su CLI, su herramienta MCP, su pestaña y sus pruebas): su flujo no seguía el protocolo que de verdad funcionó en producción — tenía un motor con estados, compuertas y reparaciones que frenaba lo que debía fluir. El nuevo son 4 archivos pequeños (`teams.cjs`, `teams-canal.cjs`, `teams-registro.cjs`, `teams-prompts.cjs`) que **observan** y no mandan.
 
-- **Un canal** `.legion/AUDITORIA-CURSOR.md` (el mismo formato de la carpeta manual; `teams: activar` adopta el existente sin tocarlo). La auditoría nunca gatea el avance; las correcciones llegan a media tarea.
+- **Un canal** `.legion/AUDITORIA-CURSOR.md` (el formato del protocolo manual que ya se usaba a mano; `teams: activar` adopta el existente sin tocarlo). La auditoría nunca gatea el avance; las correcciones llegan a media tarea.
 - **Lo que se repetía a mano, ahora es mecánico:** la ronda imprime TODO lo pendiente (el constructor no se salta secciones); el reporte es puntual por tarea y se detectan las omisiones (sin reporte, HECHO con casillas abiertas, «resuelto» sin detalle); el reporte al dueño sale solo; `cerrar` manda terminar a los vigilantes de los dos roles; el vigilante del Director avisa si el constructor queda ocioso.
 - **Decisiones:** el Director decide si sabe, investiga en internet con o sin links del dueño si duda, y solo escala lo que no está en internet o es bloqueante por seguridad.
 - **Conexión con Agentix:** aceptar una tarea la registra sola (post-cycle `--origen=teams`: ciclo, memoria KDD, contratos, AST, diseño, preservación, tablero); las correcciones resueltas y las decisiones alimentan la memoria. Si el registro falla, queda pendiente y reintenta; nunca frena.
+- `teams: heredar` limpia el historial de un canal adoptado (lo vivo al adoptar pasa a HEREDADA y no se le pide al constructor).
 - Todo por chat (`teams: activar`, `arrancar director|builder`, `vigilar`, `comprobar`, `cerrar`…) y por `akdd teams`.
 - El laboratorio (`sandbox`) queda solo en modo individual y el benchmark de contexto en siete casos.
-- Límite declarado: Cursor + Claude Code reales a la vez con vigilantes de fondo sigue `NO_EJECUTADO` (se prueba con el proyecto del dueño).
+- Límite declarado: Cursor + Claude Code reales a la vez con vigilantes de fondo sigue `NO_EJECUTADO` (se prueba en un proyecto real).
 
 ## [3.20.4] — 2026-10-04
 

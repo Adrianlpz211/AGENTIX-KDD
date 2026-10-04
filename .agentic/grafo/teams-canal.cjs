@@ -38,6 +38,7 @@ const claveSeccion = (titulo) => { const n = norm(titulo); const s = SECCIONES.f
 const RESUELTO = /✅\s*RESUELTO/i;
 const HECHO = /✅\s*HECHO/i;
 const ACEPTADA = /✅\s*ACEPTAD[AO]/i;
+const HEREDADA = /✔\s*HEREDAD[AO]/i;
 const CANCELADA = /(?:❌|✖)\s*CANCELAD[AO]/i;
 const AHORA = () => new Date();
 const sello = (d = AHORA()) => {
@@ -114,7 +115,7 @@ function elementos(c, clave) {
     out.push({
       id, titulo, ini, fin: f, modo, texto, crudo: crudo.join('\n'),
       casillas: { total: casillas.length, hechas: casillas.filter((m) => m[1] !== ' ').length },
-      resuelto: RESUELTO.test(texto), hecho: HECHO.test(texto), aceptada: ACEPTADA.test(texto), cancelada: CANCELADA.test(texto),
+      resuelto: RESUELTO.test(texto), hecho: HECHO.test(texto), aceptada: ACEPTADA.test(texto), cancelada: CANCELADA.test(texto), heredada: HEREDADA.test(texto),
       generado: !idm,
     });
   });

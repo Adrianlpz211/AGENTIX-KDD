@@ -2,7 +2,7 @@
 /**
  * TEAMS v4 — registro en el núcleo de Agentix.
  *
- * La carpeta manual del dueño funciona de maravilla pero no registra nada porque vive fuera de `aa:`. Aquí está
+ * El protocolo manual (canal MD a mano) funciona pero no registra nada porque vive fuera de `aa:`. Aquí está
  * la conexión: cuando el Director ACEPTA una tarea (o resuelve una corrección, o decide algo) lo ocurrido entra al
  * MISMO núcleo que `aa:` — ciclo, memoria KDD, contratos, AST, layout, preservación, dashboard — con origen `teams`.
  *

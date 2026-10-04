@@ -1132,7 +1132,7 @@
     {
       "id": "TEAMS-v4-10",
       "doc": "TEAMS",
-      "requisito": "Adopta sin tocar el canal de la carpeta manual del dueño",
+      "requisito": "Adopta sin tocar un canal ya existente (plantilla manual o texto libre con historial) y «heredar» lo deja limpio",
       "alcance": "proceso real (archivos)",
       "pruebas": [
         [

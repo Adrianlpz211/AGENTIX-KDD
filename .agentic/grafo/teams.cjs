@@ -85,6 +85,7 @@ function calcular(root, opts = {}) {
     const hechaBuilder = t.hecho || completa || (r && r.estado === 'HECHO');
     let estado = 'PENDIENTE';
     if (t.cancelada) estado = 'CANCELADA';
+    else if (t.heredada) estado = 'HEREDADA';
     else if (acept.has(t.id)) estado = 'ACEPTADA';
     else if (r && ESTADOS_DEVUELTA.has(r.estado) && !completa) estado = 'DEVUELTA';
     else if (hechaBuilder) estado = 'HECHA_SIN_ACEPTAR';
@@ -93,14 +94,14 @@ function calcular(root, opts = {}) {
 
   const omisiones = [];
   for (const t of tareas) {
-    if (t.generado || t.estado === 'CANCELADA' || t.estado === 'ACEPTADA') continue; // aceptada: el Director ya la contrastó
+    if (t.generado || ['CANCELADA', 'HEREDADA', 'ACEPTADA'].includes(t.estado)) continue; // aceptada: el Director ya la contrastó
     const r = t.reporte;
     if ((t.completa || t.hecho) && !r) omisiones.push({ codigo: 'SIN_REPORTE', id: t.id, texto: `${t.id} tiene todas sus casillas marcadas pero no hay línea de reporte para ella` });
     if (r && r.estado === 'HECHO' && t.casillas.total > 0 && !t.completa) omisiones.push({ codigo: 'HECHO_CON_CASILLAS_ABIERTAS', id: t.id, texto: `${t.id} reportada HECHO pero quedan ${t.casillas.total - t.casillas.hechas} casilla(s) sin marcar` });
     if (r && ['PARCIAL', 'NO_HECHO', 'BLOQUEADO'].includes(r.estado) && corto(r.detalle).length < 8) omisiones.push({ codigo: 'SIN_MOTIVO', id: t.id, texto: `${t.id} reportada ${r.estado} sin decir qué falta ni por qué` });
     if (r && !r.estado && !t.completa && t.estado !== 'ACEPTADA') omisiones.push({ codigo: 'REPORTE_SIN_ESTADO', id: t.id, texto: `${t.id} se menciona en el reporte sin estado (HECHO / PARCIAL / NO_HECHO)` });
   }
-  for (const k of correcciones) if (k.resuelto && corto(k.detalle).length < 6) omisiones.push({ codigo: 'RESUELTO_SIN_DETALLE', id: k.id, texto: `${k.id} marcada RESUELTA sin decir qué se hizo` });
+  for (const k of correcciones) if (k.resuelto && corto(k.detalle).length < 3) omisiones.push({ codigo: 'RESUELTO_SIN_DETALLE', id: k.id, texto: `${k.id} marcada RESUELTA sin decir qué se hizo` });
 
   const decisiones = canal.elementos(c, 'decisiones').map((d) => {
     const tipo = /Tipo:\s*(DIRECTOR|DUE[ÑN]O)/i.exec(d.texto);
@@ -114,7 +115,7 @@ function calcular(root, opts = {}) {
   const hechasSinAceptar = tareas.filter((t) => t.estado === 'HECHA_SIN_ACEPTAR');
   const devueltas = tareas.filter((t) => t.estado === 'DEVUELTA');
   const aceptadasN = tareas.filter((t) => t.estado === 'ACEPTADA').length;
-  const vivas = tareas.filter((t) => t.estado !== 'CANCELADA').length;
+  const vivas = tareas.filter((t) => t.estado !== 'CANCELADA' && t.estado !== 'HEREDADA').length;
   const constructorSinTrabajo = !corrPend.length && !tareasPend.length;
   const listo = vivas > 0 && constructorSinTrabajo && !hechasSinAceptar.length && !devueltas.length;
   let mtime = 0; try { mtime = fs.statSync(c.ruta).mtimeMs; } catch { /* sin mtime */ }
@@ -266,6 +267,13 @@ function activar(root, opt) {
   } else {
     canal.fijarEstado(root, 'ACTIVO');
     out.push('✔ canal existente ADOPTADO sin tocar su contenido: .legion/AUDITORIA-CURSOR.md');
+    const d = calcular(root);
+    if (d) {
+      out.push(`  Lo que veo vivo en tu canal: ${d.corrPend.length} corrección(es) sin resolver · ${d.tareasPend.length} tarea(s) en cola · ${d.hechasSinAceptar.length} hecha(s) sin aceptar.`);
+      for (const k of d.corrPend.slice(0, 8)) out.push(`    · corrección ${k.id}: ${corto(k.titulo, 90)}`);
+      for (const t of d.tareasPend.slice(0, 8)) out.push(`    · tarea ${t.id}: ${corto(t.titulo, 90)}`);
+      if (d.corrPend.length + d.tareasPend.length) out.push('  Si algo de eso YA está hecho en tu historial y solo falta la marca, ejecuta `teams: heredar` (marca ✅ lo vivo ahora como heredado) para que el constructor no lo reciba como pendiente.');
+    }
   }
   for (const [nombre, texto] of [['METODOLOGIA.md', P.metodologia()]]) {
     const f = path.join(dir, nombre);
@@ -429,6 +437,15 @@ function ejecutar(argv, root) {
     });
     say(`✔ reporte de ${id}: ${estado}`);
     if (estado !== 'HECHO') say('  · queda visible para el Director como «' + (estado === 'PARCIAL' ? 'trabajo parcial' : 'devuelta') + '»; no se pierde ni se omite.');
+    return salida();
+  }
+
+  if (cmd === 'heredar') {
+    const e = necesitaCanal(); if (!e) return salida(1);
+    let n = 0;
+    for (const k of e.corrPend) if (canal.anadirLineaAlElemento(root, 'correcciones', k.id, `✅ RESUELTO ${canal.sello()} — heredado de la adopción del canal`)) n++;
+    for (const t of e.tareasPend) if (canal.anadirLineaAlElemento(root, 'tareas', t.id, `✔ HEREDADA ${canal.sello()} — ya estaba en el historial al adoptar el canal`)) n++;
+    say(`✔ ${n} elemento(s) vivos marcados como heredados: el constructor empieza limpio. (Lo que escribas desde ahora cuenta normal.)`);
     return salida();
   }
 
