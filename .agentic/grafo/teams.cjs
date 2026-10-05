@@ -439,7 +439,49 @@ function observar(root, e, say, forzar = false) {
   return res;
 }
 
+// ───────────────────── bitácora de eventos (alimenta la oficina 3D del tablero) ─────────────────────
+// Cada comando que MUEVE algo deja una línea: quién (rol), qué y sobre qué. Es solo para mostrar en vivo
+// lo que pasa; nada del flujo depende de ella y un fallo al escribirla jamás rompe el comando.
+const EVENTOS_ARCHIVO = 'eventos.jsonl';
+const ROL_DE_COMANDO = {
+  activar: 'director', init: 'director', adoptar: 'director', modo: 'director', plan: 'director', objetivo: 'director', tarea: 'director',
+  corregir: 'director', resolver: 'director', auditar: 'director', aceptar: 'director', revisar: 'director', decidir: 'director', decision: 'director',
+  heredar: 'director', cancelar: 'director', cerrar: 'director', reabrir: 'director', iniciar: 'director', observar: 'director',
+  constructor: 'builder', builder: 'builder', conectar: 'builder', ronda: 'builder', reportar: 'builder', pausa: 'ambos', continuar: 'ambos',
+};
+function registrarEvento(root, ev) {
+  try {
+    const f = path.join(canal.dirEstado(root), EVENTOS_ARCHIVO);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.appendFileSync(f, JSON.stringify({ t: iso(), ...ev }) + '\n');
+    if (Math.random() < 0.05) { // recorte ocasional: la bitácora nunca crece sin tope
+      const lineas = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean);
+      if (lineas.length > 400) fs.writeFileSync(f, lineas.slice(-200).join('\n') + '\n');
+    }
+  } catch { /* la bitácora es opcional */ }
+}
+function leerEventos(root, n = 40) {
+  try {
+    return fs.readFileSync(path.join(canal.dirEstado(root), EVENTOS_ARCHIVO), 'utf8').split('\n').filter(Boolean).slice(-n)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
+}
+
 function ejecutar(argv, root) {
+  const r = ejecutarCmd(argv, root);
+  try {
+    const { opt, libres } = parseArgs(argv);
+    const cmd = libres[0] || '';
+    if (ROL_DE_COMANDO[cmd] && !(r && r.code > 0 && cmd !== 'activar')) {
+      const rol = (cmd === 'continuar' && ['director', 'builder'].includes(opt.rol)) ? opt.rol : (cmd === 'ronda' && opt.rol === 'director') ? 'director' : ROL_DE_COMANDO[cmd];
+      const a = libres[1] ? String(libres[1]).slice(0, 80) : undefined;
+      registrarEvento(root, { cmd: cmd === 'builder' || cmd === 'conectar' ? 'constructor' : cmd === 'objetivo' ? 'plan' : cmd, rol, ...(a ? { arg: a } : {}) });
+    }
+  } catch { /* nunca rompe el comando */ }
+  return r;
+}
+
+function ejecutarCmd(argv, root) {
   const { opt, libres } = parseArgs(argv);
   const cmd = libres[0] || 'ayuda';
   const arg = libres.slice(1);
@@ -948,9 +990,22 @@ function salud(root, opts = {}) {
     if (e.listo) sube(1, 'Todo aceptado y sin pendientes (LISTO_PARA_CERRAR): falta que el Director ejecute «cerrar»');
   }
   const informativo = e.canal !== 'ACTIVO';
+  // Lo que se ve en la oficina 3D: quién hace qué AHORA, derivado de la bitácora de comandos y del canal.
+  const evs = leerEventos(root, 60);
+  let auditoria = null;
+  for (const ev of evs) {
+    if (ev.cmd === 'auditar') auditoria = { id: ev.arg || null, desde: ev.t };
+    else if (auditoria && (['corregir', 'cancelar', 'cerrar', 'pausa'].includes(ev.cmd) || (ev.cmd === 'aceptar' && (!ev.arg || !auditoria.id || ev.arg === auditoria.id)))) auditoria = null;
+  }
+  if (auditoria && (ahora - Date.parse(auditoria.desde) > 20 * 60000 || (auditoria.id && e.tareas.some((t) => t.id === auditoria.id && t.estado === 'ACEPTADA')))) auditoria = null;
+  const ultEv = evs.length ? Date.parse(evs[evs.length - 1].t) : 0;
+  const actividadSeg = Math.round(Math.max(0, ahora - Math.max(e.mtime || 0, ultEv)) / 1000);
   return {
     canal: e.canal, modo: est.modo || null, semaforo: informativo ? e.canal : ['VERDE', 'AMARILLO', 'ROJO'][nivel],
-    alertas, roles, quieto_min: quieto, avance: e.avance, aceptadas: e.aceptadas, total: e.total,
+    alertas, roles, quieto_min: quieto, actividad_seg: actividadSeg, plan: !!est.plan, builder_conectado: !!est.builder, extras: (est.extras || []).length, auditoria,
+    eventos: evs.slice(-14).map((ev) => ({ t: ev.t, cmd: ev.cmd, rol: ev.rol, arg: ev.arg || null })),
+    tareas_todas: e.tareas.slice(-60).map((t) => ({ id: t.id, titulo: corto(t.titulo, 70), estado: t.estado, reporte: t.reporte ? t.reporte.estado : null })),
+    correcciones_todas: e.correcciones.slice(-30).map((k) => ({ id: k.id, resuelta: !!k.resuelto, sev: k.sev, titulo: corto(k.titulo, 70) })), avance: e.avance, aceptadas: e.aceptadas, total: e.total,
     cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map((d) => ({ id: d.id, titulo: corto(d.titulo, 90) })) },
     registro: reg.resumen(root), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
     generado: new Date(ahora).toISOString(),
@@ -959,7 +1014,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { salud, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { salud, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

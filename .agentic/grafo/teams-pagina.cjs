@@ -39,9 +39,11 @@ const PLANTILLA = `<!doctype html>
   .foot { padding:0 24px 24px; color:var(--dim); font-size:12px; }
   #mundo { margin:8px 24px 0; max-width:1300px; padding:0; overflow:hidden; }
   #mundo h2 { margin:0; padding:12px 16px 0; }
-  #escena { height:min(62vh, 520px); min-height:300px; margin-top:8px; background:#0d1626; }
+  #escena { height:min(74vh, 660px); min-height:340px; margin-top:8px; background:#0a0f1a; }
   .ctl { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 12px 10px; }
   .ctl button { padding:3px 10px; font-size:12px; }
+  .ctl button.on { border-color:var(--ok); color:var(--ok); }
+  .ctl .sep { width:1px; height:18px; background:var(--line); margin:0 6px; }
   .nota3d { color:var(--dim); font-size:12px; margin-left:6px; }
 </style>
 </head>
@@ -52,20 +54,26 @@ const PLANTILLA = `<!doctype html>
   <button id="recargar" type="button">Actualizar vista</button>
 </header>
 <section id="mundo" class="card">
-  <h2>Oficina en vivo — arrastra para girar, rueda para acercar, doble clic para reiniciar</h2>
-  <div id="escena" aria-label="Escena 3D de la oficina: director, tres sub-agentes y constructor"></div>
+  <h2>Oficina en vivo · lo que ves es lo que pasa ahora mismo</h2>
+  <div id="escena" aria-label="Escena 3D de la oficina: director, tres sub-agentes, constructor y sus vigilantes"></div>
   <div class="ctl">
-    <span class="dim">Ver:</span>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('real')">Datos reales</button>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('trabajo')">Simular: trabajando</button>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('espera3')">Simular: 3 min sin trabajo</button>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('alarma')">Simular: sin vigilante</button>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('celebrar')">Simular: tarea aceptada</button>
+    <span class="dim">Vista:</span>
+    <button type="button" data-vista="iso" class="on" onclick="window.mundoVista && mundoVista('iso')">Isométrica</button>
+    <button type="button" data-vista="libre" onclick="window.mundoVista && mundoVista('libre')">Libre</button>
+    <span class="sep"></span><span class="dim">Ir a:</span>
+    <button type="button" onclick="window.mundoIr && mundoIr('oficina')">Oficina</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('pizarra')">Pizarra</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('flujo')">Flujo</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('semaforo')">Semáforo</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('sala')">Sala</button>
+    <span class="sep"></span><span class="dim">Demostración:</span>
+    <button type="button" onclick="window.mundoSimular && mundoSimular('recorrido')">Recorrido completo</button>
+    <button type="button" onclick="window.mundoSimular && mundoSimular('real')">Volver a lo real</button>
     <span id="nota3d" class="nota3d"></span>
   </div>
 </section>
 <main id="raiz" aria-live="polite"></main>
-<div class="foot">Solo lectura, se refresca cada 5 s. «Vigilante vivo» = el proceso que avisa al modelo cuando hay algo; «loop de respaldo» = su ronda periódica de ~3 min. Si un rol está en rojo, solo tú puedes despertarlo escribiéndole en su chat.</div>
+<div class="foot">Solo lectura, en vivo (se refresca cada 2 s). «Vigilante vivo» = el proceso que avisa al modelo cuando hay algo; «loop de respaldo» = su ronda periódica de ~3 min. Si un rol está en rojo, solo tú puedes despertarlo escribiéndole en su chat.</div>
 <script src="/vendor/three.min.js"></script>
 <script>
 /*__MUNDO__*/
@@ -82,7 +90,6 @@ const PLANTILLA = `<!doctype html>
 
   function pintar(j) {
     var d = j.data; raiz.textContent = '';
-    if (window.mundoActualizar) { try { window.mundoActualizar(d, j); } catch (e) { /* la escena es un adorno: nunca rompe los datos */ } }
     if (!d) {
       var c0 = card('Sin canal TEAMS', true);
       c0.appendChild(el('div', 'dim', j.reason_code === 'SIN_CANAL' ? 'Este proyecto no tiene un canal TEAMS. Escribe «teams: activar» en Claude Code.' : 'No hay datos (' + (j.reason_code || j.status) + ').'));
@@ -125,11 +132,16 @@ const PLANTILLA = `<!doctype html>
     lista(av, d.avisos.slice().reverse(), 'Todavía no hubo avisos.', function (a) { return hora(a.at) + ' · ' + (a.rol === 'director' ? 'Director' : 'Constructor') + ' · ' + (a.atendido ? 'atendido' : 'SIN ATENDER'); });
   }
 
+  var firma = '';
   function cargar() {
-    fetch('/api/v1/teams', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(pintar).catch(function () { sub.textContent = 'no pude leer el tablero'; });
+    fetch('/api/v1/teams', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (window.mundoActualizar) { try { window.mundoActualizar(j.data || null, j); } catch (e) { /* la escena es un adorno: nunca rompe los datos */ } }
+      var d = j.data, f = d ? JSON.stringify([d.semaforo, d.canal, d.alertas, d.roles, d.cola, d.registro, d.avisos, d.avance, d.quieto_min]) : String(j.status) + String(j.reason_code);
+      if (f !== firma || !raiz.firstChild) { firma = f; pintar(j); }
+    }).catch(function () { sub.textContent = 'no pude leer el tablero'; });
   }
-  document.getElementById('recargar').addEventListener('click', cargar);
-  cargar(); setInterval(cargar, 5000);
+  document.getElementById('recargar').addEventListener('click', function () { firma = ''; cargar(); });
+  cargar(); setInterval(cargar, 2000);
 })();
 </script>
 </body>

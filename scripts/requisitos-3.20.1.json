@@ -1532,6 +1532,30 @@
           "la oficina 3D en navegador real"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-oficina-1",
+      "doc": "TEAMS",
+      "requisito": "Cada comando que mueve algo deja su evento (rol, comando, objetivo) y salud() lo expone junto a las tareas",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OFICINA-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-oficina-2",
+      "doc": "TEAMS",
+      "requisito": "Los sub-agentes figuran auditando desde auditar hasta aceptar/corregir, y una auditoría vieja no queda pegada",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OFICINA-2"
+        ]
+      ]
     }
   ]
 }

@@ -84,7 +84,7 @@ test('la oficina 3D va dentro de /teams con three.js local, sin innerHTML ni rec
   } finally { d.cerrar(); }
 });
 
-test('la oficina 3D en navegador real: trabajan sentados; 3 min sin trabajo se juntan a conversar; sin errores', { timeout: 120000, skip: hayNavegador() ? false : 'sin playwright-core' }, async () => {
+test('la oficina 3D en navegador real: sin TEAMS juegan; los comandos los mueven; vigilantes con galleta; 3 min sin trabajo → a descansar; sin errores', { timeout: 150000, skip: hayNavegador() ? false : 'sin playwright-core' }, async () => {
   const dir = tmp('3dnav'); crearFixture(dir); conTeams(dir);
   const d = await arrancarDashboard(dir);
   const bg = require(path.join(REPO, '.agentic', 'grafo', 'browser-gate.cjs'));
@@ -96,10 +96,35 @@ test('la oficina 3D en navegador real: trabajan sentados; 3 min sin trabajo se j
     page.on('console', (m) => { if (/Content Security Policy|Refused to (load|execute|apply|connect)/i.test(m.text())) errores.push('CSP: ' + m.text().slice(0, 200)); });
     await page.goto(d.url.replace(/\/$/, '') + '/teams', { waitUntil: 'load', timeout: 60000 });
     await page.waitForFunction(() => typeof window.mundoSimular === 'function' && !!document.querySelector('#escena canvas'), null, { timeout: 30000 });
-    const trabajo = await page.evaluate(() => { window.mundoSimular('trabajo'); return window.mundoPaso(10); });
-    assert.equal((trabajo.match(/ sentado/g) || []).length, 5, 'los cinco trabajan sentados: ' + trabajo);
-    const espera = await page.evaluate(() => { window.mundoSimular('espera3'); return window.mundoPaso(12); });
-    assert.equal((espera.match(/espera\/descanso/g) || []).length, 5, 'los cinco en la sala de descanso: ' + espera);
+    const sitios = (r) => Object.fromEntries(r.filter((x) => !String(x.k).startsWith('perro')).map((x) => [x.k, x.sitio || ('→' + x.destino)]));
+    const zona = (v) => /^(sofa|bean)/.test(v) ? 'sala' : /^esc_/.test(v) ? 'puesto' : v;
+    const paso = (nombre, seg, opc) => page.evaluate(([n, sg, o]) => { window.mundoSimular(n, o); return window.mundoPaso(sg); }, [nombre, seg, opc || {}]);
+    // 1) sin TEAMS: los cinco en la sala de descanso jugando; los perros duermen
+    let r = await paso('apagado', 1, { silencioso: true });
+    assert.deepStrictEqual(Object.values(sitios(r)).map(zona), ['sala', 'sala', 'sala', 'sala', 'sala']);
+    assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.estado === 'dormido' && !x.vivo));
+    // 2) teams: activar → solo el Director va a su puesto
+    r = await paso('activar', 14); let z = sitios(r);
+    assert.equal(z.director, 'esc_director'); assert.equal(zona(z.fe), 'sala'); assert.equal(zona(z.cons), 'sala');
+    // 3) plan → llegan los tres sub-agentes; el constructor sigue descansando
+    r = await paso('plan', 16); z = sitios(r);
+    assert.deepStrictEqual([z.fe, z.be, z.neg], ['esc_fe', 'esc_be', 'esc_neg']); assert.equal(zona(z.cons), 'sala');
+    // 4) teams: constructor → el Constructor deja de jugar y va a su máquina; los perros siguen dormidos (vigilantes apagados)
+    r = await paso('constructor', 16); z = sitios(r); assert.equal(z.cons, 'esc_cons');
+    assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.estado === 'dormido'));
+    // 5) vigilantes arrancan → cada dueño va a darle su galleta y los perros se ponen a vigilar
+    r = await paso('vigilantes', 6); z = sitios(r);
+    assert.ok(/galleta_director/.test(z.director) && /galleta_cons/.test(z.cons), JSON.stringify(z));
+    assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.vivo && x.estado !== 'dormido'));
+    // 6) trabajo real: construyen y revisan; la auditoría pone a teclear a los tres sub-agentes
+    r = await paso('trabajo', 30); assert.ok(r.find((x) => x.k === 'director').modo === 'type' && r.find((x) => x.k === 'cons').modo === 'type');
+    r = await paso('auditoria', 4); assert.deepStrictEqual(['fe', 'be', 'neg'].map((k) => r.find((x) => x.k === k).modo), ['type', 'type', 'type']);
+    // 7) sin vigilante los perros se van a dormir, aunque la gente siga en su puesto
+    r = await paso('alarma', 14); assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.estado === 'dormido' && !x.vivo));
+    // 8) a los 3 min sin nada que hacer se levantan y se van a descansar (se juega en la sala)
+    r = await paso('espera3', 40); assert.deepStrictEqual(Object.values(sitios(r)).map(zona), ['sala', 'sala', 'sala', 'sala', 'sala']);
+    // vistas y atajos de cámara sin errores
+    await page.evaluate(() => { window.mundoVista('libre'); window.mundoIr('pizarra'); window.mundoPaso(2); window.mundoVista('iso'); window.mundoPaso(0.2); });
     assert.deepStrictEqual(errores, []);
   } finally { await browser.close().catch(() => {}); d.cerrar(); }
 });

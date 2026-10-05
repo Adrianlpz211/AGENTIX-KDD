@@ -966,3 +966,42 @@ test('TORMENTA — relanzar el vigilante tras un aviso NO lo dispara de nuevo po
   assert.ok(T.leerEstado(root).wakes.every((w) => w.visto_at), 'ningún aviso viejo queda «sin atender» (daba falsas alarmas de «31 min» en el semáforo)');
   assert.equal(T.salud(root).roles.builder.aviso_sin_atender_min, null);
 });
+
+// ───────────────────────────── oficina 3D: bitácora de comandos y datos de la escena ─────────────────────────────
+
+test('OFICINA-1 — cada comando que mueve algo deja su evento (rol, comando, objetivo) y salud() lo expone junto a las tareas', () => {
+  const root = proyecto(); const restaurar = stubPostCycle(root);
+  try {
+    arrancado(root);
+    salida(root, 'tarea', 'Login con correo', '--criterio=valida', '--sin-contexto');
+    salida(root, 'constructor');
+    salida(root, 'estado'); // solo lectura: no deja evento
+    const evs = T.leerEventos(root, 50);
+    assert.deepEqual(evs.map((e) => e.cmd + ':' + e.rol), ['activar:director', 'modo:director', 'iniciar:director', 'tarea:director', 'constructor:builder']);
+    assert.ok(evs.every((e) => Number.isFinite(Date.parse(e.t))));
+    const s = T.salud(root);
+    assert.equal(s.eventos.at(-1).cmd, 'constructor');
+    assert.equal(s.builder_conectado, true);
+    assert.equal(s.tareas_todas[0].id, 'T-001'); assert.equal(s.tareas_todas[0].estado, 'PENDIENTE');
+    assert.equal(s.auditoria, null);
+    assert.equal(typeof s.actividad_seg, 'number');
+  } finally { restaurar(); }
+});
+
+test('OFICINA-2 — los sub-agentes figuran auditando desde «auditar T-00X» hasta que el Director acepta o corrige; sin comandos viejos que se queden pegados', () => {
+  const root = proyecto(); const restaurar = stubPostCycle(root);
+  try {
+    arrancado(root);
+    salida(root, 'tarea', 'Login', '--criterio=a', '--sin-contexto');
+    salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo', '--verif=npm test');
+    salida(root, 'auditar', 'T-001');
+    let s = T.salud(root);
+    assert.equal(s.auditoria.id, 'T-001');
+    salida(root, 'aceptar', 'T-001', '--verifico=npm test', '--tests=1');
+    s = T.salud(root);
+    assert.equal(s.auditoria, null, 'aceptar cierra la auditoría');
+    salida(root, 'tarea', 'Otra', '--criterio=a', '--sin-contexto'); salida(root, 'auditar', 'T-002');
+    assert.equal(T.salud(root).auditoria.id, 'T-002');
+    assert.equal(T.salud(root, { ahora: Date.now() + 25 * 60000 }).auditoria, null, 'una auditoría de hace 25 min ya no se muestra como activa');
+  } finally { restaurar(); }
+});
