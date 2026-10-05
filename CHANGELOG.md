@@ -1,5 +1,12 @@
 # Changelog — Agentic KDD
 
+## [3.23.3] — 2026-10-05
+
+**Tres hallazgos de la revisión profunda de glowly (loop de 3 min), resueltos.**
+- **H-001 — registro «pendiente» eterno:** una tarea aceptada cuyo registro en el núcleo quedó pendiente (el post-cycle murió con 143) y que luego el Director canceló seguía contando como «registro pendiente» durante horas (alertas, reporte, ntfy) y ningún reintento podía cerrarla. Ahora se declara OBSOLETA y deja de contar (`registro.obsoletas`).
+- **H-002 — Director dormido sin mensaje para reactivarlo:** la alerta «Director: su vigilante NO está vivo y tiene trabajo esperando» ahora trae el texto para pegarle en su chat («Revisa T-045, T-046: audita y acepta o corrige… No te detengas a resumir»), igual que la del constructor; llega también al teléfono por ntfy.
+- **H-003 — reencolar no reactiva a Cursor:** el Director canceló y reencoló las mismas tareas dos veces creyendo que así despertaba a Cursor (no lo hizo). Ahora, al reencolar algo que canceló hace menos de 90 min, `teams tarea` avisa en el momento («Reencolar NO reactiva a Cursor… corre diagnostico…») y `cancelar` lo recuerda; antes solo lo decía el protocolo, que su sesión ya había leído.
+
 ## [3.23.2] — 2026-10-05
 
 **Cursor que termina su turno y se queda quieto: ahora se detecta con evidencia, se avisa con el mensaje para reactivarlo, y el tablero se monta en otro puerto si el suyo está ocupado.**

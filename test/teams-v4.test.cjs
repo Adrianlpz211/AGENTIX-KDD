@@ -1116,3 +1116,39 @@ test('OCIO-5 — Cursor parado: evidencia en la solicitud y en el aviso al Direc
   process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 60000);
   try { assert.match(salida(root, 'diagnostico'), /DIAGNÓSTICO DEL CONSTRUCTOR: TRABAJANDO[\s\S]*no lo interrumpas/); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
 });
+
+// ───────────────────────────── hallazgos de la revisión profunda (H-001..H-003) ─────────────────────────────
+
+test('H-001 — un registro PENDIENTE de una tarea que luego se cancela se declara OBSOLETO: deja de contar como pendiente', () => {
+  const root = proyecto(); arrancado(root);
+  const stub = path.join(root, 'stub-143.cjs'); fs.writeFileSync(stub, 'process.exit(143);'); process.env.AKDD_TEAMS_POSTCYCLE = stub;
+  try {
+    salida(root, 'tarea', 'Algo que se acepta y luego se cancela', '--criterio=a', '--sin-contexto');
+    salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo', '--verif=npm test');
+    salida(root, 'aceptar', 'T-001', '--verifico=npm test', '--tests=1');
+    assert.equal(T.salud(root).registro.pendientes, 1, 'el registro quedó pendiente (el post-cycle murió con 143)');
+    salida(root, 'cancelar', 'T-001', 'reencolada tras un cambio de orden');
+    salida(root, 'observar');
+    const r = T.salud(root).registro;
+    assert.equal(r.pendientes, 0, 'ya no cuenta como pendiente'); assert.equal(r.obsoletas, 1);
+  } finally { delete process.env.AKDD_TEAMS_POSTCYCLE; }
+});
+
+test('H-002 — la alerta del Director dormido trae el mensaje para reactivarlo, con las entregas por revisar', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo', '--criterio=a', '--sin-contexto');
+  salida(root, 'reportar', 'T-001', '--estado=HECHO', '--detalle=listo', '--verif=npm test');
+  const al = T.salud(root).alertas.find((a) => /Director \(Claude Code\): su vigilante NO está vivo/.test(a.msg));
+  assert.match(al.msg, /Si su chat está quieto, pégale en él: «Revisa T-001: audita y acepta o corrige/);
+  assert.match(al.msg, /No te detengas a resumir/);
+});
+
+test('H-003 — reencolar lo que acabas de cancelar avisa que NO reactiva a Cursor; una tarea distinta no avisa', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'S02-06: Auditoría append-only, request_id y revocación', '--criterio=a', '--sin-contexto', '--lote=L11');
+  assert.match(salida(root, 'cancelar', 'T-001', 'el constructor no la tomaba'), /cancelar y reencolar la misma tarea NO despierta a Cursor/);
+  const r = salida(root, 'tarea', 'S02-06: Auditoría append-only, request_id y revocación', '--criterio=a', '--sin-contexto', '--lote=L12');
+  assert.match(r, /Estás reencolando «S02-06: Auditoría append-only[^»]*», que cancelaste hace \d+ min \(T-001\)\. Reencolar NO reactiva a Cursor/);
+  assert.match(r, /diagnostico/);
+  assert.doesNotMatch(salida(root, 'tarea', 'S03-01: otra cosa totalmente distinta', '--criterio=a', '--sin-contexto'), /reencolando/);
+});

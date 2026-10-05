@@ -145,6 +145,16 @@ function pendientes(root) {
   return Object.entries(reg.tareas).filter(([, v]) => v.estado === 'PENDIENTE').map(([clave, v]) => ({ clave, ...v }));
 }
 
+/** Un registro PENDIENTE de una tarea que ya no figura ACEPTADA (la cancelaron o la reabrieron) no puede cerrarse nunca: se declara OBSOLETO. */
+function descartarObsoletas(root, idsAceptadas) {
+  const reg = leerRegistro(root); let n = 0;
+  for (const v of Object.values(reg.tareas || {})) {
+    if (v.estado === 'PENDIENTE' && !idsAceptadas.includes(v.id)) { v.estado = 'OBSOLETA'; v.causa = 'la tarea ya no está aceptada (cancelada o reabierta)'; v.obsoleta_at = new Date().toISOString(); n++; }
+  }
+  if (n) guardarRegistro(root, reg);
+  return n;
+}
+
 function resumen(root) {
   const reg = leerRegistro(root);
   const v = Object.values(reg.tareas);
@@ -152,8 +162,9 @@ function resumen(root) {
     registradas: v.filter((x) => x.estado === 'REGISTRADA').length,
     pendientes: v.filter((x) => x.estado === 'PENDIENTE' && (x.intentos || 0) < REINTENTOS_MAX).length,
     abandonadas: v.filter((x) => x.estado === 'PENDIENTE' && (x.intentos || 0) >= REINTENTOS_MAX).length,
+    obsoletas: v.filter((x) => x.estado === 'OBSOLETA').length,
     memoria: Object.keys(reg.memoria || {}).length,
   };
 }
 
-module.exports = { estamparInicio, registrarTarea, recordar, pendientes, resumen, leerRegistro, archivosDe, REINTENTOS_MAX };
+module.exports = { estamparInicio, registrarTarea, recordar, pendientes, descartarObsoletas, resumen, leerRegistro, archivosDe, REINTENTOS_MAX };

@@ -1724,6 +1724,42 @@
           "si el puerto del tablero ya está ocupado"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-001",
+      "doc": "TEAMS",
+      "requisito": "Un registro pendiente de una tarea que luego se cancela se declara obsoleto y deja de contar",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-001"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-002",
+      "doc": "TEAMS",
+      "requisito": "La alerta del Director dormido trae el mensaje para reactivarlo con las entregas por revisar",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-002"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-003",
+      "doc": "TEAMS",
+      "requisito": "Reencolar lo recién cancelado avisa que no reactiva a Cursor",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-003"
+        ]
+      ]
     }
   ]
 }

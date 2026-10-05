@@ -548,9 +548,24 @@ function observar(root, e, say, forzar = false) {
     const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio, forzar });
     res.push({ id: t.id, ...r });
   }
+  try { reg.descartarObsoletas(root, e.tareas.filter((x) => x.estado === 'ACEPTADA').map((x) => x.id)); } catch { /* el registro es auxiliar */ }
   const nuevos = res.filter((x) => !['YA_REGISTRADA', 'EN_ESPERA'].includes(x.estado));
   if (say) for (const x of nuevos) say(x.estado === 'REGISTRADA' ? `  ✔ ${x.id} registrada en el núcleo (ciclo ${x.ciclo}, área ${x.area}, ${x.archivos} archivo(s))` : `  ⚠ ${x.id} ${x.estado}${x.causa ? ': ' + x.causa : ''} — no frena nada; se reintenta en la próxima revisión`);
   return res;
+}
+
+/** Si esta tarea es (casi) la misma que el Director canceló hace poco, devuelve cuál y hace cuánto. */
+function reencolaCancelada(root, titulo) {
+  try {
+    const norm = (t) => String(t || '').toLowerCase().replace(/\[[^\]]+\]/g, '').replace(/\s*[—-]\s*lote\s+\S+/g, '').replace(/[^a-z0-9áéíóúñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const e = calcular(root); if (!e) return null; const nuevo = norm(titulo).slice(0, 48); if (nuevo.length < 12) return null;
+    const ahora = Date.now();
+    for (const ev of leerEventos(root, 200).filter((x) => x.cmd === 'cancelar' && x.arg).reverse()) {
+      const min = (ahora - Date.parse(ev.t)) / 60000; if (min > 90) break;
+      const t = e.tareas.find((x) => x.id === ev.arg); if (t && norm(t.titulo).slice(0, 48) === nuevo) return { id: t.id, min: Math.round(min) };
+    }
+  } catch { /* el aviso es auxiliar */ }
+  return null;
 }
 
 // ───────────────────── bitácora de eventos (alimenta la oficina 3D del tablero) ─────────────────────
@@ -687,6 +702,7 @@ function ejecutarCmd(argv, root) {
     if (brief) say(`  🧠 Aviso previo de Agentix: riesgo ${brief.riesgo || 'n/d'}${brief.lineas.length ? ' · ' + brief.lineas.length + ' dato(s) del proyecto anotados en la tarea' : ' · sin antecedentes'}${/ALTO/i.test(brief.riesgo || '') ? ' — RIESGO ALTO: revisa ese contexto antes de darla por buena' : ''}`);
     { const est = leerEstado(root); est.creadas = est.creadas || {}; est.creadas[id] = iso(); guardarEstado(root, est); }
     atenderSolicitudes(root, 'el Director encoló ' + id);
+    { const rec = reencolaCancelada(root, titulo); if (rec) say('  ⚠ Estás reencolando «' + corto(titulo, 70) + '», que cancelaste hace ' + rec.min + ' min (' + rec.id + '). Reencolar NO reactiva a Cursor (glowly lo comprobó: no reaccionó). Si el problema es que no la toma, corre `' + P.CMD + ' diagnostico`; si dice PARADO, dale al dueño el mensaje que imprime. Reencola solo si cambiaste algo de fondo en la tarea.'); }
     for (const a of canal.lintTexto([titulo, ...crit, opt.detalle || ''].join('\n'))) say('  ⚠ ' + a);
     return salida();
   }
@@ -849,7 +865,7 @@ function ejecutarCmd(argv, root) {
     const id = arg[0]; const motivo = arg.slice(1).join(' ').trim();
     if (!id || !motivo) { say('Uso: teams.cjs cancelar T-001 "motivo" (la tarea deja de contar y de pedirse al constructor)'); return salida(2); }
     if (!canal.anadirLineaAlElemento(root, 'tareas', id, `❌ CANCELADA ${canal.sello()} — ${motivo}`)) { say('No encuentro la tarea ' + id); return salida(1); }
-    say(`✔ ${id} cancelada: ya no se le pide al constructor ni cuenta en el avance`); return salida();
+    say(`✔ ${id} cancelada: ya no se le pide al constructor ni cuenta en el avance`); say('  Ojo: cancelar y reencolar la misma tarea NO despierta a Cursor (glowly lo comprobó). Si no la tomaba, corre diagnostico y dale al dueño el mensaje que imprime.'); return salida();
   }
 
   if (cmd === 'auditar') {
@@ -1118,7 +1134,8 @@ function salud(root, opts = {}) {
     roles[rol] = { sin_novedad: sinNov, nombre: NOMBRE[rol], vigilante: v, ultima_ronda_hace_min: ultMin, loop: individual ? 'n/a' : (ultMin !== null && ultMin <= 6 ? 'ACTIVO' : 'NO FIGURA'), pendiente: a.razones.length, razones: a.razones.slice(0, 6), aviso_sin_atender_min: avisoMin };
     if (e.canal !== 'ACTIVO' || individual) continue;
     if (sinNov && sinNov.n >= sinNov.umbral) sube(sinNov.n >= sinNov.umbral * 2 ? 2 : 1, NOMBRE[rol] + ': ' + sinNov.n + ' rondas sin trabajo (~' + sinNov.min + ' min)' + (sinNov.pedido ? '; ya pidió tareas al Director (' + sinNov.pedido + ')' : '') + (sinNov.veredicto === 'PARADO' ? '. Evidencia: ' + sinNov.evidencia + '. Probablemente terminó su turno y espera que le escribas: pégale en su chat «' + (sinNov.empujon || 'Continúa con la cola y no te detengas a resumir.') + '»' : ''));
-    if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : ''));
+    const empujonDir = rol === 'director' && a.razones.length ? ' Si su chat está quieto, pégale en él: «' + (e.hechasSinAceptar.length ? 'Revisa ' + e.hechasSinAceptar.map((t) => t.id).join(', ') + ': audita y acepta o corrige' : 'Atiende lo que tienes pendiente') + ', atiende lo que pida el constructor y sigue con el siguiente lote. No te detengas a resumir.»' : '';
+    if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : '') + empujonDir);
     if (avisoMin !== null && avisoMin >= 10) sube(2, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min (en un turno largo, o dormido: solo tú puedes despertarlo escribiéndole en su chat)');
     else if (avisoMin !== null && avisoMin >= 3) sube(1, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min');
     if (ultMin === null || ultMin > 6) sube(1, NOMBRE[rol] + ': su loop de respaldo no figura (' + (ultMin === null ? 'sin rondas registradas' : 'última ronda hace ' + ultMin + ' min') + ')');
@@ -1157,7 +1174,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { salud, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { salud, reencolaCancelada, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();
