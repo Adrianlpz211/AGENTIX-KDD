@@ -29,6 +29,10 @@ const P = require('./teams-prompts.cjs');
 const SONDEO_MS = 10000;
 const MAX_ESPERA_MS = 105 * 60 * 1000;
 const OCIOSO_MS = 6 * 60 * 1000;
+const OCIO_RONDAS = 3;          // rondas seguidas SIN nada que hacer (~9 min con el loop de 3 min) → el constructor le pide trabajo al Director
+const OCIO_RONDAS_CON_PENDIENTE = 5;  // con pendientes que no se mueven (sin reportar ni resolver nada) esperamos más antes de preguntar
+const DORMIDO_MS = 10 * 60 * 1000;    // el constructor tiene trabajo, su vigilante está muerto y no hace rondas desde hace tanto → se lo decimos al Director (y por él, al dueño)
+const OCIO_ESPACIO_MS = 90 * 1000;     // dos llamadas a `ronda` pegadas (ronda + ronda --cierre) cuentan como UNA ronda
 const REPETIR_MS = 10 * 60 * 1000; // un aviso de «nadie tiene nada» se repite cada tanto mientras siga igual
 const PARCIAL_MS = 10 * 60 * 1000; // un PARCIAL sin avance pasa a ser decisión del Director
 const LOOP_MS = Number(process.env.AKDD_TEAMS_LOOP_MS) || 3 * 60 * 1000;     // cadencia del loop de respaldo; una ronda más espaciada que ~2 ciclos = el loop no está activo
@@ -171,7 +175,8 @@ function calcular(root, opts = {}) {
     const tipo = /Tipo:\s*(DIRECTOR|DUE[ÑN]O)/i.exec(d.texto);
     const dueno = tipo ? /DUE/i.test(tipo[1]) : false;
     const abierta = /Estado:\s*ABIERTA/i.test(d.texto) || (dueno && !/Estado:\s*DECIDIDA/i.test(d.texto) && !/Decisi[óo]n del due[ñn]o/i.test(d.texto));
-    return { ...d, dueno, abierta };
+    const solicitud = !dueno && /Origen:\s*CONSTRUCTOR/i.test(d.texto);
+    return { ...d, dueno, abierta, solicitud };
   });
 
   const corrPend = correcciones.filter((k) => !k.resuelto);
@@ -187,8 +192,9 @@ function calcular(root, opts = {}) {
 
   return {
     c, root, canal: c.estado, mecanica: c.mecanica, ahora, mtime,
+    rondas: (() => { try { return leerEstado(root).rondas || {}; } catch { return {}; } })(), modo: (() => { try { return leerEstado(root).modo || null; } catch { return null; } })(),
     correcciones, corrPend, tareas, tareasPend, hechasSinAceptar, devueltas, omisiones, decisiones,
-    decisionesDueno: decisiones.filter((d) => d.dueno && d.abierta), decididasDueno: decisiones.filter((d) => d.dueno && !d.abierta),
+    solicitudes: decisiones.filter((d) => d.solicitud && d.abierta), decisionesDueno: decisiones.filter((d) => d.dueno && d.abierta), decididasDueno: decisiones.filter((d) => d.dueno && !d.abierta),
     aceptadas: aceptadasN, total: vivas, avance: vivas ? Math.round((aceptadasN / vivas) * 100) : null,
     constructorSinTrabajo, listo, ocioso,
   };
@@ -213,6 +219,12 @@ function accionable(e, rol) {
         ? `PARCIAL ESTANCADA ${t.id} (sin avance hace ${Math.round((e.ahora - t.reporte.at) / 60000)} min): ${corto(t.reporte.detalle, 140)} — el constructor no puede avanzarla solo: decide (aceptarla así anotando lo que queda, desbloquear lo que falta, reformular o cancelar)`
         : `DEVUELTA ${t.id} (${t.reporte.estado}): ${corto(t.reporte.detalle, 100)} — decide: reformular, desbloquear o cancelar`); claves.push('V:' + t.id + ':' + canal.sha(t.reporte.detalle).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION del constructor ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
+    // El constructor tiene trabajo pero lleva rato sin rondas y sin vigilante: nadie lo va a despertar salvo el dueño (caso glowly, 05/10/2026).
+    if (e.modo !== 'individual' && (e.corrPend.length || e.tareasPend.length || e.omisiones.length)) {
+      const ultRonda = e.rondas && e.rondas.builder; const sinRonda = ultRonda ? e.ahora - ultRonda : 0;
+      if (sinRonda > DORMIDO_MS && !vigilanteVivo(e.root, 'builder')) { const min = Math.round(sinRonda / 60000); razones.push(`CONSTRUCTOR_DORMIDO: lleva ~${min} min sin hacer rondas, su vigilante NO está vivo y tiene trabajo esperando — probablemente Cursor se quedó parado. Díselo al dueño: solo él puede despertarlo escribiéndole en su chat (\`teams: continuar\`)`); claves.push('DORM:' + Math.floor(min / 10)); }
+    }
+    for (const d of e.solicitudes) { razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
     // (el caso «los dos esperando al otro» que dejó glowly parado).
@@ -221,6 +233,56 @@ function accionable(e, rol) {
     if (e.listo) { razones.push('LISTO_PARA_CERRAR: todo aceptado, sin correcciones y sin más lotes — ejecuta `cerrar` (publica el reporte final y detiene a los vigilantes)'); claves.push('LISTO:' + Math.floor(Math.max(0, e.ahora - e.mtime) / REPETIR_MS)); }
   }
   return { razones, digest: claves.length ? canal.sha(claves.sort().join('|')).slice(0, 16) : '' };
+}
+
+// ───────────────────── ocio del constructor: 3 rondas iguales → pide trabajo al Director ─────────────────────
+// Caso real (glowly, 05/10/2026): el Director ya no tenía nada que revisar, el constructor repetía «el canal sigue sin tareas
+// nuevas» ronda tras ronda y los dos se quedaron esperándose ~20 min hasta que el dueño intervino. Ahora el constructor, a la
+// tercera ronda idéntica, deja una SOLICITUD en el canal; el vigilante del Director lo despierta con ella.
+function seguimientoOcio(root, e, est) {
+  est.sinNovedad = est.sinNovedad || {}; const ahora = Date.now();
+  const razones = accionable(e, 'builder').razones;
+  const huella = canal.sha(razones.join('|') + '#' + e.hechasSinAceptar.map((t) => t.id).join(',')).slice(0, 12);
+  const prevAt = (est.rondas && est.rondas.builder) || 0;
+  const hizo = leerEventos(root, 300).some((ev) => ev.rol === 'builder' && ['reportar', 'resolver', 'decision'].includes(ev.cmd) && Date.parse(ev.t) > prevAt);
+  const umbral = razones.length ? OCIO_RONDAS_CON_PENDIENTE : OCIO_RONDAS;
+  let s = est.sinNovedad.builder;
+  if (!s || s.huella !== huella || hizo) { s = est.sinNovedad.builder = { huella, n: 1, desde: ahora, ultimo: ahora, pedido: null, umbral }; return { s, aviso: null }; }
+  s.umbral = umbral;
+  if (ahora - s.ultimo >= OCIO_ESPACIO_MS) { s.n++; s.ultimo = ahora; }
+  const min = Math.round((ahora - s.desde) / 60000);
+  if (s.n < umbral || e.listo) return { s, aviso: null };
+  if (!s.pedido) {
+    let id = '';
+    canal.mutar(root, (lineas, c) => {
+      id = canal.siguienteId(c.limpias.join(String.fromCharCode(10)), 'D');
+      const b = [`### [${id}] Constructor sin trabajo hace ~${min} min (${s.n} rondas iguales)`, `Tipo: DIRECTOR · Estado: ABIERTA · Origen: CONSTRUCTOR · ${canal.sello()}`,
+        razones.length ? `El constructor tiene ${razones.length} pendiente(s) que no avanzan desde hace ${s.n} rondas: ¿hay un bloqueo?` : 'El constructor no tiene tareas, correcciones ni omisiones y lleva ' + s.n + ' rondas con el mismo estado.',
+        'Director: encola el siguiente lote (`tarea`), cierra si todo está listo (`cerrar`) o dile qué esperar.'];
+      let L = canal.__asegurar(lineas.slice(), 'decisiones', 'Decisiones del Director y del dueño'); L = canal.__quitarPlaceholder(L, 'decisiones');
+      const fin = canal.__finSeccion(L, 'decisiones'); L.splice(fin, 0, '', ...b); return L;
+    });
+    s.pedido = id; s.pedido_at = ahora;
+    registrarEvento(root, { cmd: 'solicitud', rol: 'builder', arg: id });
+    return { s, aviso: `⏱ LLEVAS ${s.n} RONDAS (~${min} min) SIN TRABAJO. Ya le pedí tareas al Director en ${id}: su vigilante lo despierta con eso. No esperes en silencio: mantén tu loop y atiende lo que llegue.` };
+  }
+  if (s.n >= umbral * 2 && !s.escalado) { s.escalado = true; return { s, aviso: `⏱ ${s.n} RONDAS (~${min} min) y el Director no respondió a ${s.pedido}. Díselo al dueño: el Director puede estar dormido y solo él puede despertarlo escribiéndole en su chat.` }; }
+  return { s, aviso: null };
+}
+
+/** El Director encoló algo: las solicitudes abiertas del constructor quedan atendidas. */
+function atenderSolicitudes(root, texto) {
+  try {
+    canal.mutar(root, (lineas, c) => {
+      const abiertas = canal.elementos(c, 'decisiones').filter((d) => !/Tipo:\s*DUE/i.test(d.texto) && /Origen:\s*CONSTRUCTOR/i.test(d.texto) && /Estado:\s*ABIERTA/i.test(d.texto));
+      if (!abiertas.length) return null;
+      for (const d of abiertas.slice().reverse()) {
+        for (let i = d.ini; i < d.fin; i++) lineas[i] = lineas[i].replace(/Estado:\s*ABIERTA/i, 'Estado: DECIDIDA');
+        lineas.splice(d.fin, 0, `Atendida ${canal.sello()}: ${texto}`);
+      }
+      return lineas;
+    });
+  } catch { /* la solicitud es auxiliar */ }
 }
 
 // ───────────────────────────── salida de las rondas ─────────────────────────
@@ -445,7 +507,7 @@ function observar(root, e, say, forzar = false) {
 const EVENTOS_ARCHIVO = 'eventos.jsonl';
 const ROL_DE_COMANDO = {
   activar: 'director', init: 'director', adoptar: 'director', modo: 'director', plan: 'director', objetivo: 'director', tarea: 'director',
-  corregir: 'director', resolver: 'director', auditar: 'director', aceptar: 'director', revisar: 'director', decidir: 'director', decision: 'director',
+  corregir: 'director', resolver: 'builder', auditar: 'director', aceptar: 'director', revisar: 'director', decidir: 'director', decision: 'director',
   heredar: 'director', cancelar: 'director', cerrar: 'director', reabrir: 'director', iniciar: 'director', observar: 'director',
   constructor: 'builder', builder: 'builder', conectar: 'builder', ronda: 'builder', reportar: 'builder', pausa: 'ambos', continuar: 'ambos',
 };
@@ -533,7 +595,10 @@ function ejecutarCmd(argv, root) {
       say(textoRondaDirector(e));
       const rs = observar(root, e, (x) => say(x)); void rs;
       try { escribirContinuidad(root, e); } catch { /* auxiliar */ }
-    } else say(textoRondaBuilder(e));
+    } else {
+      say(textoRondaBuilder(e));
+      if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual') { const est2 = leerEstado(root); const r = seguimientoOcio(root, e, est2); guardarEstado(root, est2); if (r.aviso) say('', r.aviso); }
+    }
     if (opt.cierre && rol === 'builder' && e.canal === 'ACTIVO') {
       say('');
       const pend = e.corrPend.length + e.tareasPend.length + e.omisiones.length;
@@ -568,6 +633,7 @@ function ejecutarCmd(argv, root) {
     say(`✔ ${id} encolada${crit.length ? ' con ' + crit.length + ' criterio(s)' : ''}`);
     if (brief) say(`  🧠 Aviso previo de Agentix: riesgo ${brief.riesgo || 'n/d'}${brief.lineas.length ? ' · ' + brief.lineas.length + ' dato(s) del proyecto anotados en la tarea' : ' · sin antecedentes'}${/ALTO/i.test(brief.riesgo || '') ? ' — RIESGO ALTO: revisa ese contexto antes de darla por buena' : ''}`);
     { const est = leerEstado(root); est.creadas = est.creadas || {}; est.creadas[id] = iso(); guardarEstado(root, est); }
+    atenderSolicitudes(root, 'el Director encoló ' + id);
     for (const a of canal.lintTexto([titulo, ...crit, opt.detalle || ''].join('\n'))) say('  ⚠ ' + a);
     return salida();
   }
@@ -974,8 +1040,10 @@ function salud(root, opts = {}) {
     const ult = est.rondas && est.rondas[rol]; const ultMin = ult ? Math.round((ahora - ult) / 60000) : null;
     const sinAt = (est.wakes || []).filter((w) => w.rol === rol && !w.visto_at).map((w) => Date.parse(w.at)).filter(Number.isFinite);
     const avisoMin = sinAt.length ? Math.round((ahora - Math.min(...sinAt)) / 60000) : null;
-    roles[rol] = { nombre: NOMBRE[rol], vigilante: v, ultima_ronda_hace_min: ultMin, loop: individual ? 'n/a' : (ultMin !== null && ultMin <= 6 ? 'ACTIVO' : 'NO FIGURA'), pendiente: a.razones.length, razones: a.razones.slice(0, 6), aviso_sin_atender_min: avisoMin };
+    const sn = rol === 'builder' && est.sinNovedad && est.sinNovedad.builder; const sinNov = sn && sn.n >= 2 ? { n: sn.n, min: Math.round((ahora - sn.desde) / 60000), pedido: sn.pedido || null, umbral: sn.umbral || OCIO_RONDAS } : null;
+    roles[rol] = { sin_novedad: sinNov, nombre: NOMBRE[rol], vigilante: v, ultima_ronda_hace_min: ultMin, loop: individual ? 'n/a' : (ultMin !== null && ultMin <= 6 ? 'ACTIVO' : 'NO FIGURA'), pendiente: a.razones.length, razones: a.razones.slice(0, 6), aviso_sin_atender_min: avisoMin };
     if (e.canal !== 'ACTIVO' || individual) continue;
+    if (sinNov && sinNov.n >= sinNov.umbral) sube(sinNov.n >= sinNov.umbral * 2 ? 2 : 1, NOMBRE[rol] + ': ' + sinNov.n + ' rondas sin trabajo (~' + sinNov.min + ' min)' + (sinNov.pedido ? '; ya pidió tareas al Director (' + sinNov.pedido + ')' : ''));
     if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : ''));
     if (avisoMin !== null && avisoMin >= 10) sube(2, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min (en un turno largo, o dormido: solo tú puedes despertarlo escribiéndole en su chat)');
     else if (avisoMin !== null && avisoMin >= 3) sube(1, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min');

@@ -1005,3 +1005,57 @@ test('OFICINA-2 — los sub-agentes figuran auditando desde «auditar T-00X» ha
     assert.equal(T.salud(root, { ahora: Date.now() + 25 * 60000 }).auditoria, null, 'una auditoría de hace 25 min ya no se muestra como activa');
   } finally { restaurar(); }
 });
+
+// ───────────────────────────── ocio del constructor: 3 rondas iguales → pide trabajo al Director ─────────────────────────────
+
+test('OCIO-1 — tres rondas seguidas del constructor sin nada que hacer dejan una SOLICITUD que despierta al Director, y encolar tarea la atiende', () => {
+  const root = proyecto(); arrancado(root);
+  const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+  const atras = () => { const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); if (est.sinNovedad && est.sinNovedad.builder) { est.sinNovedad.builder.ultimo -= 100000; est.sinNovedad.builder.desde -= 180000; } fs.writeFileSync(estadoF, JSON.stringify(est)); };
+  const ronda = () => salida(root, 'ronda', '--rol=builder');
+  assert.doesNotMatch(ronda(), /SIN TRABAJO/);
+  assert.doesNotMatch(ronda(), /SIN TRABAJO/, 'dos llamadas pegadas cuentan como UNA ronda');
+  atras(); assert.doesNotMatch(ronda(), /SIN TRABAJO/);   // 2.ª ronda
+  atras(); const r3 = ronda();                             // 3.ª ronda
+  assert.match(r3, /LLEVAS 3 RONDAS \(~\d+ min\) SIN TRABAJO/);
+  assert.match(r3, /Ya le pedí tareas al Director en D-001/);
+  assert.match(fs.readFileSync(canal.rutaCanal(root), 'utf8'), /\[D-001\] Constructor sin trabajo[\s\S]*Origen: CONSTRUCTOR/);
+  const e = T.calcular(root);
+  assert.ok(T.accionable(e, 'director').razones.some((x) => /SOLICITUD DEL CONSTRUCTOR D-001/.test(x)), 'el Director recibe el aviso');
+  assert.notEqual(T.accionable(e, 'director').digest, '');
+  assert.equal(e.decisionesDueno.length, 0, 'no es una decisión del dueño');
+  const s = T.salud(root); assert.equal(s.roles.builder.sin_novedad.pedido, 'D-001');
+  assert.ok(s.alertas.some((a) => /Constructor \(Cursor\): 3 rondas sin trabajo/.test(a.msg)));
+  atras(); assert.doesNotMatch(ronda(), /Ya le pedí/, 'no pide dos veces la misma solicitud');
+  salida(root, 'tarea', 'Siguiente lote', '--criterio=a', '--sin-contexto');
+  assert.match(fs.readFileSync(canal.rutaCanal(root), 'utf8'), /Atendida [^\n]*el Director encoló T-001/);
+  assert.equal(T.calcular(root).solicitudes.length, 0);
+  assert.ok(!T.accionable(T.calcular(root), 'director').razones.some((x) => /SOLICITUD DEL CONSTRUCTOR/.test(x)));
+});
+
+test('OCIO-2 — si el constructor reporta algo, la cuenta de rondas iguales vuelve a empezar; en modo individual no se pide nada', () => {
+  const root = proyecto(); arrancado(root); const restaurar = stubPostCycle(root);
+  try {
+    const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+    const atras = () => { const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); if (est.sinNovedad && est.sinNovedad.builder) est.sinNovedad.builder.ultimo -= 100000; fs.writeFileSync(estadoF, JSON.stringify(est)); };
+    salida(root, 'tarea', 'Algo', '--criterio=a', '--sin-contexto');
+    salida(root, 'ronda', '--rol=builder'); atras(); salida(root, 'ronda', '--rol=builder'); atras();
+    salida(root, 'reportar', 'T-001', '--estado=PARCIAL', '--detalle=voy por la mitad del módulo');
+    atras(); salida(root, 'ronda', '--rol=builder');
+    assert.equal(JSON.parse(fs.readFileSync(estadoF, 'utf8')).sinNovedad.builder.n, 1, 'reportar reinicia la cuenta');
+  } finally { restaurar(); }
+  const ind = proyecto(); salida(ind, 'activar'); salida(ind, 'modo', 'individual'); salida(ind, 'iniciar');
+  for (let i = 0; i < 4; i++) { const est = JSON.parse(fs.readFileSync(path.join(ind, '.agentic', '_teams', 'estado.json'), 'utf8')); fs.writeFileSync(path.join(ind, '.agentic', '_teams', 'estado.json'), JSON.stringify(est)); assert.doesNotMatch(salida(ind, 'ronda', '--rol=builder'), /SIN TRABAJO/); }
+});
+
+test('OCIO-3 — con trabajo esperando, sin vigilante y ~10 min sin rondas, el Director recibe CONSTRUCTOR_DORMIDO (solo el dueño puede despertar a Cursor)', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo', '--criterio=a', '--sin-contexto');
+  const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+  const poner = (minAtras) => { const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); est.rondas = { ...(est.rondas || {}), builder: Date.now() - minAtras * 60000 }; fs.writeFileSync(estadoF, JSON.stringify(est)); };
+  const razones = () => T.accionable(T.calcular(root), 'director').razones.filter((x) => /CONSTRUCTOR_DORMIDO/.test(x));
+  assert.equal(razones().length, 0, 'sin haber hecho nunca una ronda no se le llama dormido');
+  poner(4); assert.equal(razones().length, 0, 'una ronda reciente: está vivo');
+  poner(15); assert.match(razones()[0], /lleva ~15 min sin hacer rondas.*solo él puede despertarlo/);
+  vigilanteFalso(root, 'builder'); assert.equal(razones().length, 0, 'con su vigilante vivo no está dormido');
+});

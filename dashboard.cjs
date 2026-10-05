@@ -1475,7 +1475,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('tiempos',this)">⏱ Línea de Tiempo</div>
   <div class="mode-tab" onclick="setMode('memoria',this)" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</div>
   <div class="mode-tab" onclick="setMode('contexto',this)" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</div>
-  <div class="mode-tab" onclick="setMode('teams',this)" title="Director + Constructor: semáforo, vigilantes, cola y registro">🤝 TEAMS</div>
+  <div class="mode-tab" onclick="setMode('teams',this)" title="La oficina de la agencia en 3D: quién trabaja, en vivo (TEAMS completo o individual, o un solo modelo con aa:)">🏢 Oficina</div>
   <div class="mode-tab" onclick="setMode('actualizacion',this)" title="Estado de la última actualización y de la memoria">🔄 Actualización</div>
 </div>
 
@@ -2307,7 +2307,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <div id="mode-memoria" class="mode-embed"><iframe data-src="/memoria?embed=1" title="Memoria"></iframe></div>
 <div id="mode-contexto" class="mode-embed"><iframe data-src="/contexto?embed=1" title="Contexto y esfuerzo"></iframe></div>
-<div id="mode-teams" class="mode-embed"><iframe data-src="/teams?embed=1" title="TEAMS"></iframe></div>
+<div id="mode-teams" class="mode-embed"><iframe data-src="/oficina?embed=1" title="Oficina"></iframe></div>
 <div id="mode-actualizacion" class="mode-embed"><iframe data-src="/actualizacion?embed=1" title="Actualización"></iframe></div>
 
 <div id="mode-tiempos">
@@ -5167,7 +5167,7 @@ const server = require('http').createServer((req, res) => {
     res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(full));
     return;
   }
-  if (ruta === '/teams') {
+  if (ruta === '/teams' || ruta === '/oficina') {
     // Pestaña TEAMS (solo lectura): semáforo, vigilantes, cola y registro. No toca el tablero de grafos.
     res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
     res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('teams-pagina.cjs').HTML, url));
@@ -5196,7 +5196,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}`);
   console.log(`  Actualización y memoria → ${url}/actualizacion`);
-  console.log(`  Memoria → ${url}/memoria  ·  Contexto y esfuerzo → ${url}/contexto  ·  TEAMS → ${url}/teams\n`);
+  console.log(`  Memoria → ${url}/memoria  ·  Contexto y esfuerzo → ${url}/contexto  ·  Oficina → ${url}/oficina\n`);
   if (process.env.AKDD_DASH_NO_OPEN === '1') return;
   // Open browser
   const { exec } = require('child_process');

@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.22.7] — 2026-10-05
+
+**Oficina para cualquier forma de trabajo, y el constructor ya no se queda esperando en silencio.**
+- **La pestaña pasa a llamarse «Oficina»** (`/oficina`; `/teams` sigue sirviendo) y la agencia 3D vive con TEAMS completo, TEAMS individual o **un solo modelo**: quien trabaja con `aa:` (solo Claude Code o solo Cursor, marcado con `linea-tiempo inicio --actor=<quién eres>`) se sienta a trabajar con el texto «aa: <tarea>»; el otro sigue en la sala de descanso. Nuevo `/api/v1/oficina` (TEAMS si lo hay + actividad por modelo, solo lectura; una marca de sesión cerrada o de hace más de 6 h no cuenta como trabajo).
+- **Cámara que gira desde el centro:** las vistas isométrica y libre giran SIEMPRE alrededor del centro de la oficina (arrastrar = girar e inclinar; clic derecho / mayús = mover el centro; rueda = zoom). Las paredes se ocultan solas al pasar por detrás.
+- **Sin botones de demostración: todo en tiempo real.** En su lugar: atajos de cámara (Oficina, Pizarra, Flujo, Semáforo, Sala, Reloj) y un botón por persona (Director, UI/UX, Backend, Negocio, Constructor, Clawd) que se acerca y **sigue** a esa persona mientras trabaja o camina.
+- **Clawd camina por toda la oficina**, va hasta cada persona o perro y los saluda (ellos le devuelven el saludo); sigue siendo pulsable. El reloj de pared ahora tiene números y la hora real en digital. Las etiquetas se encogen al acercar la cámara. En modo individual, Claude Code también aparece construyendo.
+- **Constructor parado → pide trabajo al Director (regla de las 3 rondas).** Caso real (glowly, 05/10/2026): el Director no tenía nada que revisar, el constructor repetía «el canal sigue sin tareas nuevas» y los dos se esperaron ~20 min hasta que el dueño intervino. Ahora, si el constructor lleva 3 rondas seguidas (~9 min) con el mismo estado y sin nada que hacer (5 si tiene pendientes que no se mueven y no reportó ni resolvió nada), la propia ronda deja una **SOLICITUD** en el canal (`Origen: CONSTRUCTOR`), le dice «LLEVAS 3 RONDAS (~9 min) SIN TRABAJO» y el vigilante del Director lo despierta con ella; si en otras 3 rondas el Director no responde, avisa al dueño. Encolar una tarea la marca atendida. El semáforo lo muestra («Constructor: 3 rondas sin trabajo»). Dos llamadas pegadas (`ronda` + `ronda --cierre`) cuentan como una; modo individual no pide nada.
+- **Constructor dormido → el Director lo sabe.** Si el constructor tiene trabajo esperando, su vigilante no está vivo y lleva ~10 min sin hacer rondas, el vigilante del Director recibe CONSTRUCTOR_DORMIDO («probablemente Cursor se quedó parado: díselo al dueño, solo él puede despertarlo»). Antes solo lo veía quien abriera el tablero.
+- **Corregido:** `teams: resolver C-00X` se registraba en la bitácora como acción del Director; es del constructor.
+
 ## [3.22.6] — 2026-10-04
 
 **TEAMS: la oficina 3D en el tablero, y dos arreglos de ruido en los avisos.**

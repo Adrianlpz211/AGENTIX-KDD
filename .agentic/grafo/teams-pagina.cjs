@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Página «TEAMS» del tablero: /teams  (se muestra dentro del tablero como una pestaña más).
+ * Página «Oficina» del tablero: /oficina (y /teams, el nombre anterior). Se muestra dentro del tablero como una pestaña más.
  *
  * Solo lectura. Lee /api/v1/teams, que sale de `teams.cjs salud`: el canal, los dos roles (vigilante vivo, última ronda,
  * loop de respaldo, avisos sin atender), la cola y el registro en el núcleo de Agentix. El SEMÁFORO está arriba y dice,
@@ -16,7 +16,7 @@ const PLANTILLA = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agentix — TEAMS</title>
+<title>Agentix — Oficina</title>
 <style>
   :root { --bg:#0A0E14; --panel:#111823; --line:#1f2a3a; --txt:#d6dde8; --dim:#8A97A6; --ok:#3FE2E8; --warn:#D9A33C; --bad:#ff6b6b; }
   @media (prefers-color-scheme: light) { :root { --bg:#f6f8fb; --panel:#fff; --line:#d9e0ea; --txt:#17202e; --dim:#5c6b7e; --ok:#0a8f96; --warn:#9a6a00; --bad:#c0392b; } }
@@ -49,12 +49,12 @@ const PLANTILLA = `<!doctype html>
 </head>
 <body>
 <header>
-  <h1>TEAMS — Director + Constructor</h1>
+  <h1>Oficina — agencia de desarrollo</h1>
   <span class="sub" id="sub">cargando…</span>
   <button id="recargar" type="button">Actualizar vista</button>
 </header>
 <section id="mundo" class="card">
-  <h2>Oficina en vivo · lo que ves es lo que pasa ahora mismo</h2>
+  <h2>Oficina en vivo · lo que ves es lo que pasa ahora mismo · arrastra para girar, clic derecho para mover, rueda para acercar</h2>
   <div id="escena" aria-label="Escena 3D de la oficina: director, tres sub-agentes, constructor y sus vigilantes"></div>
   <div class="ctl">
     <span class="dim">Vista:</span>
@@ -66,9 +66,14 @@ const PLANTILLA = `<!doctype html>
     <button type="button" onclick="window.mundoIr && mundoIr('flujo')">Flujo</button>
     <button type="button" onclick="window.mundoIr && mundoIr('semaforo')">Semáforo</button>
     <button type="button" onclick="window.mundoIr && mundoIr('sala')">Sala</button>
-    <span class="sep"></span><span class="dim">Demostración:</span>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('recorrido')">Recorrido completo</button>
-    <button type="button" onclick="window.mundoSimular && mundoSimular('real')">Volver a lo real</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('reloj')">Reloj</button>
+    <span class="sep"></span><span class="dim">Seguir a:</span>
+    <button type="button" data-seguir="director" onclick="window.mundoSeguir && mundoSeguir('director')">Director</button>
+    <button type="button" data-seguir="fe" onclick="window.mundoSeguir && mundoSeguir('fe')">UI/UX</button>
+    <button type="button" data-seguir="be" onclick="window.mundoSeguir && mundoSeguir('be')">Backend</button>
+    <button type="button" data-seguir="neg" onclick="window.mundoSeguir && mundoSeguir('neg')">Negocio</button>
+    <button type="button" data-seguir="cons" onclick="window.mundoSeguir && mundoSeguir('cons')">Constructor</button>
+    <button type="button" data-seguir="clawd" onclick="window.mundoSeguir && mundoSeguir('clawd')">Clawd</button>
     <span id="nota3d" class="nota3d"></span>
   </div>
 </section>
@@ -88,12 +93,18 @@ const PLANTILLA = `<!doctype html>
   function hora(x) { if (!x) return '—'; var d = new Date(x); return isNaN(d) ? String(x) : d.toLocaleTimeString(); }
   function lista(c, items, vacio, fmt) { if (!items || !items.length) { c.appendChild(el('div', 'dim', vacio)); return; } var ul = el('ul'); for (var i = 0; i < items.length; i++) ul.appendChild(el('li', null, fmt(items[i]))); c.appendChild(ul); }
 
+  function actividadCard(act) {
+    var c = card('Quién trabaja con aa: ahora', false);
+    var vivos = act && act.actores ? act.actores.filter(function (a) { return a.activa; }) : [];
+    if (!vivos.length) { c.appendChild(el('div', 'dim', 'Nadie tiene una tarea aa: abierta. Cada modelo se marca con «linea-tiempo inicio --actor=<quién eres>» al arrancar.')); return; }
+    vivos.forEach(function (a) { fila(c, a.actor === 'default' ? 'agente' : a.actor, a.tarea + (a.desde_seg !== null ? ' · hace ' + Math.max(1, Math.round(a.desde_seg / 60)) + ' min' : ''), 'ok'); });
+  }
   function pintar(j) {
     var d = j.data; raiz.textContent = '';
     if (!d) {
       var c0 = card('Sin canal TEAMS', true);
-      c0.appendChild(el('div', 'dim', j.reason_code === 'SIN_CANAL' ? 'Este proyecto no tiene un canal TEAMS. Escribe «teams: activar» en Claude Code.' : 'No hay datos (' + (j.reason_code || j.status) + ').'));
-      sub.textContent = 'sin datos'; return;
+      c0.appendChild(el('div', 'dim', j.reason_code === 'SIN_CANAL' ? 'Este proyecto no tiene un canal TEAMS activo: la oficina sigue viva con lo que cada modelo hace con aa:. Para trabajar en equipo escribe «teams: activar» en Claude Code.' : j.reason_code === 'TEAMS_NO_INSTALADO' ? 'Este proyecto no trae TEAMS: la oficina muestra lo que cada modelo hace con aa:.' : 'No hay datos (' + (j.reason_code || j.status) + ').'));
+      actividadCard(j.actividad); sub.textContent = (j.actividad && j.actividad.actores.some(function (a) { return a.activa; })) ? 'trabajando con aa:' : 'sin actividad'; return;
     }
     sub.textContent = 'canal ' + d.canal + (d.modo ? ' · modo ' + d.modo.toUpperCase() : '') + ' · ' + hora(d.generado) + (j.stale ? ' · dato VIEJO (la base está ocupada)' : '');
 
@@ -130,14 +141,17 @@ const PLANTILLA = `<!doctype html>
 
     var av = card('Últimos avisos de los vigilantes');
     lista(av, d.avisos.slice().reverse(), 'Todavía no hubo avisos.', function (a) { return hora(a.at) + ' · ' + (a.rol === 'director' ? 'Director' : 'Constructor') + ' · ' + (a.atendido ? 'atendido' : 'SIN ATENDER'); });
+    actividadCard(j.actividad);
   }
 
   var firma = '';
   function cargar() {
-    fetch('/api/v1/teams', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
-      if (window.mundoActualizar) { try { window.mundoActualizar(j.data || null, j); } catch (e) { /* la escena es un adorno: nunca rompe los datos */ } }
-      var d = j.data, f = d ? JSON.stringify([d.semaforo, d.canal, d.alertas, d.roles, d.cola, d.registro, d.avisos, d.avance, d.quieto_min]) : String(j.status) + String(j.reason_code);
-      if (f !== firma || !raiz.firstChild) { firma = f; pintar(j); }
+    fetch('/api/v1/oficina', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      var o = j.data || { teams: null, teams_instalado: false, actividad: { actores: [] } };
+      var d = o.teams || null, t = { status: d ? 'OK' : (o.teams_instalado ? 'EMPTY' : 'UNAVAILABLE'), reason_code: d ? null : (o.teams_instalado ? 'SIN_CANAL' : 'TEAMS_NO_INSTALADO'), data: d, stale: j.stale, actividad: o.actividad };
+      if (window.mundoActualizar) { try { window.mundoActualizar(d, t, o.actividad); } catch (e) { /* la escena es un adorno: nunca rompe los datos */ } }
+      var f = (d ? JSON.stringify([d.semaforo, d.canal, d.alertas, d.roles, d.cola, d.registro, d.avisos, d.avance, d.quieto_min]) : 'sin') + JSON.stringify(o.actividad.actores.map(function (a) { return [a.actor, a.tarea, a.activa]; }));
+      if (f !== firma || !raiz.firstChild) { firma = f; pintar(t); }
     }).catch(function () { sub.textContent = 'no pude leer el tablero'; });
   }
   document.getElementById('recargar').addEventListener('click', function () { firma = ''; cargar(); });

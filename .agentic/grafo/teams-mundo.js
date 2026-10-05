@@ -25,60 +25,77 @@
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0f1a);
 
-  // ═════════ cámaras: isométrica (ortográfica) y libre (perspectiva) ═════════
+  // ═════════ cámaras: isométrica (ortográfica) y libre (perspectiva) — las dos giran SIEMPRE alrededor del centro ═════════
   var camO = new THREE.OrthographicCamera(-1, 1, 1, -1, -80, 220);
   var camP = new THREE.PerspectiveCamera(36, 1, 0.1, 160);
   var camera = camO, vista = 'iso';
-  var ISO = { tx: 0, ty: 1.9, tz: -0.2, zoom: 15.2 }, ISO_DIR = new THREE.Vector3(1, 0.98, 1).normalize();
-  var LIB = { yaw: 0.62, pitch: 0.58, dist: 23, tx: 0, ty: 1.2, tz: -0.4 };
+  var ORB = { yaw: 0.785, pitch: 0.61, dist: 23, zoom: 15.2, tx: 0, ty: 1.0, tz: 0 };   // el pivote es el centro de la oficina
   var PRESETS = {
-    oficina: { yaw: 0.62, pitch: 0.58, dist: 23, tx: 0, ty: 1.2, tz: -0.4 },
+    oficina: { iso: true, yaw: 0.785, pitch: 0.61, zoom: 15.2, dist: 23, tx: 0, ty: 1.0, tz: 0 },
     pizarra: { yaw: 0.0, pitch: 0.05, dist: 6.5, tx: -6, ty: 3.5, tz: -7 },
     flujo: { yaw: 0.0, pitch: 0.05, dist: 7.0, tx: 0.6, ty: 3.5, tz: -7 },
     semaforo: { yaw: 0.0, pitch: 0.05, dist: 6.0, tx: 7.6, ty: 3.5, tz: -7 },
     sala: { yaw: 0.9, pitch: 0.5, dist: 10.5, tx: -6.2, ty: 0.9, tz: 3.6 },
+    reloj: { yaw: 1.5708, pitch: 0.05, dist: 6.5, tx: -9.9, ty: 4.3, tz: -5.8 },
   };
-  var vuelo = null;
+  var vuelo = null, seguir = null, seguirDist = 6.5;
   function aplicarCamara() {
-    var w = cont.clientWidth || 640, h = cont.clientHeight || 400, asp = w / h;
+    var w = cont.clientWidth || 640, h = cont.clientHeight || 400, asp = w / h, cp = Math.cos(ORB.pitch);
+    var dx = Math.sin(ORB.yaw) * cp, dy = Math.sin(ORB.pitch), dz = Math.cos(ORB.yaw) * cp;
     if (vista === 'iso') {
-      var s = ISO.zoom; camO.left = -s * asp / 2; camO.right = s * asp / 2; camO.top = s / 2; camO.bottom = -s / 2; camO.updateProjectionMatrix();
-      camO.position.set(ISO.tx + ISO_DIR.x * 50, ISO.ty + ISO_DIR.y * 50, ISO.tz + ISO_DIR.z * 50); camO.lookAt(ISO.tx, ISO.ty, ISO.tz); camera = camO;
+      var s = ORB.zoom; camO.left = -s * asp / 2; camO.right = s * asp / 2; camO.top = s / 2; camO.bottom = -s / 2; camO.updateProjectionMatrix();
+      camO.position.set(ORB.tx + dx * 60, ORB.ty + dy * 60, ORB.tz + dz * 60); camO.lookAt(ORB.tx, ORB.ty, ORB.tz); camera = camO;
     } else {
       camP.aspect = asp; camP.updateProjectionMatrix();
-      var cp = Math.cos(LIB.pitch);
-      camP.position.set(LIB.tx + Math.sin(LIB.yaw) * cp * LIB.dist, LIB.ty + Math.sin(LIB.pitch) * LIB.dist, LIB.tz + Math.cos(LIB.yaw) * cp * LIB.dist);
-      camP.lookAt(LIB.tx, LIB.ty, LIB.tz); camera = camP;
+      camP.position.set(ORB.tx + dx * ORB.dist, ORB.ty + dy * ORB.dist, ORB.tz + dz * ORB.dist); camP.lookAt(ORB.tx, ORB.ty, ORB.tz); camera = camP;
     }
+    // la maqueta tiene dos paredes: si la cámara pasa por detrás de una, esa pared se oculta para poder ver dentro
+    var cx = camera.position.x, cz = camera.position.z;
+    if (typeof paredFondo !== 'undefined') { var vf = cz > -HD - 0.3, vi = cx > -HW - 0.3; paredFondo.visible = vf; ledFondo.visible = vf; paredIzq.visible = vi; }
   }
   function tamano() { var w = cont.clientWidth || 640, h = cont.clientHeight || 400; renderer.setSize(w, h, false); aplicarCamara(); }
   if (window.ResizeObserver) new ResizeObserver(tamano).observe(cont); else window.addEventListener('resize', tamano);
   function marcarBotones() {
-    var bs = document.querySelectorAll('[data-vista]'); for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('on', bs[i].getAttribute('data-vista') === vista && !vuelo);
+    var bs = document.querySelectorAll('[data-vista]'); for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('on', bs[i].getAttribute('data-vista') === vista);
+    var ss = document.querySelectorAll('[data-seguir]'); for (var j = 0; j < ss.length; j++) ss[j].classList.toggle('on', ss[j].getAttribute('data-seguir') === seguir);
   }
-  window.mundoVista = function (v) { vista = v === 'libre' ? 'libre' : 'iso'; vuelo = null; aplicarCamara(); marcarBotones(); };
-  window.mundoIr = function (nombre) {
-    var p = PRESETS[nombre]; if (!p) return;
-    vista = 'libre'; vuelo = { desde: JSON.parse(JSON.stringify(LIB)), hasta: p, t: 0, dur: 1.15 }; marcarBotones();
+  window.mundoVista = function (v) {
+    seguir = null; vuelo = null;
+    if (v === 'iso') { vista = 'iso'; } else { vista = 'libre'; }
+    aplicarCamara(); marcarBotones();
   };
-  // entrada: arrastrar (iso = mover · libre = girar), mayús/clic derecho = mover, rueda = zoom, doble clic = reiniciar
+  window.mundoIr = function (nombre) {
+    var p = PRESETS[nombre]; if (!p) return; seguir = null;
+    vista = p.iso ? 'iso' : 'libre';
+    vuelo = { desde: JSON.parse(JSON.stringify(ORB)), hasta: p, t: 0, dur: 1.15 }; marcarBotones();
+  };
+  // seguir a alguien: el pivote lo acompaña mientras se mueve; arrastrar sigue girando alrededor de esa persona
+  window.mundoSeguir = function (k) {
+    if (k === seguir) { seguir = null; marcarBotones(); return; }
+    if (k !== 'clawd' && !P[k]) return; seguir = k; vuelo = null; vista = 'libre'; seguirDist = 6.5; marcarBotones();
+  };
+  function posSeguida() { return seguir === 'clawd' ? clawd.position : P[seguir].raiz.position; }
+  // entrada: arrastrar = girar alrededor del centro (arriba/abajo = inclinar); clic derecho, mayús o rueda del medio = mover el centro; rueda = zoom
   var arr = null, moved = 0;
   cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   cv.addEventListener('pointerdown', function (e) { arr = { x: e.clientX, y: e.clientY, mover: e.button === 2 || e.shiftKey || e.button === 1 }; moved = 0; vuelo = null; cv.style.cursor = 'grabbing'; try { cv.setPointerCapture(e.pointerId); } catch (x) { /* sin captura */ } });
   cv.addEventListener('pointerup', function (e) { var fue = arr && moved < 5; arr = null; cv.style.cursor = 'grab'; if (fue) pulsar(e); });
   cv.addEventListener('pointermove', function (e) {
     if (!arr) return; var dx = e.clientX - arr.x, dy = e.clientY - arr.y; arr.x = e.clientX; arr.y = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
-    if (vista === 'iso' || arr.mover) {
-      var cam = vista === 'iso' ? camO : camP, T = vista === 'iso' ? ISO : LIB; cam.updateMatrixWorld();
-      var u = (vista === 'iso' ? ISO.zoom : LIB.dist * 0.8) / (cont.clientHeight || 400), rx = cam.matrixWorld.elements[0], rz = cam.matrixWorld.elements[2], rl = Math.sqrt(rx * rx + rz * rz) || 1;
-      var fx = T.tx - cam.position.x, fz = T.tz - cam.position.z, fl = Math.sqrt(fx * fx + fz * fz) || 1; rx /= rl; rz /= rl; fx /= fl; fz /= fl;
-      T.tx += -rx * dx * u + fx * dy * u * 1.4; T.tz += -rz * dx * u + fz * dy * u * 1.4;
-      T.tx = Math.max(-12, Math.min(12, T.tx)); T.tz = Math.max(-9, Math.min(9, T.tz));
-    } else { LIB.yaw -= dx * 0.006; LIB.pitch = Math.max(0.05, Math.min(1.45, LIB.pitch + dy * 0.005)); }
+    if (arr.mover) {
+      seguir = null; marcarBotones();
+      var u = (vista === 'iso' ? ORB.zoom : ORB.dist * 0.8) / (cont.clientHeight || 400), rx = Math.cos(ORB.yaw), rz = -Math.sin(ORB.yaw), fx = -Math.sin(ORB.yaw), fz = -Math.cos(ORB.yaw);
+      ORB.tx += -rx * dx * u + fx * dy * u * 1.4; ORB.tz += -rz * dx * u + fz * dy * u * 1.4;
+      ORB.tx = Math.max(-12, Math.min(12, ORB.tx)); ORB.tz = Math.max(-9, Math.min(9, ORB.tz));
+    } else { ORB.yaw -= dx * 0.006; ORB.pitch = Math.max(0.05, Math.min(1.5, ORB.pitch + dy * 0.005)); }
     aplicarCamara();
   });
-  cv.addEventListener('wheel', function (e) { e.preventDefault(); vuelo = null; if (vista === 'iso') ISO.zoom = Math.max(7, Math.min(32, ISO.zoom * (1 + e.deltaY * 0.0011))); else LIB.dist = Math.max(4, Math.min(40, LIB.dist * (1 + e.deltaY * 0.0011))); aplicarCamara(); }, { passive: false });
-  cv.addEventListener('dblclick', function () { if (vista === 'iso') { ISO.tx = 0; ISO.ty = 1.9; ISO.tz = -0.2; ISO.zoom = 15.2; aplicarCamara(); } else window.mundoIr('oficina'); });
+  cv.addEventListener('wheel', function (e) {
+    e.preventDefault(); vuelo = null; var f = 1 + e.deltaY * 0.0011;
+    if (seguir) seguirDist = Math.max(2.5, Math.min(24, seguirDist * f)); else if (vista === 'iso') ORB.zoom = Math.max(7, Math.min(32, ORB.zoom * f)); else ORB.dist = Math.max(4, Math.min(40, ORB.dist * f));
+    aplicarCamara();
+  }, { passive: false });
+  cv.addEventListener('dblclick', function () { window.mundoIr('oficina'); });
 
   // ═════════ luces ═════════
   scene.add(new THREE.HemisphereLight(0xc9d8f5, 0x3a3640, 1.0));
@@ -138,9 +155,9 @@
     caja(HW * 2 + 0.6, 0.5, 0.3, 0x1b2030, 0, -0.45, HD + 0.15); caja(0.3, 0.5, HD * 2 + 0.3, 0x1b2030, HW + 0.15, -0.45, 0);   // canto de la maqueta
   })();
   var pared = 0x3a4766;
-  caja(HW * 2 + 0.3, 6.4, 0.3, pared, 0, 3.2, -HD - 0.15); caja(0.3, 6.4, HD * 2, pared, -HW - 0.15, 3.2, 0);
+  var paredFondo = caja(HW * 2 + 0.3, 6.4, 0.3, pared, 0, 3.2, -HD - 0.15), paredIzq = caja(0.3, 6.4, HD * 2, pared, -HW - 0.15, 3.2, 0);
   caja(HW * 2, 0.22, 0.12, 0x1a2133, 0, 0.11, -HD + 0.06); caja(0.12, 0.22, HD * 2, 0x1a2133, -HW + 0.06, 0.11, 0);   // zócalos
-  caja(HW * 2 + 0.3, 0.08, 0.32, 0x3fe2e8, 0, 6.3, -HD - 0.15, null, { e: 1.2, nosombra: true });   // tira de luz arriba
+  var ledFondo = caja(HW * 2 + 0.3, 0.08, 0.32, 0x3fe2e8, 0, 6.3, -HD - 0.15, null, { e: 1.2, nosombra: true });   // tira de luz arriba
   // ventanas con atardecer en la pared izquierda
   (function ventanas() {
     var c = lienzo(256, 320), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 320); gr.addColorStop(0, '#1d2b52'); gr.addColorStop(0.55, '#6d5a8a'); gr.addColorStop(1, '#e49a62'); g.fillStyle = gr; g.fillRect(0, 0, 256, 320);
@@ -150,14 +167,21 @@
       caja(0.1, 0.1, 2.5, 0x161b29, -HW + 0.18, 3.3, z); caja(0.1, 3.0, 0.1, 0x161b29, -HW + 0.18, 3.3, z);
     });
   })();
-  // reloj de pared: la hora REAL
-  var relojC = lienzo(160, 160), relojP = pantalla(relojC, 1.5, 1.5, -HW + 0.12, 5.1, -5.8, null, Math.PI / 2); var relojSeg = -1;
+  // reloj de pared con números y la hora REAL (analógico + digital)
+  var relojC = lienzo(256, 310), relojP = pantalla(relojC, 1.9, 2.3, -HW + 0.12, 5.0, -5.8, null, Math.PI / 2); var relojSeg = -1;
+  relojP.userData.clic = 'reloj';
   function pintarReloj() {
-    var d = new Date(), s = d.getSeconds(); if (s === relojSeg) return; relojSeg = s; var g = relojC.getContext('2d'); g.clearRect(0, 0, 160, 160);
-    g.fillStyle = '#10182a'; g.beginPath(); g.arc(80, 80, 76, 0, 7); g.fill(); g.strokeStyle = '#3fe2e8'; g.lineWidth = 5; g.stroke();
-    g.strokeStyle = '#7f8aa3'; g.lineWidth = 3; for (var i = 0; i < 12; i++) { var a = i * Math.PI / 6; g.beginPath(); g.moveTo(80 + Math.sin(a) * 62, 80 - Math.cos(a) * 62); g.lineTo(80 + Math.sin(a) * 70, 80 - Math.cos(a) * 70); g.stroke(); }
-    function mano(ang, len, w, col) { g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(80, 80); g.lineTo(80 + Math.sin(ang) * len, 80 - Math.cos(ang) * len); g.stroke(); }
-    mano(((d.getHours() % 12) + d.getMinutes() / 60) * Math.PI / 6, 38, 7, '#e8eef9'); mano((d.getMinutes() + s / 60) * Math.PI / 30, 56, 5, '#e8eef9'); mano(s * Math.PI / 30, 60, 2, '#ff7a59');
+    var d = new Date(), s = d.getSeconds(); if (s === relojSeg) return; relojSeg = s; var g = relojC.getContext('2d'); g.clearRect(0, 0, 256, 310);
+    g.fillStyle = '#0d1424'; recorte(g, 4, 4, 248, 302, 22); g.fill(); g.strokeStyle = '#3fe2e8'; g.lineWidth = 4; g.stroke();
+    g.fillStyle = '#141d33'; g.beginPath(); g.arc(128, 128, 112, 0, 7); g.fill(); g.strokeStyle = '#3fe2e8'; g.lineWidth = 3; g.stroke();
+    g.fillStyle = '#e8eef9'; g.font = 'bold 27px sans-serif'; g.textAlign = 'center';
+    for (var i = 1; i <= 12; i++) { var a = i * Math.PI / 6; g.fillText(String(i), 128 + Math.sin(a) * 86, 128 - Math.cos(a) * 86 + 9); }
+    g.strokeStyle = '#4b5a7a'; g.lineWidth = 2; for (var m = 0; m < 60; m++) { var b = m * Math.PI / 30, l = m % 5 ? 5 : 0; g.beginPath(); g.moveTo(128 + Math.sin(b) * (104 - l), 128 - Math.cos(b) * (104 - l)); g.lineTo(128 + Math.sin(b) * 110, 128 - Math.cos(b) * 110); g.stroke(); }
+    function mano(ang, len, w, col) { g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(128 - Math.sin(ang) * 14, 128 + Math.cos(ang) * 14); g.lineTo(128 + Math.sin(ang) * len, 128 - Math.cos(ang) * len); g.stroke(); }
+    mano(((d.getHours() % 12) + d.getMinutes() / 60) * Math.PI / 6, 54, 9, '#e8eef9'); mano((d.getMinutes() + s / 60) * Math.PI / 30, 80, 6, '#e8eef9'); mano(s * Math.PI / 30, 92, 3, '#ff7a59');
+    g.fillStyle = '#ff7a59'; g.beginPath(); g.arc(128, 128, 7, 0, 7); g.fill();
+    function dos(n) { return (n < 10 ? '0' : '') + n; }
+    g.fillStyle = '#3fe2e8'; g.font = 'bold 44px monospace'; g.fillText(dos(d.getHours()) + ':' + dos(d.getMinutes()) + ':' + dos(s), 128, 288);
     relojP._tex.needsUpdate = true;
   }
 
@@ -335,10 +359,12 @@
     else if (m === 'cheer') { a = { iu: -2.9 + Math.sin(t * 8) * 0.3, ic: -0.2, du: -2.9 + Math.sin(t * 8 + 1) * 0.3, dc: -0.2 }; }
     else if (m === 'escribir') { a.du = -2.45 + Math.sin(t * 3.2) * 0.18; a.dc = -0.45 + Math.sin(t * 6) * 0.1; }
     else if (m === 'dar') { a.du = -1.15; a.dc = -0.4; }
+    else if (m === 'wave') { a.du = -2.6 + Math.sin(t * 10) * 0.25; a.dc = -0.3 + Math.sin(t * 10) * 0.35; }
     return a;
   }
   function animar(p, dt, t) {
     p.modo = p.fase === 'parado' ? p.modoDeseado || 'lap' : 'normal';
+    if (p.saludo > 0) { p.saludo -= dt; if (p.fase === 'parado' && p.modo !== 'escribir' && p.modo !== 'dar') p.modo = 'wave'; }
     var a = objetivoBrazos(p, t), k = Math.min(1, dt * 10);
     p.arm.iu += (a.iu - p.arm.iu) * k; p.arm.ic += (a.ic - p.arm.ic) * k; p.arm.du += (a.du - p.arm.du) * k; p.arm.dc += (a.dc - p.arm.dc) * k;
     p.bI.h.rotation.x = p.arm.iu; p.bI.cod.rotation.x = p.arm.ic; p.bD.h.rotation.x = p.arm.du; p.bD.cod.rotation.x = p.arm.dc;
@@ -439,7 +465,8 @@
     var ph = t * 14; pf.patas.forEach(function (pa, i) { var sw = Math.sin(ph + (i === 1 || i === 2 ? Math.PI : 0)) * 0.7 * correr; pa.rotation.x = lerp(sw, i < 2 ? -1.35 : 1.35, pf.curl); });
     pf.tronco.position.y = lerp(0.36 + Math.abs(Math.sin(ph)) * 0.02 * correr, 0.22 + 0.0, pf.curl) + (pf.estado === 'despertando' ? Math.sin(t * 10) * 0.01 : 0);
     pf.cuello.rotation.x = lerp(correr ? 0.05 : -0.15, 0.7, pf.curl); pf.cab.rotation.x = lerp(pf.comiendo > 0 ? 0.5 : 0, 0.3, pf.curl);
-    pf.cola.rotation.y = Math.sin(t * (pf.vivo && !correr ? 18 : 6)) * (pf.vivo ? 0.5 : 0.1); pf.cola.rotation.x = lerp(-0.3, 0.9, pf.curl);
+    if (pf.saludo > 0) { pf.saludo -= dt; pf.tronco.position.y += Math.abs(Math.sin(t * 9)) * 0.05; }
+    pf.cola.rotation.y = Math.sin(t * (pf.saludo > 0 || (pf.vivo && !correr) ? 18 : 6)) * (pf.vivo || pf.saludo > 0 ? 0.5 : 0.1); pf.cola.rotation.x = lerp(-0.3, 0.9, pf.curl);
     pf.orejas.forEach(function (o, i) { o.rotation.z = (i ? -1 : 1) * (pf.alerta ? 0.0 : 0.28) + (pf.curl * (i ? -0.2 : 0.2)); });
     pf.zz.visible = dormido; if (dormido) { var q = (t * 0.6) % 1; pf.zz.position.set(0.25 + q * 0.2, 0.7 + q * 0.5, 0); pf.zz.material.opacity = 1 - q; }
     if (pf.comiendo > 0) pf.comiendo -= dt;
@@ -447,18 +474,51 @@
     etiquetaPerro(pf);
   }
 
-  // ═════════ mascota Clawd (clic = dice algo) ═════════
+  // ═════════ mascota Clawd: camina por la oficina saludando a todos (clic = dice algo) ═════════
   var clawd = new THREE.Group(); clawd.position.set(-0.3, 0, 2.2); scene.add(clawd);
-  cil(0.5, 0.56, 0.5, 0x232a3a, 0, 0.25, 0, clawd, 12); cil(0.44, 0.44, 0.04, 0x3fe2e8, 0, 0.52, 0, clawd, 12, { e: 0.8, nosombra: true });
-  var clawdCuerpo = eje(clawd, 0, 0.54, 0);
-  caja(0.62, 0.34, 0.34, 0xd97757, 0, 0.3, 0, clawdCuerpo); caja(0.1, 0.1, 0.1, 0xd97757, -0.36, 0.34, 0, clawdCuerpo); caja(0.1, 0.1, 0.1, 0xd97757, 0.36, 0.34, 0, clawdCuerpo);
-  caja(0.08, 0.1, 0.1, 0xd97757, -0.2, 0.08, 0, clawdCuerpo); caja(0.08, 0.1, 0.1, 0xd97757, -0.07, 0.08, 0, clawdCuerpo); caja(0.08, 0.1, 0.1, 0xd97757, 0.07, 0.08, 0, clawdCuerpo); caja(0.08, 0.1, 0.1, 0xd97757, 0.2, 0.08, 0, clawdCuerpo);
-  var ojosClawd = [caja(0.07, 0.11, 0.02, 0x1a0f0a, -0.12, 0.34, 0.18, clawdCuerpo, { nosombra: true }), caja(0.07, 0.11, 0.02, 0x1a0f0a, 0.12, 0.34, 0.18, clawdCuerpo, { nosombra: true })];
-  clawd.userData.clic = 'clawd'; var clawdBub = sprite(lienzo(380, 96), 3.0, 13); clawdBub.position.set(0, 1.9, 0); clawdBub.visible = false; clawd.add(clawdBub); var clawdHasta = 0, clawdSalto = 0, clawdTag = sprite(lienzo(300, 84), 1.8, 12);
-  (function () { var c = clawdTag._canvas, g = c.getContext('2d'); g.fillStyle = 'rgba(8,12,22,0.8)'; recorte(g, 3, 3, c.width - 6, c.height - 6, 16); g.fill(); g.strokeStyle = '#d97757'; g.lineWidth = 3; g.stroke(); g.fillStyle = '#f2f6ff'; g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.fillText('Clawd', 150, 38); g.fillStyle = '#aebbd3'; g.font = '22px sans-serif'; g.fillText('mascota · pulsa', 150, 68); clawdTag._tex.needsUpdate = true; clawdTag.position.set(0, 1.5, 0); clawd.add(clawdTag); })();
+  var clawdCuerpo = eje(clawd, 0, 0.3, 0);
+  caja(0.74, 0.4, 0.4, 0xd97757, 0, 0.3, 0, clawdCuerpo); caja(0.12, 0.12, 0.12, 0xd97757, -0.43, 0.34, 0, clawdCuerpo); caja(0.12, 0.12, 0.12, 0xd97757, 0.43, 0.34, 0, clawdCuerpo);
+  var clawdPatas = [-0.24, -0.08, 0.08, 0.24].map(function (x) { var h = eje(clawd, x, 0.3, 0); caja(0.1, 0.3, 0.1, 0xc2603f, 0, -0.15, 0, h); return h; });
+  var ojosClawd = [caja(0.08, 0.13, 0.02, 0x1a0f0a, -0.14, 0.36, 0.205, clawdCuerpo, { nosombra: true }), caja(0.08, 0.13, 0.02, 0x1a0f0a, 0.14, 0.36, 0.205, clawdCuerpo, { nosombra: true })];
+  clawd.userData.clic = 'clawd'; var clawdBub = sprite(lienzo(380, 96), 2.7, 13); clawdBub.position.set(0, 1.55, 0); clawdBub.visible = false; clawd.add(clawdBub); var clawdHasta = 0, clawdSalto = 0, clawdTag = sprite(lienzo(300, 84), 1.5, 12);
+  (function () { var c = clawdTag._canvas, g = c.getContext('2d'); g.fillStyle = 'rgba(8,12,22,0.8)'; recorte(g, 3, 3, c.width - 6, c.height - 6, 16); g.fill(); g.strokeStyle = '#d97757'; g.lineWidth = 3; g.stroke(); g.fillStyle = '#f2f6ff'; g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.fillText('Clawd', 150, 38); g.fillStyle = '#aebbd3'; g.font = '22px sans-serif'; g.fillText('mascota · pulsa', 150, 68); clawdTag._tex.needsUpdate = true; clawdTag.position.set(0, 1.18, 0); clawd.add(clawdTag); })();
   var FRASES_CLAWD = ['¡Hola! Soy Clawd.', 'Los perritos vigilan; yo animo.', 'Un test en verde alegra el día.', 'Respira. Compila. Repite.', '¿Ya probaste correr los tests?', 'Menos bugs, más galletas.', 'Aquí nadie se queda dormido… ¿o sí?'];
   var iFrase = 0;
   function clawdHabla() { iFrase = (iFrase + 1) % FRASES_CLAWD.length; var c = clawdBub._canvas, g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); g.fillStyle = 'rgba(244,248,255,0.97)'; g.strokeStyle = '#d97757'; g.lineWidth = 4; recorte(g, 6, 6, c.width - 12, 64, 16); g.fill(); g.stroke(); g.beginPath(); g.moveTo(c.width / 2 - 14, 68); g.lineTo(c.width / 2, 90); g.lineTo(c.width / 2 + 14, 68); g.fill(); g.fillStyle = '#10182c'; g.font = 'bold 26px sans-serif'; g.textAlign = 'center'; g.fillText(cortar(FRASES_CLAWD[iFrase], 28), c.width / 2, 49); clawdBub._tex.needsUpdate = true; clawdBub.visible = true; clawdHasta = AHORA() + 4200; clawdSalto = 1; }
+  // paseo: elige a alguien (persona o perro), va hasta él, lo saluda con un salto y sigue con otro
+  var cw = { estado: 'espera', espera: 2.5, ruta: [], objetivo: null, previo: null, fase: 0 };
+  function clawdElegir() {
+    var cand = ORDEN.map(function (k) { return 'p:' + k; }).concat(['d:director', 'd:cons']).filter(function (x) { return x !== cw.previo; });
+    var c = cand[Math.floor(Math.random() * cand.length)], k = c.slice(2), esP = c[0] === 'p', pos = esP ? P[k].raiz.position : { x: PERROS[k].x, z: PERROS[k].z };
+    var enSala = pos.z > -1.4, dest = { x: Math.max(-9.2, Math.min(9.2, pos.x + (enSala ? 1.3 : 0))), z: Math.max(-1.55, Math.min(6.4, enSala ? pos.z + 0.4 : pos.z + 1.0)) };
+    if (!esP && pos.z < -0.4) dest = { x: pos.x + (k === 'director' ? 1.2 : -1.2), z: pos.z + 0.9 };
+    var desde = nodoCercano({ x: clawd.position.x, z: clawd.position.z }), hasta = nodoCercano(dest), pts = [];
+    ruta(desde, hasta).forEach(function (n) { pts.push({ x: G[n].x, z: G[n].z }); }); pts.push(dest);
+    cw.objetivo = { esP: esP, k: k }; cw.previo = c; cw.ruta = pts; cw.estado = 'camina';
+  }
+  function clawdPaso(dt, t) {
+    var salto = 0;
+    if (cw.estado === 'espera') { cw.espera -= dt; if (cw.espera <= 0) clawdElegir(); }
+    else if (cw.estado === 'camina') {
+      var q = cw.ruta[0];
+      if (!q) { cw.estado = 'saluda'; cw.espera = 2.6; clawdSalto = 1; var o = cw.objetivo; if (o.esP) P[o.k].saludo = 2.2; else PERROS[o.k].saludo = 2.2; }
+      else {
+        var dx = q.x - clawd.position.x, dz = q.z - clawd.position.z, d = Math.sqrt(dx * dx + dz * dz), v = 1.6 * dt;
+        if (d <= v) { clawd.position.x = q.x; clawd.position.z = q.z; cw.ruta.shift(); }
+        else { clawd.position.x += dx / d * v; clawd.position.z += dz / d * v; clawd.rotation.y = haciaAngulo(clawd.rotation.y, Math.atan2(dx, dz), dt * 9); }
+        cw.fase += dt * 11; salto = Math.abs(Math.sin(cw.fase)) * 0.07;
+      }
+    } else if (cw.estado === 'saluda') {
+      var ob = cw.objetivo, tp = ob.esP ? P[ob.k].raiz.position : { x: PERROS[ob.k].x, z: PERROS[ob.k].z };
+      clawd.rotation.y = haciaAngulo(clawd.rotation.y, Math.atan2(tp.x - clawd.position.x, tp.z - clawd.position.z), dt * 8);
+      cw.espera -= dt; if (cw.espera <= 0) { cw.estado = 'espera'; cw.espera = 3 + Math.random() * 5; }
+    }
+    clawdPatas.forEach(function (h, i) { h.rotation.x = cw.estado === 'camina' ? Math.sin(cw.fase + i * 1.6) * 0.6 : 0; });
+    clawdCuerpo.position.y = 0.3 + salto + Math.sin(t * 2) * 0.01 + (clawdSalto > 0 ? Math.abs(Math.sin((1 - clawdSalto) * Math.PI * 3)) * 0.3 : 0);
+    if (clawdSalto > 0) clawdSalto = Math.max(0, clawdSalto - dt * 0.9);
+    var parp = (t % 4.5) < 0.12; ojosClawd.forEach(function (o) { o.scale.y = parp ? 0.15 : 1; });
+    if (clawdBub.visible && AHORA() > clawdHasta) clawdBub.visible = false;
+  }
 
   // ═════════ confeti y sobres ═════════
   var confeti = [], vuelos = [];
@@ -470,6 +530,7 @@
   }
 
   // ═════════ pantallas de la pared ═════════
+  var ACT = null;               // actividad de aa: por modelo (marcas de tiempo), sirve aunque TEAMS no esté activo
   var D = null, Dprev = null, recibido = 0, estadoTarea = {}, aparecio = {}, eventosVistos = {}, ultimoAvance = -1, firma = {};
   function colorEstado(e, auditando, construyendo) {
     if (auditando) return '#8b6bd9'; if (e === 'ACEPTADA') return '#3ddc84'; if (e === 'HECHA_SIN_ACEPTAR') return '#ffc233'; if (e === 'DEVUELTA') return '#ff5a5a'; if (e === 'CANCELADA' || e === 'HEREDADA') return '#566178'; return construyendo ? '#4aa3ff' : '#7f8aa3';
@@ -565,13 +626,15 @@
     var aud = d && d.auditoria, ro = d ? d.roles : null;
     var trabajaDir = !!d && (cola.por_aceptar.length > 0 || cola.devueltas.length > 0 || !!aud);
     var trabajaCons = !!d && (cola.tareas.length > 0 || cola.correcciones.length > 0);
-    var hechos = { director: false, fe: false, be: false, neg: false, cons: false };
-    var queda = function (k, trab) { return !(enMarcha && (!ocioso || trab)); };   // true = va a la sala
+    var A = (ACT && ACT.actores ? ACT.actores : []).filter(function (a) { return a.activa; });
+    var actCons = A.filter(function (a) { return /cursor/i.test(a.actor); })[0] || null, actDir = A.filter(function (a) { return !/cursor/i.test(a.actor); })[0] || null;
+    var construyeDir = !!d && individual && (cola.tareas.length > 0 || cola.correcciones.length > 0);   // modo individual: Claude Code también construye
+    trabajaDir = trabajaDir || construyeDir || !!actDir; trabajaCons = trabajaCons || !!actCons;
     var meta = {};
-    meta.director = { sala: !enMarcha || (ocioso && !trabajaDir), trab: trabajaDir };
+    meta.director = { sala: actDir ? false : (!enMarcha || (ocioso && !trabajaDir)), trab: trabajaDir };
     var subsAqui = enMarcha && (d.plan || d.total > 0 || d.canal === 'ACTIVO');
     ['fe', 'be', 'neg'].forEach(function (k) { meta[k] = { sala: !subsAqui || (ocioso && !aud), trab: !!aud }; });
-    meta.cons = { sala: !enMarcha || individual || !(d.builder_conectado || ro.builder.vigilante.vivo) || (ocioso && !trabajaCons), trab: trabajaCons };
+    meta.cons = { sala: actCons ? false : (!enMarcha || individual || !(d.builder_conectado || ro.builder.vigilante.vivo) || (ocioso && !trabajaCons)), trab: trabajaCons };
     ORDEN.forEach(function (k) {
       var p = P[k], m = meta[k], tag = DEF[k], linea2, col;
       var sitio;
@@ -593,6 +656,9 @@
       if (sitio.zona === 'perro') { texto = 'Da una galleta al vigilante'; colEtq = '#3ddc84'; }
       else if (sitio.zona === 'sala') { texto = p.fase !== 'parado' ? 'Va a descansar' : sitio.juega ? 'Jugando' : 'Descansando'; colEtq = '#7f8aa3'; }
       else if (sitio.pose === 'escribir') { texto = sitio.id === 'pizarra' ? 'Escribiendo en la pizarra' : 'Mirando el flujo'; colEtq = '#3fe2e8'; }
+      else if (k === 'director' && actDir) { texto = 'aa: ' + cortar(actDir.tarea, 22); colEtq = '#d97757'; }
+      else if (k === 'cons' && actCons) { texto = 'aa: ' + cortar(actCons.tarea, 22); colEtq = '#4aa3ff'; }
+      else if (k === 'director' && construyeDir) { texto = 'Construyendo ' + (cola.correcciones.length ? cola.correcciones[0].id : cola.tareas[0].id); colEtq = '#d97757'; }
       else if (k === 'director') { texto = cola.por_aceptar.length ? 'Revisando ' + cola.por_aceptar[0].id : aud ? 'Revisando ' + (aud.id || 'entrega') : cola.devueltas.length ? 'Decidiendo ' + cola.devueltas[0].id : 'Esperando entrega'; colEtq = m.trab ? '#d97757' : '#7f8aa3'; }
       else if (k === 'cons') { texto = cola.correcciones.length ? 'Corrigiendo ' + cola.correcciones[0].id : cola.tareas.length ? 'Construyendo ' + cola.tareas[0].id : cola.devueltas.length ? 'Bloqueado: espera decisión' : 'Esperando tarea'; colEtq = m.trab ? '#4aa3ff' : '#7f8aa3'; }
       else { var area = { fe: 'UI/UX', be: 'backend', neg: 'negocio' }[k]; texto = aud ? 'Auditando ' + (aud.id || '') + ' · ' + area : 'En espera'; colEtq = aud ? '#8b6bd9' : '#7f8aa3'; }
@@ -652,13 +718,13 @@
   }
 
   // ═════════ API pública ═════════
-  window.mundoActualizar = function (d, j) {
-    window.__ultimoReal = { d: d, j: j };
+  window.mundoActualizar = function (d, j, act) {
+    window.__ultimoReal = { d: d, j: j, act: act };
     if (sim) return;
-    aplicarDatos(d, j);
+    aplicarDatos(d, j, act);
   };
-  function aplicarDatos(d, j) {
-    var prev = D, silencioso = !cargado; D = d || null; recibido = AHORA(); cargado = true;
+  function aplicarDatos(d, j, act) {
+    var prev = D, silencioso = !cargado; D = d || null; ACT = act || null; recibido = AHORA(); cargado = true;
     if (d) reaccionar(prev, d, silencioso); else estadoTarea = {};
     decidir(); if (silencioso) { teletransportar(); decidir(); }
     pintarPizarra(D); pintarSemaforo(D); pintarFlujo(D, AHORA() / 1000);
@@ -692,20 +758,26 @@
     pausa: function () { return demo({ canal: 'PAUSADO', semaforo: 'PAUSADO', roles: { director: role(false), builder: role(false) }, tareas: T0 }); },
   };
   var RECORRIDO = [['apagado', 5], ['activar', 7], ['plan', 8], ['constructor', 8], ['vigilantes', 9], ['trabajo', 9], ['auditoria', 8], ['celebrar', 8], ['aviso', 6], ['espera3', 12], ['alarma', 9], ['pausa', 8]];
+  function actor(a, tarea) { return { actores: [{ actor: a, tarea: tarea, activa: true, desde_seg: 60 }] }; }
+  var ACT_SIM = { solo_claude: function () { return actor('claude', 'refactorizar el login'); }, solo_cursor: function () { return actor('cursor', 'corregir el formulario de citas'); } };
+  ESCENARIOS.solo_claude = ESCENARIOS.solo_cursor = function () { return null; };
   var PRE = { celebrar: 'trabajo', vigilantes: 'constructor', aviso: 'trabajo', auditoria: 'trabajo' };
   window.mundoSimular = function (nombre, opc) {
     opc = opc || {}; var yaSim = !!sim;
     if (sim && sim.timers) sim.timers.forEach(clearTimeout);
-    if (!nombre || nombre === 'real') { sim = null; cargado = false; estadoTarea = {}; var rr = window.__ultimoReal; aplicarDatos(rr ? rr.d : null, rr ? rr.j : null); return; }
+    if (!nombre || nombre === 'real') { sim = null; cargado = false; estadoTarea = {}; var rr = window.__ultimoReal; aplicarDatos(rr ? rr.d : null, rr ? rr.j : null, rr ? rr.act : null); return; }
     sim = { nombre: nombre, timers: [] };
     if (!yaSim || opc.silencioso) { cargado = false; estadoTarea = {}; D = null; }
-    function poner(n) { if (sim) aplicarDatos(ESCENARIOS[n](), null); }
+    function poner(n) { if (sim) aplicarDatos(ESCENARIOS[n](), null, ACT_SIM[n] ? ACT_SIM[n]() : null); }
     if (nombre === 'recorrido') { var acum = 0; RECORRIDO.forEach(function (st) { var n = st[0], dur = st[1]; sim.timers.push(setTimeout(function () { poner(n); }, acum * 1000)); acum += dur; }); sim.timers.push(setTimeout(function () { window.mundoSimular('real'); }, acum * 1000)); }
     else if (ESCENARIOS[nombre]) { if (!cargado && PRE[nombre]) poner(PRE[nombre]); poner(nombre); }
   };
   window.mundoEstado = function () {
+    var cl = { k: 'clawd', x: +clawd.position.x.toFixed(2), z: +clawd.position.z.toFixed(2), estado: cw.estado };
     return ORDEN.map(function (k) { var p = P[k]; return { k: k, sitio: p.sitio ? p.sitio.id : null, destino: p.destino ? p.destino.id : null, sentado: p.sentado > 0.9, modo: p.modo, x: +p.raiz.position.x.toFixed(2), z: +p.raiz.position.z.toFixed(2), caminando: p.fase === 'caminando' }; })
-      .concat(Object.keys(PERROS).map(function (k) { var f = PERROS[k]; return { k: 'perro_' + k, estado: f.estado, vivo: f.vivo }; }));
+      .concat(Object.keys(PERROS).map(function (k) { var f = PERROS[k]; return { k: 'perro_' + k, estado: f.estado, vivo: f.vivo }; })).concat([cl]);
+  };
+  window.mundoCamara = function () { return { vista: vista, yaw: ORB.yaw, pitch: ORB.pitch, dist: ORB.dist, zoom: ORB.zoom, tx: +ORB.tx.toFixed(3), ty: +ORB.ty.toFixed(3), tz: +ORB.tz.toFixed(3), siguiendo: seguir };
   };
   window.mundoPaso = function (seg) { var n = Math.max(1, Math.round((seg || 1) * 30)); for (var i = 0; i < n; i++) paso(1 / 30, i < n - 1); return window.mundoEstado(); };
 
@@ -724,13 +796,19 @@
     }
   }
 
+  var etiquetas = null;
+  function etiquetasEscala() {
+    if (!etiquetas) { etiquetas = []; ORDEN.forEach(function (k) { etiquetas.push([P[k].tag, P[k].tag.scale.x, P[k].tag.scale.y, P[k].raiz]); }); Object.keys(PERROS).forEach(function (k) { etiquetas.push([PERROS[k].tag, PERROS[k].tag.scale.x, PERROS[k].tag.scale.y, PERROS[k].raiz]); }); etiquetas.push([clawdTag, clawdTag.scale.x, clawdTag.scale.y, clawd]); }
+    etiquetas.forEach(function (e) { var k = camera === camP ? Math.max(0.3, Math.min(1, camP.position.distanceTo(e[3].position) / 15)) : 1; e[0].scale.set(e[1] * k, e[2] * k, 1); });
+  }
   // ═════════ bucle ═════════
   var reloj = new THREE.Clock(), vivo = true, tAcum = 0, tDec = 0, tFlujo = 0, tTV = 0, tMon = 0, cuerpoTs = 0;
   document.addEventListener('visibilitychange', function () { vivo = !document.hidden; if (vivo) { reloj.getDelta(); bucle(); } });
   function bucle() { if (!vivo) return; requestAnimationFrame(bucle); paso(Math.min(reloj.getDelta(), 0.1)); }
   function paso(dt, sinDibujar) {
     tAcum += dt; var t = tAcum;
-    if (vuelo) { vuelo.t += dt / vuelo.dur; var k = Math.min(1, vuelo.t), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; ['yaw', 'pitch', 'dist', 'tx', 'ty', 'tz'].forEach(function (n) { LIB[n] = lerp(vuelo.desde[n], vuelo.hasta[n], e); }); aplicarCamara(); if (k >= 1) { vuelo = null; marcarBotones(); } }
+    if (vuelo) { vuelo.t += dt / vuelo.dur; var kk = Math.min(1, vuelo.t), ee = kk < 0.5 ? 2 * kk * kk : 1 - Math.pow(-2 * kk + 2, 2) / 2; ['yaw', 'pitch', 'dist', 'zoom', 'tx', 'ty', 'tz'].forEach(function (n) { if (vuelo.hasta[n] !== undefined) ORB[n] = lerp(vuelo.desde[n], vuelo.hasta[n], ee); }); aplicarCamara(); if (kk >= 1) { vuelo = null; marcarBotones(); } }
+    if (seguir) { var ps = posSeguida(), kf = Math.min(1, dt * 3.5); ORB.tx += (ps.x - ORB.tx) * kf; ORB.ty += (1.15 - ORB.ty) * kf; ORB.tz += (ps.z - ORB.tz) * kf; ORB.dist += (seguirDist - ORB.dist) * Math.min(1, dt * 2.5); if (ORB.pitch > 0.7) ORB.pitch += (0.5 - ORB.pitch) * Math.min(1, dt * 1.2); aplicarCamara(); }
     tDec += dt; if (tDec > 1) { tDec = 0; decidir(); }
     ORDEN.forEach(function (k) {
       var p = P[k]; moverPersona(p, dt); animar(p, dt, t);
@@ -747,9 +825,8 @@
       if (q >= 1) { if (v.galleta && v.perro) { v.perro.comiendo = 1.4; if (v.perro.vivo && v.perro.estado === 'despertando') v.perro.espera = 0.4; } scene.remove(v.m); vuelos.splice(i, 1); }
     }
     confeti.forEach(function (c) { if (c.vida > 0) { c.vida -= dt; c.v.y -= 9 * dt; c.m.position.addScaledVector(c.v, dt); c.m.rotation.x += dt * 8; c.m.rotation.z += dt * 6; if (c.m.position.y < 0.05) { c.m.position.y = 0.05; c.v.set(0, 0, 0); } if (c.vida <= 0) c.m.visible = false; } });
-    // mascota
-    clawdCuerpo.position.y = 0.54 + Math.sin(t * 2) * 0.012 + (clawdSalto > 0 ? Math.abs(Math.sin((1 - clawdSalto) * Math.PI * 3)) * 0.4 : 0); if (clawdSalto > 0) clawdSalto = Math.max(0, clawdSalto - dt * 0.9);
-    var parp = (t % 4.5) < 0.12; ojosClawd.forEach(function (o) { o.scale.y = parp ? 0.15 : 1; }); if (clawdBub.visible && AHORA() > clawdHasta) clawdBub.visible = false;
+    clawdPaso(dt, t);
+    etiquetasEscala();
     // pantallas
     tMon += dt; if (tMon > 0.16) { tMon = 0; Object.keys(monitores).forEach(function (k) { monitores[k].forEach(function (o) { if (o.modo === 'code' || o.sucio) { pintarMonitor(o, t, k); o.sucio = false; } }); }); }
     tTV += dt; if (tTV > 0.1) { tTV = 0; var jug = !!(ocupados.sofa0 || ocupados.sofa1) && (P[ocupados.sofa0 || ocupados.sofa1] && P[ocupados.sofa0 || ocupados.sofa1].sentado > 0.9); pintarTV(t, jug); }

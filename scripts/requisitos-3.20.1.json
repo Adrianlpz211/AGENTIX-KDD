@@ -1493,7 +1493,7 @@
       "pruebas": [
         [
           "dashboard-teams",
-          "el tablero trae la pestaña TEAMS"
+          "el tablero trae la pestaña Oficina"
         ]
       ]
     },
@@ -1554,6 +1554,54 @@
         [
           "teams-v4",
           "OFICINA-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-ocio-1",
+      "doc": "TEAMS",
+      "requisito": "Tres rondas seguidas sin trabajo del constructor dejan una solicitud que despierta al Director; encolar tarea la atiende; no pide dos veces",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OCIO-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-ocio-2",
+      "doc": "TEAMS",
+      "requisito": "Si el constructor reporta, la cuenta de rondas iguales reinicia; en modo individual no se pide nada",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OCIO-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-oficina-3",
+      "doc": "TEAMS",
+      "requisito": "La oficina vive con un solo modelo: la actividad sale de las marcas de aa: por actor, sin TEAMS",
+      "alcance": "proceso real (tablero y HTTP)",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "/api/v1/oficina"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-ocio-3",
+      "doc": "TEAMS",
+      "requisito": "Con trabajo esperando, sin vigilante y ~10 min sin rondas, el Director recibe CONSTRUCTOR_DORMIDO",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OCIO-3"
         ]
       ]
     }

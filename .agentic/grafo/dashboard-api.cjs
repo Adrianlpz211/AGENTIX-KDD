@@ -205,6 +205,11 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
         return r ? { status: 'OK', data: r } : { status: 'EMPTY', data: null, reason_code: 'SIN_CANAL' };
       } catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
+    // 3.22.6 — Oficina (la agencia 3D): TEAMS si lo hay + la actividad de los modelos con aa: (sirve con un solo modelo). Siempre OK: la oficina vive aunque no haya nada.
+    oficina: { params: ['project_id'], fn: () => {
+      try { return { status: 'OK', data: require('./oficina-datos.cjs').leer(projectPath) }; }
+      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
     // 3.20.1 — salud funcional, panel Memoria y panel Contexto y esfuerzo. Solo lectura; el proyecto lo fija el servidor.
     'memory-health': { params: ['project_id'], fn: () => {
       try {
