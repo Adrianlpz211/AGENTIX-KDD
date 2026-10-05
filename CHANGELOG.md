@@ -1,5 +1,9 @@
 # Changelog — Agentic KDD
 
+## [3.23.6] — 2026-10-05
+
+- **H-007 — «Nadie avanza» (semáforo ROJO) con el constructor trabajando:** la alerta saltaba a los 20 min de canal quieto aunque el constructor siguiera tocando archivos en una tarea larga. Ahora, si hay evidencia de trabajo reciente, las tareas y correcciones del constructor no cuentan como paradas; sigue contando lo que espera al Director (entregas por revisar, tareas devueltas). Sin git se comporta como antes.
+
 ## [3.23.5] — 2026-10-05
 
 **Un hallazgo más de la revisión profunda de glowly.**

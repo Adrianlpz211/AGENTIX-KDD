@@ -1175,3 +1175,14 @@ test('H-006 — una tarea PARCIAL no pasa a ESTANCADA mientras el constructor si
   process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 40 * 60000); // nada desde hace 40 min: ahora sí es una espera real
   try { const e = T.calcular(root, { ahora: tarde }); assert.equal(e.tareas[0].estado, 'DEVUELTA'); assert.equal(e.tareas[0].estancada, true); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
 });
+
+test('H-007 — «Nadie avanza» no sale (ni semáforo ROJO) mientras el constructor sigue tocando archivos', () => {
+  const root = proyecto(); arrancado(root);
+  for (const rol of ['director', 'builder']) { vigilanteFalso(root, rol); rondaReciente(root, rol, 1); }
+  salida(root, 'tarea', 'Tarea larga', '--criterio=a', '--sin-contexto');
+  const t0 = Date.now(); const tarde = t0 + 25 * 60000;
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(tarde - 60000);            // tocó un archivo hace 1 min
+  try { const s = T.salud(root, { ahora: tarde }); assert.ok(!s.alertas.some((a) => /Nadie avanza/.test(a.msg)), JSON.stringify(s.alertas)); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(t0 - 60 * 60000);          // nada desde hace una hora: ahora sí
+  try { const s = T.salud(root, { ahora: tarde }); assert.ok(s.alertas.some((a) => /Nadie avanza: hay 1 cosa/.test(a.msg)), JSON.stringify(s.alertas)); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});

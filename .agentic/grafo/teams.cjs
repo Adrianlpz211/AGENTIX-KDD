@@ -1151,7 +1151,11 @@ function salud(root, opts = {}) {
   const quieto = Math.round(Math.max(0, ahora - e.mtime) / 60000);
   if (e.canal === 'ACTIVO') {
     const trabajo = e.tareasPend.length + e.hechasSinAceptar.length + e.devueltas.length + e.corrPend.length;
-    if (trabajo && quieto >= 20) sube(2, 'Nadie avanza: hay ' + trabajo + ' cosa(s) pendiente(s) y el canal lleva ' + quieto + ' min sin cambios');
+    // Si el constructor sigue tocando archivos, lo suyo (tareas y correcciones) está en marcha aunque el canal esté quieto (H-007, glowly 05/10/2026):
+    // solo cuenta lo que espera al Director. Sin git no se puede saber y se avisa como antes.
+    const enMarcha = quieto >= 20 && (e.tareasPend.length || e.corrPend.length) && evidenciaConstructor(root, e).veredicto === 'TRABAJANDO';
+    const trabajoParado = enMarcha ? e.hechasSinAceptar.length + e.devueltas.length : trabajo;
+    if (trabajoParado && quieto >= 20) sube(2, 'Nadie avanza: hay ' + trabajoParado + ' cosa(s) pendiente(s) y el canal lleva ' + quieto + ' min sin cambios');
     if (!e.total && quieto >= 10) sube(1, 'El canal está ACTIVO pero no hay ninguna tarea en cola: el Director debe encolar el primer lote');
     if (!trabajo && e.total && !e.listo && quieto >= 10) sube(1, 'Nadie tiene nada accionable pero el proyecto no está cerrado: el Director debe encolar el siguiente lote o cerrar');
     if (e.listo) sube(1, 'Todo aceptado y sin pendientes (LISTO_PARA_CERRAR): falta que el Director ejecute «cerrar»');

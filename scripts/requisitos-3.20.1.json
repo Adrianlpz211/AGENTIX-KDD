@@ -1796,6 +1796,18 @@
           "H-006"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-007",
+      "doc": "TEAMS",
+      "requisito": "La alerta «Nadie avanza» no sale mientras el constructor sigue tocando archivos",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-007"
+        ]
+      ]
     }
   ]
 }
