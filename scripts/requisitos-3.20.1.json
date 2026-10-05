@@ -1852,6 +1852,34 @@
           "PUERTO-1"
         ]
       ]
+    },
+    {
+      "id": "KDD-riesgo-por-archivo",
+      "doc": "KDD",
+      "requisito": "El riesgo de una tarea sale de la evidencia sobre los archivos que nombra, no de un piso por confianza BAJA",
+      "alcance": "proceso real (context-enricher + riesgo-archivos)",
+      "pruebas": [
+        [
+          "riesgo-archivos",
+          "RIESGO-2"
+        ],
+        [
+          "riesgo-archivos",
+          "RIESGO-5"
+        ]
+      ]
+    },
+    {
+      "id": "KDD-contratos-archivo-de-test",
+      "doc": "KDD",
+      "requisito": "Los contratos sin test_file se atribuyen a su archivo de test por título único",
+      "alcance": "proceso real (contract-guard)",
+      "pruebas": [
+        [
+          "contratos-archivo-test",
+          "CFILE-2"
+        ]
+      ]
     }
   ]
 }

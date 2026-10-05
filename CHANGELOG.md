@@ -1,5 +1,13 @@
 # Changelog — Agentic KDD
 
+## [3.23.8] — 2026-10-05
+
+**Cuatro flojedades de la memoria de glowly, diagnosticadas con la base real (62 ciclos de TEAMS).**
+- **Predicción de riesgo casi siempre MEDIO (54 de 60):** (1) el piso «contexto de confianza BAJA» subía el riesgo aunque TODA la memoria estuviera en BAJA, y (2) el motor de predicción recibía `[]` como archivos, así que los patrones por archivo no podían aplicar jamás. Ahora el contexto BAJA solo sube el riesgo si la memoria distingue confianzas, y los archivos que la tarea nombra se miden por evidencia (`riesgo-archivos.cjs`): cuántos archivos los importan según el AST (MEDIO ≥ 8, ALTO ≥ 30), comportamientos protegidos selectivos y errores ya registrados. Sin evidencia: BAJO. Los comportamientos protegidos que listan más de 50 archivos relacionados se ignoran: en glowly los 35 listaban los 677 del repo, es decir, cualquier cambio los tocaba a todos.
+- **`ciclos.ast_indexed` siempre 0:** la columna existía y nadie la escribía; el post-cycle ahora la marca cuando indexa el AST.
+- **59 de 62 ciclos «COMPLETADO_CON_PENDIENTES»:** el Preservation Gate terminaba siempre UNVERIFIED (NO_TEST_FILE_MAPPED) porque ninguno de los 140 contratos tenía `test_file` (el corredor imprime títulos sin archivo y `tdd-gate` solo atribuye archivo cuando corre UNO). Nuevo `contract-guard.cjs backfill-test-files [--aplicar]`: atribuye cada contrato a su archivo por el título literal del test (solo si es único) y deduce `source_files` de los imports del test. Dry-run por defecto. En glowly atribuiría 160 de 162.
+- **Memoria sin usar** (`code_summaries`, `knowledge_docs`, `mem_knowledge`): no es un fallo; se alimentan con `akdd describe` y `aa: aprende`, que requieren un modelo y nadie corrió. No se automatiza (una descripción en lenguaje natural no se genera sin LLM).
+
 ## [3.23.7] — 2026-10-05
 
 **Todo el tablero en vivo: se acabó matar el servidor para ver datos nuevos.**

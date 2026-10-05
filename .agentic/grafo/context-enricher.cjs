@@ -193,9 +193,28 @@ async function enrich(task) {
       }
     } catch { /* la predicción es un plus, nunca un requisito */ }
 
-    if (brief.riesgo === 'BAJO' && brief.contexto.some(c => c.confianza === 'BAJA')) {
+    // Contexto de confianza BAJA sube el riesgo SOLO si la memoria distingue confianzas. En glowly toda la memoria estaba en BAJA: el piso
+    // salía MEDIO en 54 de 60 predicciones y la señal no informaba nada (ver riesgo-archivos.cjs).
+    let distingue = true;
+    try { distingue = require(path.join(__dirname, 'riesgo-archivos.cjs')).memoriaDistingueConfianza(db); } catch { /* sin el módulo: comportamiento de siempre */ }
+    if (brief.riesgo === 'BAJO' && distingue && brief.contexto.some(c => c.confianza === 'BAJA')) {
       brief.riesgo = 'MEDIO';
     }
+
+    // 6.4 RIESGO POR ARCHIVOS — el motor de predicción recibía [] y los patrones por archivo no podían aplicar jamás. Los archivos que la
+    //     tarea nombra se miden contra lo que la base sabe de ellos: quién los importa (AST), comportamientos protegidos selectivos y errores
+    //     ya registrados. Sin evidencia no cambia nada. Solo lectura, nunca bloquea.
+    let archivosTarea = [];
+    try {
+      const ra = require(path.join(__dirname, 'riesgo-archivos.cjs'));
+      archivosTarea = ra.archivosDeTexto(task);
+      if (archivosTarea.length) {
+        const rf = ra.evaluar(db, archivosTarea);
+        rf.razones.slice(0, 6).forEach((r) => brief.avisos.push('📍 Riesgo por archivo: ' + r));
+        if (rf.nivel === 'ALTO') brief.riesgo = 'ALTO';
+        else if (rf.nivel === 'MEDIO' && brief.riesgo === 'BAJO') brief.riesgo = 'MEDIO';
+      }
+    } catch { /* medir por archivo es un plus */ }
 
     // 6.5 APUNTAR LA PREDICCIÓN — para poder saber después si acertó.
     //
@@ -212,7 +231,7 @@ async function enrich(task) {
       brief.prediccionId = reg.registrarPrediccion(ROOT, {
         tarea: task,
         modulo: (areas && areas[0]) || 'global',
-        archivos: [],
+        archivos: archivosTarea,
         nivel: brief.riesgo,
         alertas: brief.avisos.slice(0, 12),
         precondiciones: brief.faltante.slice(0, 6),

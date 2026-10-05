@@ -819,7 +819,7 @@ if (require.main === module) {
       console.log(dryRun ? 'Dry-run: no se escribió nada' : `✅ Contract Guard v2 aplicado (${JSON.stringify(res)})`);
       process.exit(0);
     }
-    db = openDB(projectRoot, { readOnly: ['status', 'list', 'blast', 'unresolved'].includes(cmd) });
+    db = openDB(projectRoot, { readOnly: ['status', 'list', 'blast', 'unresolved'].includes(cmd) || (cmd === 'backfill-test-files' && !args.includes('--aplicar')) });
   } catch (e) {
     console.error('[CONTRACT] DB error:', e.message);
     process.exit(1);
@@ -909,6 +909,16 @@ if (require.main === module) {
       break;
     }
 
+    case 'backfill-test-files': {
+      const aplicar = args.includes('--aplicar');
+      const r = rellenarArchivosDeTest(db, projectRoot, { aplicar });
+      console.log(`
+Contratos: ${r.contratos} · ya tenían archivo de test: ${r.ya_tenian} · atribuibles por título único: ${r.atribuibles} · sin atribuir (sin match o título repetido): ${r.sin_match}`);
+      console.log(`Con fuentes deducidas de los imports del test: ${r.fuentes}`);
+      console.log(aplicar ? `✅ Aplicado a ${r.aplicados} contrato(s). El Preservation Gate ya puede elegir qué tests correr.` : 'Dry-run: no se escribió nada. Para aplicar: node .agentic/grafo/contract-guard.cjs backfill-test-files --aplicar');
+      break;
+    }
+
     case 'unresolved': {
       const rows = listUnresolved(db);
       console.log(`\nContratos sin test individual mapeado (${rows.length}):`);
@@ -917,10 +927,38 @@ if (require.main === module) {
     }
 
     default:
-      console.log('Uso: node contract-guard.cjs [status | list [module] | blast <file> | gate [files...] | verify | promote | unresolved | migrate [--dry-run]]');
+      console.log('Uso: node contract-guard.cjs [status | list [module] | blast <file> | gate [files...] | verify | promote | unresolved | backfill-test-files [--aplicar] | migrate [--dry-run]]');
   }
 }
 
+
+// ─── ARCHIVO DE TEST DE CADA CONTRATO ────────────────────────────────────────
+
+/**
+ * Rellena `test_file` (y `source_files`, que salen de los imports del test) de contratos que nacieron sin ellos. Sin `test_file` el
+ * Preservation Gate no puede elegir qué tests correr y cada ciclo termina UNVERIFIED (NO_TEST_FILE_MAPPED). Solo atribuye por título
+ * ÚNICO; nunca pisa un `test_file` ya puesto. Con `aplicar: false` solo cuenta.
+ */
+function rellenarArchivosDeTest(db, projectRoot, { aplicar = false } = {}) {
+  const tm = require('./test-file-map.cjs');
+  const m = tm.construirMapa(projectRoot);
+  const filas = db.prepare('SELECT id, test_name, test_file, source_files FROM verified_contracts').all();
+  const r = { contratos: filas.length, ya_tenian: 0, atribuibles: 0, sin_match: 0, fuentes: 0, aplicados: 0 };
+  const cacheFuentes = new Map();
+  const upd = aplicar ? db.prepare('UPDATE verified_contracts SET test_file = ?, source_files = ? WHERE id = ?') : null;
+  for (const f of filas) {
+    if (f.test_file) { r.ya_tenian++; continue; }
+    const archivo = tm.archivoDe(m, f.test_name);
+    if (!archivo) { r.sin_match++; continue; }
+    r.atribuibles++;
+    if (!cacheFuentes.has(archivo)) cacheFuentes.set(archivo, tm.fuentesDe(projectRoot, archivo));
+    let actuales = []; try { actuales = JSON.parse(f.source_files || '[]'); } catch { /* vacío */ }
+    const fuentes = actuales.length ? actuales : cacheFuentes.get(archivo);
+    if (!actuales.length && fuentes.length) r.fuentes++;
+    if (aplicar) { upd.run(archivo, JSON.stringify(fuentes), f.id); r.aplicados++; }
+  }
+  return r;
+}
 
 // ─── REGISTER PASSING TESTS (called by TDD Gate automatically) ───────────────
 
@@ -996,6 +1034,7 @@ function schemaDisponible(db) {
 
 module.exports = {
   registerPassingTests,
+  rellenarArchivosDeTest,
   migrateSchema,
   migrateSchemaV2,
   schemaDisponible,

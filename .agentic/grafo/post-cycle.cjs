@@ -1474,6 +1474,10 @@ async function main() {
   if (!silent) process.stdout.write('  9. Index AST (mapa de código)... ');
   results.ast = indexarAst();
   if (!silent) console.log(results.ast ? '✅' : '⚠️  (omitido)');
+  // La columna ciclos.ast_indexed existe desde siempre y NADIE la escribía: 62 de 62 ciclos de glowly figuraban «sin AST» con 60 indexaciones hechas.
+  if (results.ast && results.ciclo) {
+    try { const dbAst = openDB(); if (dbAst) { try { dbAst.prepare('UPDATE ciclos SET ast_indexed = 1 WHERE ciclo_id = ?').run(results.ciclo); } finally { dbAst.close(); } } } catch { /* rotular es un plus */ }
+  }
 
   // Step 11: Parallel Guard ("romper el silencio") — solo corre si el
   // orquestador pasó --expected-parallel, es decir, si MODO LEGIÓN decidió
