@@ -1,6 +1,6 @@
 {
   "name": "agentic-kdd",
-  "version": "3.23.0",
+  "version": "3.23.2",
   "schema": {
     "gate_result": 1,
     "telemetry": 2,

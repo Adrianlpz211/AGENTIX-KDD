@@ -1688,6 +1688,42 @@
           "NTFY-5"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-ocio-4",
+      "doc": "TEAMS",
+      "requisito": "Tarea sin empezar y sin archivos tocados: a la 2.ª ronda se le exige reportar BLOQUEADO o empezar, a la 3.ª se pregunta al Director; con archivos recientes espera 8",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OCIO-4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-ocio-5",
+      "doc": "TEAMS",
+      "requisito": "Cursor parado: evidencia en la solicitud, mensaje para reactivarlo en el aviso, diagnóstico por comando y la ronda exige no cerrar con un resumen",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OCIO-5"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-tablero-5",
+      "doc": "TEAMS",
+      "requisito": "Si el puerto del tablero está ocupado se monta en el siguiente libre",
+      "alcance": "proceso real (tablero y HTTP)",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "si el puerto del tablero ya está ocupado"
+        ]
+      ]
     }
   ]
 }

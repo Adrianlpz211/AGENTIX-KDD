@@ -630,6 +630,8 @@
     var actCons = A.filter(function (a) { return /cursor/i.test(a.actor); })[0] || null, actDir = A.filter(function (a) { return !/cursor/i.test(a.actor); })[0] || null;
     var construyeDir = !!d && individual && (cola.tareas.length > 0 || cola.correcciones.length > 0);   // modo individual: Claude Code también construye
     trabajaDir = trabajaDir || construyeDir || !!actDir; trabajaCons = trabajaCons || !!actCons;
+    var parado = !!(ro && ro.builder && ro.builder.sin_novedad && ro.builder.sin_novedad.veredicto === 'PARADO' && ro.builder.sin_novedad.n >= 2);
+    if (parado) trabajaCons = false;
     var meta = {};
     meta.director = { sala: actDir ? false : (!enMarcha || (ocioso && !trabajaDir)), trab: trabajaDir };
     var subsAqui = enMarcha && (d.plan || d.total > 0 || d.canal === 'ACTIVO');
@@ -660,6 +662,7 @@
       else if (k === 'cons' && actCons) { texto = 'aa: ' + cortar(actCons.tarea, 22); colEtq = '#4aa3ff'; }
       else if (k === 'director' && construyeDir) { texto = 'Construyendo ' + (cola.correcciones.length ? cola.correcciones[0].id : cola.tareas[0].id); colEtq = '#d97757'; }
       else if (k === 'director') { texto = cola.por_aceptar.length ? 'Revisando ' + cola.por_aceptar[0].id : aud ? 'Revisando ' + (aud.id || 'entrega') : cola.devueltas.length ? 'Decidiendo ' + cola.devueltas[0].id : 'Esperando entrega'; colEtq = m.trab ? '#d97757' : '#7f8aa3'; }
+      else if (k === 'cons' && parado) { texto = 'Parado: espera que le escriban'; colEtq = '#ff5a5a'; }
       else if (k === 'cons') { texto = cola.correcciones.length ? 'Corrigiendo ' + cola.correcciones[0].id : cola.tareas.length ? 'Construyendo ' + cola.tareas[0].id : cola.devueltas.length ? 'Bloqueado: espera decisión' : 'Esperando tarea'; colEtq = m.trab ? '#4aa3ff' : '#7f8aa3'; }
       else { var area = { fe: 'UI/UX', be: 'backend', neg: 'negocio' }[k]; texto = aud ? 'Auditando ' + (aud.id || '') + ' · ' + area : 'En espera'; colEtq = aud ? '#8b6bd9' : '#7f8aa3'; }
       if (p.fase !== 'parado' && sitio.zona === 'trabajo') { texto = 'Va a su puesto'; colEtq = '#3fe2e8'; }
@@ -754,6 +757,7 @@
     celebrar: function () { var t = T0.map(function (x) { return x.id === 'T-003' ? tarea('T-003', 'Agenda de citas', 'ACEPTADA') : x; }); return demo({ roles: { director: role(true, 0), builder: role(true, 1) }, tareas: t }); },
     espera3: function () { var t = T0.map(function (x) { return tarea(x.id, x.titulo, 'ACEPTADA'); }); return demo({ actividad_seg: 200, roles: { director: role(true), builder: role(true) }, tareas: t }); },
     alarma: function () { return demo({ semaforo: 'ROJO', alertas: [{ nivel: 'ROJO', msg: 'Director (Claude Code): su vigilante NO está vivo' }, { nivel: 'ROJO', msg: 'Constructor (Cursor): su vigilante NO está vivo y tiene trabajo esperando' }], roles: { director: role(false, 1), builder: role(false, 1) }, tareas: T0 }); },
+    parado: function () { var r = { director: role(true, 1), builder: role(true, 1) }; r.builder.sin_novedad = { n: 3, min: 9, pedido: 'D-001', umbral: 3, veredicto: 'PARADO', evidencia: 'ningún archivo tocado', empujon: 'Continúa con T-004' }; return demo({ semaforo: 'AMARILLO', alertas: [{ nivel: 'AMARILLO', msg: 'Constructor (Cursor): 3 rondas sin trabajo (~9 min)' }], roles: r, tareas: T0 }); },
     aviso: function () { return demo({ semaforo: 'AMARILLO', alertas: [{ nivel: 'AMARILLO', msg: 'Director (Claude Code): aviso sin atender hace 4 min' }], roles: { director: role(true, 1, 4), builder: role(true, 1) }, tareas: T0 }); },
     pausa: function () { return demo({ canal: 'PAUSADO', semaforo: 'PAUSADO', roles: { director: role(false), builder: role(false) }, tareas: T0 }); },
   };

@@ -1071,3 +1071,48 @@ test('OFICINA-3 — la decisión del dueño llega al tablero con su pregunta, op
   salida(root, 'decidir', 'D-001', 'Resend', '--porque=ya lo usamos');
   s = T.salud(root); assert.equal(s.cola.decisiones_dueno.length, 0, 'resuelta: sale del tablero');
 });
+
+test('OCIO-4 — con una tarea sin empezar y SIN archivos tocados: a la 2.ª ronda se le dice que no espere en silencio (reportar BLOQUEADO) y a la 3.ª se pregunta al Director; con archivos recientes espera 8', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Una tarea que no se empieza', '--criterio=a', '--sin-contexto');
+  const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+  const atras = () => { const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); if (est.sinNovedad && est.sinNovedad.builder) est.sinNovedad.builder.ultimo -= 100000; fs.writeFileSync(estadoF, JSON.stringify(est)); };
+  const ronda = () => salida(root, 'ronda', '--rol=builder');
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 30 * 60000);   // el último archivo tocado fue hace 30 min
+  try {
+    assert.doesNotMatch(ronda(), /SIN EMPEZARLA/);
+    atras(); const r2 = ronda();
+    assert.match(r2, /LLEVAS 2 RONDAS VIENDO T-001 SIN EMPEZARLA/); assert.match(r2, /reportar T-001 --estado=BLOQUEADO/);
+    atras(); const r3 = ronda();
+    assert.doesNotMatch(r3, /SIN EMPEZARLA/, 'el aviso de silencio sale una sola vez');
+    assert.match(r3, /SIN TRABAJO\. Ya le pedí tareas al Director en D-001/, 'a la 3.ª ronda sin archivos tocados se pregunta al Director (no a la 8.ª)');
+  } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  const activo = proyecto(); arrancado(activo); salida(activo, 'tarea', 'Tarea larga', '--criterio=a', '--sin-contexto');
+  const estadoA = path.join(activo, '.agentic', '_teams', 'estado.json');
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 60000);          // acaba de tocar archivos: está trabajando
+  try {
+    for (let i = 0; i < 5; i++) { const est = JSON.parse(fs.readFileSync(estadoA, 'utf8')); if (est.sinNovedad && est.sinNovedad.builder) est.sinNovedad.builder.ultimo -= 100000; fs.writeFileSync(estadoA, JSON.stringify(est)); assert.doesNotMatch(salida(activo, 'ronda', '--rol=builder'), /SIN TRABAJO|SIN EMPEZARLA/); }
+  } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});
+
+test('OCIO-5 — Cursor parado: evidencia en la solicitud y en el aviso al Director, mensaje listo para pegarle en su chat, diagnóstico por comando y la ronda no deja cerrar con un resumen', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Prueba en vivo de la falla a mitad del alta', '--criterio=a', '--sin-contexto');
+  const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+  const atras = () => { const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); if (est.sinNovedad && est.sinNovedad.builder) est.sinNovedad.builder.ultimo -= 100000; fs.writeFileSync(estadoF, JSON.stringify(est)); };
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 30 * 60000);
+  try {
+    const r1 = salida(root, 'ronda', '--rol=builder');
+    assert.match(r1, /ESTE TURNO NO TERMINA CON UN RESUMEN/, 'con trabajo pendiente la ronda lo exige');
+    atras(); salida(root, 'ronda', '--rol=builder'); atras(); salida(root, 'ronda', '--rol=builder');
+    assert.match(fs.readFileSync(canal.rutaCanal(root), 'utf8'), /Evidencia: último archivo tocado hace 30 min[^\n]*sin reportes suyos[^\n]*→ PARADO\./);
+    const rz = T.accionable(T.calcular(root), 'director').razones.find((x) => /SOLICITUD DEL CONSTRUCTOR/.test(x));
+    assert.match(rz, /\[último archivo tocado hace 30 min/, 'el Director ve la evidencia en su aviso');
+    const al = T.salud(root).alertas.find((a) => /rondas sin trabajo/.test(a.msg));
+    assert.match(al.msg, /Probablemente terminó su turno y espera que le escribas: pégale en su chat «Continúa con T-001: Prueba en vivo de la falla a mitad del alta\. Después sigue con el resto de la cola\. No te detengas a resumir/);
+    const d = salida(root, 'diagnostico');
+    assert.match(d, /DIAGNÓSTICO DEL CONSTRUCTOR: PARADO/); assert.match(d, /pendientes: T-001/); assert.match(d, /PARECE PARADO[\s\S]*«Continúa con T-001/);
+  } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 60000);
+  try { assert.match(salida(root, 'diagnostico'), /DIAGNÓSTICO DEL CONSTRUCTOR: TRABAJANDO[\s\S]*no lo interrumpas/); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});

@@ -1,5 +1,23 @@
 # Changelog — Agentic KDD
 
+## [3.23.2] — 2026-10-05
+
+**Cursor que termina su turno y se queda quieto: ahora se detecta con evidencia, se avisa con el mensaje para reactivarlo, y el tablero se monta en otro puerto si el suyo está ocupado.**
+- **Hallazgo real (glowly, ~30 min):** los loops y el vigilante de Cursor estaban vivos y sus rondas llegaban, pero cada aviso lo respondía con un resumen («sigo con el anti-abuso…») y paraba. Reencolar tareas no lo movió; solo un mensaje del dueño en su chat lo reactivó. Desde Agentix NO se puede escribir en el chat de Cursor: lo que sí se puede es detectarlo rápido y avisar bien.
+- **Evidencia en vez de suposición:** nuevo `teams: diagnostico` (y el mismo dato dentro de la solicitud del constructor): último archivo tocado (con su nombre), último reporte suyo y última ronda → veredicto TRABAJANDO / PARADO. Es lo que el Director hacía a mano mirando el disco.
+- **Con tarea pendiente y sin archivos tocados**, el aviso sube a la 3.ª ronda (antes 8), con el mensaje listo para pegarle a Cursor («Continúa con T-0xx: …. No te detengas a resumir…»). Ese mensaje llega **al Director, al semáforo, a la oficina (el constructor se ve parado, en rojo) y a tu teléfono por ntfy**.
+- **La ronda del constructor ya no deja cerrar con un resumen:** con trabajo pendiente le dice «ESTE TURNO NO TERMINA CON UN RESUMEN: debe acabar con archivos tocados o con `reportar`», y a la 2.ª ronda sin empezar le exige reportar BLOQUEADO si algo lo frena.
+- **El Director aprende que reencolar no sirve:** su protocolo dice que un «PARADO» se resuelve con un mensaje del dueño y que debe dárselo (por ntfy si está activo), no reencolar lo mismo.
+- **Tablero:** si el puerto 3847 ya lo usa el tablero de otro proyecto, el nuevo se monta en el siguiente libre (como Vite/Next) y lo dice, en vez de morir.
+
+## [3.23.1] — 2026-10-05
+
+**El constructor que ve su tarea y no la empieza ya no se queda callado (caso glowly, 22:20–22:40).**
+- Cursor dejó T-042 y T-043 sin empezar ~20 min mientras sus rondas decían «sin cambios»: no estaba «sin tareas», estaba parado con tareas delante, y nada le exigía decir por qué. Ahora, si tiene una tarea pendiente y **no hay archivos tocados** en el proyecto (`git status`, sin `.agentic`/`.legion`/`_output`) en 8 min:
+  - a la **2.ª ronda** la propia ronda le dice «LLEVAS 2 RONDAS VIENDO T-0xx SIN EMPEZARLA: no esperes en silencio; si algo te frena (un gate, una duda, un archivo crítico, el orden, un permiso) repórtalo ya con `reportar T-0xx --estado=BLOQUEADO --detalle=…`; si no, empieza»;
+  - a la **3.ª ronda** deja la solicitud al Director (antes esperaba 8 rondas, ~24 min). Con archivos recién tocados (tarea larga de verdad) sigue esperando 8.
+- Sin git no se puede saber si trabaja: se asume que sí (no se molesta de más).
+
 ## [3.23.0] — 2026-10-05
 
 **Agentix te escribe al teléfono (ntfy) y puedes contestarle desde ahí.**

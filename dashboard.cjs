@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || 3847; // override: AKDD_DASH_PORT (permite correr dos versiones lado a lado)
+let PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || 3847; // override: AKDD_DASH_PORT. Si está ocupado (otro proyecto con su tablero abierto) se prueba el siguiente, como hace Node/Vite
 const projectPath = process.cwd();
 const dbPath = path.join(projectPath, '.agentic', 'memoria.db');
 const grafoPath = fs.existsSync(path.join(projectPath, '.agentic', 'grafo', 'grafo.cjs'))
@@ -5191,7 +5191,21 @@ const server = require('http').createServer((req, res) => {
   res.end(req.method === 'HEAD' ? undefined : HTML);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+// Si el puerto ya lo usa otro tablero (p. ej. el de otro proyecto), se monta en el siguiente libre en vez de morir.
+const INTENTOS_PUERTO = 40;
+function escuchar(intentosRestantes) {
+  server.once('error', (e) => {
+    if (e && e.code === 'EADDRINUSE' && intentosRestantes > 0) {
+      console.log(`  El puerto ${PORT} ya está en uso (¿el tablero de otro proyecto?). Pruebo el ${PORT + 1}…`);
+      PORT += 1; escuchar(intentosRestantes - 1);
+    } else if (e && e.code === 'EADDRINUSE') {
+      console.error(`  No encontré un puerto libre entre ${PORT - INTENTOS_PUERTO} y ${PORT}. Cierra un tablero o define AKDD_DASH_PORT.`); process.exit(1);
+    } else throw e;
+  });
+  server.listen(PORT, '127.0.0.1', alEscuchar);
+}
+function alEscuchar() {
+  server.removeAllListeners('error');
   const url = `http://localhost:${PORT}`;
   console.log(`\n  Agentix KDD Dashboard v4`);
   console.log(`  → ${url}`);
@@ -5207,4 +5221,5 @@ server.listen(PORT, '127.0.0.1', () => {
     if (err) console.log(`  Open manually: ${url}`);
   });
   console.log('  Press Ctrl+C to stop\n');
-});
+}
+escuchar(INTENTOS_PUERTO);

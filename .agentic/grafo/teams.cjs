@@ -32,6 +32,7 @@ const OCIOSO_MS = 6 * 60 * 1000;
 const OCIO_RONDAS = 3;          // rondas seguidas SIN nada que hacer (~9 min con el loop de 3 min) → el constructor le pide trabajo al Director
 const OCIO_RONDAS_CON_PENDIENTE = 8;  // con pendientes que no se mueven (sin reportar ni resolver nada) esperamos más antes de preguntar
 const DORMIDO_MS = 10 * 60 * 1000;    // el constructor tiene trabajo, su vigilante está muerto y no hace rondas desde hace tanto → se lo decimos al Director (y por él, al dueño)
+const OCIO_ARCHIVOS_MS = 8 * 60 * 1000;   // pendientes + ningún archivo tocado en este tiempo = no está trabajando: se pregunta a las 3 rondas, no a las 8
 const OCIO_ESPACIO_MS = 90 * 1000;     // dos llamadas a `ronda` pegadas (ronda + ronda --cierre) cuentan como UNA ronda
 const REPETIR_MS = 10 * 60 * 1000; // un aviso de «nadie tiene nada» se repite cada tanto mientras siga igual
 const PARCIAL_MS = 10 * 60 * 1000; // un PARCIAL sin avance pasa a ser decisión del Director
@@ -228,7 +229,7 @@ function accionable(e, rol) {
     }
     // Mensajes que el dueño dejó desde el teléfono (puente ntfy): son una indicación suya y el vigilante del Director se despierta con ellos.
     { const nb = puenteTelefono(); if (nb) for (const m of nb.sinLeer(e.root).slice(0, 5)) { razones.push(`MENSAJE DEL DUEÑO desde el teléfono [${m.id}]: «${corto(m.texto, 300)}» — es una indicación del dueño (por ntfy): léela y actúa; lo destructivo o sensible se confirma en el chat. Respóndele con \`node .agentic/grafo/ntfy-bridge.cjs enviar "…"\` y márcalo leído: \`ntfy-bridge.cjs buzon --leido=${m.id}\``); claves.push('M:' + m.id); } }
-    for (const d of e.solicitudes) { razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
+    for (const d of e.solicitudes) { const evid = /Evidencia:\s*([^\n]+)/.exec(d.texto); razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)}${evid ? ' [' + corto(evid[1], 260) + ']' : ''} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
     // (el caso «los dos esperando al otro» que dejó glowly parado).
@@ -243,19 +244,64 @@ function accionable(e, rol) {
 // Caso real (glowly, 05/10/2026): el Director ya no tenía nada que revisar, el constructor repetía «el canal sigue sin tareas
 // nuevas» ronda tras ronda y los dos se quedaron esperándose ~20 min hasta que el dueño intervino. Ahora el constructor, a la
 // tercera ronda idéntica, deja una SOLICITUD en el canal; el vigilante del Director lo despierta con ella.
+/** Último cambio en archivos del proyecto: { t, archivo } (t = 0 si no hay nada sin guardar en git); null = no se puede saber (sin git). */
+function cambioReciente(root) {
+  if (process.env.AKDD_TEAMS_ULTIMO_CAMBIO) { const t = Number(process.env.AKDD_TEAMS_ULTIMO_CAMBIO); return t ? { t, archivo: 'archivo de prueba' } : null; }
+  try {
+    if (!fs.existsSync(path.join(root, '.git'))) return null;
+    const r = require('child_process').spawnSync('git', ['-c', 'safe.directory=*', 'status', '--porcelain', '-uall'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 16 * 1024 * 1024 });
+    if (r.status !== 0) return null;
+    let max = 0, quien = '';
+    for (const l of String(r.stdout).split(String.fromCharCode(10))) {
+      const p = l.slice(3).replace(/^"|"$/g, '').replace(/.* -> /, ''); if (!p || /^(\.agentic|\.legion|_output)\//.test(p)) continue;
+      try { const m = fs.statSync(path.join(root, p)).mtimeMs; if (m > max) { max = m; quien = p; } } catch { /* borrado o ilegible */ }
+    }
+    return { t: max, archivo: quien };
+  } catch { return null; }
+}
+function ultimoCambioArchivos(root) { const c = cambioReciente(root); return c === null ? null : c.t; }
+
+/** Lo que se puede comprobar en el disco sobre si el constructor trabaja: archivos tocados, reportes y rondas. Es lo que el Director hacía a mano. */
+function evidenciaConstructor(root, e) {
+  const ahora = Date.now(), c = cambioReciente(root);
+  const ev = leerEventos(root, 400).filter((x) => x.rol === 'builder');
+  const ult = (cmd) => { const x = ev.filter((y) => y.cmd === cmd).pop(); return x ? Date.parse(x.t) : null; };
+  const rond = (e && e.rondas && e.rondas.builder) || ult('ronda'), rep = ult('reportar');
+  const min = (t) => Math.max(0, Math.round((ahora - t) / 60000));
+  const partes = [
+    c === null ? 'sin git: no se puede ver si toca archivos' : c.t ? 'último archivo tocado hace ' + min(c.t) + ' min (' + corto(c.archivo, 60) + ')' : 'ningún archivo modificado sin guardar',
+    rep ? 'último reporte suyo hace ' + min(rep) + ' min' : 'sin reportes suyos',
+    rond ? 'última ronda hace ' + min(rond) + ' min' : 'sin rondas',
+  ];
+  const sinArchivos = c !== null && (!c.t || (ahora - c.t) >= OCIO_ARCHIVOS_MS), sinReporte = !rep || (ahora - rep) >= OCIO_ARCHIVOS_MS;
+  const veredicto = c === null ? 'SIN_DATOS' : (sinArchivos && sinReporte ? 'PARADO' : 'TRABAJANDO');
+  let empujon = null;
+  const t = e && e.tareasPend && e.tareasPend[0], k = e && e.corrPend && e.corrPend[0];
+  if (t) empujon = 'Continúa con ' + t.id + ': ' + corto(t.titulo, 90) + '. Después sigue con el resto de la cola. No te detengas a resumir: termina este turno con archivos tocados o con un reporte (si algo te frena, reportar --estado=BLOQUEADO).';
+  else if (k) empujon = 'Resuelve ' + k.id + ' y márcala con resolver. No te detengas a resumir: termina este turno con archivos tocados o con un reporte.';
+  return { texto: partes.join(' · '), veredicto, empujon };
+}
+
 function seguimientoOcio(root, e, est) {
   est.sinNovedad = est.sinNovedad || {}; const ahora = Date.now();
   const razones = accionable(e, 'builder').razones;
   const huella = canal.sha(razones.join('|') + '#' + e.hechasSinAceptar.map((t) => t.id).join(',')).slice(0, 12);
   const prevAt = (est.rondas && est.rondas.builder) || 0;
   const hizo = leerEventos(root, 300).some((ev) => ev.rol === 'builder' && ['reportar', 'resolver', 'decision'].includes(ev.cmd) && Date.parse(ev.t) > prevAt);
-  const umbral = razones.length ? OCIO_RONDAS_CON_PENDIENTE : OCIO_RONDAS;
+  const ultCambio = razones.length ? ultimoCambioArchivos(root) : null;
+  const trabajando = ultCambio === null || (ahora - ultCambio) < OCIO_ARCHIVOS_MS;   // sin git no se puede saber: se asume trabajo
+  const umbral = razones.length && trabajando ? OCIO_RONDAS_CON_PENDIENTE : OCIO_RONDAS;
+  const evi = evidenciaConstructor(root, e);
   let s = est.sinNovedad.builder;
   if (s && s.pedido && (hizo || s.huella !== huella)) atenderSolicitudes(root, 'el constructor volvió a avanzar (reportó o cambió su cola)');
   if (!s || s.huella !== huella || hizo) { s = est.sinNovedad.builder = { huella, n: 1, desde: ahora, ultimo: ahora, pedido: null, umbral }; return { s, aviso: null }; }
-  s.umbral = umbral;
+  s.umbral = umbral; s.evidencia = evi.texto; s.veredicto = evi.veredicto; s.empujon = evi.empujon;
   if (ahora - s.ultimo >= OCIO_ESPACIO_MS) { s.n++; s.ultimo = ahora; }
   const min = Math.round((ahora - s.desde) / 60000);
+  if (s.n === 2 && !trabajando && !s.avisoSilencio && e.tareasPend.length) {
+    s.avisoSilencio = true; const t = e.tareasPend[0];
+    return { s, aviso: `⚠ LLEVAS 2 RONDAS VIENDO ${t.id} SIN EMPEZARLA y no hay archivos tocados. NO esperes en silencio: si algo te frena (un gate, una duda, un archivo crítico, el orden, un permiso), repórtalo AHORA: \`${P.CMD} reportar ${t.id} --estado=BLOQUEADO --detalle="qué te frena y qué necesitas"\`. Si no hay nada que te frene, EMPIEZA ${t.id} ya. Una tarea parada sin reporte es lo único que el Director no puede ver.` };
+  }
   if (s.n < umbral || e.listo) return { s, aviso: null };
   if (!s.pedido) {
     let id = '';
@@ -263,11 +309,12 @@ function seguimientoOcio(root, e, est) {
       id = canal.siguienteId(c.limpias.join(String.fromCharCode(10)), 'D');
       const b = [`### [${id}] Constructor sin trabajo hace ~${min} min (${s.n} rondas iguales)`, `Tipo: DIRECTOR · Estado: ABIERTA · Origen: CONSTRUCTOR · ${canal.sello()}`,
         razones.length ? `El constructor tiene ${razones.length} pendiente(s) que no avanzan desde hace ${s.n} rondas: ¿hay un bloqueo?` : 'El constructor no tiene tareas, correcciones ni omisiones y lleva ' + s.n + ' rondas con el mismo estado.',
+        'Evidencia: ' + evi.texto + ' → ' + evi.veredicto + '.',
         'Director: encola el siguiente lote (`tarea`), cierra si todo está listo (`cerrar`) o dile qué esperar.'];
       let L = canal.__asegurar(lineas.slice(), 'decisiones', 'Decisiones del Director y del dueño'); L = canal.__quitarPlaceholder(L, 'decisiones');
       const fin = canal.__finSeccion(L, 'decisiones'); L.splice(fin, 0, '', ...b); return L;
     });
-    s.pedido = id; s.pedido_at = ahora;
+    s.pedido = id; s.pedido_at = ahora; s.evidencia = evi.texto; s.veredicto = evi.veredicto; s.empujon = evi.empujon;
     registrarEvento(root, { cmd: 'solicitud', rol: 'builder', arg: id });
     return { s, aviso: `⏱ LLEVAS ${s.n} RONDAS (~${min} min) SIN TRABAJO. Ya le pedí tareas al Director en ${id}: su vigilante lo despierta con eso. No esperes en silencio: mantén tu loop y atiende lo que llegue.` };
   }
@@ -602,6 +649,7 @@ function ejecutarCmd(argv, root) {
       try { escribirContinuidad(root, e); } catch { /* auxiliar */ }
     } else {
       say(textoRondaBuilder(e));
+      if (e.canal === 'ACTIVO' && (e.tareasPend.length || e.corrPend.length)) say('', '▶ ESTE TURNO NO TERMINA CON UN RESUMEN. Tienes trabajo pendiente: hazlo ahora. Un turno que cierra con «sigo con…» o con la lista de lo que falta, sin archivos tocados ni `reportar`, es un turno perdido (el Director y el dueño lo ven como «constructor parado»).');
       if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual') { const est2 = leerEstado(root); const r = seguimientoOcio(root, e, est2); guardarEstado(root, est2); if (r.aviso) say('', r.aviso); }
     }
     if (opt.cierre && rol === 'builder' && e.canal === 'ACTIVO') {
@@ -892,6 +940,17 @@ function ejecutarCmd(argv, root) {
     return salida();
   }
 
+  if (cmd === 'diagnostico') {
+    const e = necesitaCanal(); if (!e) return salida(1);
+    const ev = evidenciaConstructor(root, e); const sn = leerEstado(root).sinNovedad;
+    say('DIAGNÓSTICO DEL CONSTRUCTOR: ' + ev.veredicto);
+    say('  ' + ev.texto);
+    say('  pendientes: ' + (e.tareasPend.length ? e.tareasPend.map((t) => t.id).join(', ') : 'ninguna tarea') + ' · correcciones: ' + (e.corrPend.length || 0) + ' · vigilante ' + (vigilanteVivo(root, 'builder') ? 'vivo' : 'MUERTO') + (sn && sn.builder ? ' · ' + sn.builder.n + ' ronda(s) iguales' : ''));
+    if (ev.veredicto === 'PARADO' && ev.empujon) say('', 'PARECE PARADO (terminó su turno y espera que le escriban). No hay forma de escribir en su chat desde aquí: pásale al dueño este mensaje para que se lo pegue a Cursor:', '  «' + ev.empujon + '»');
+    else if (ev.veredicto === 'TRABAJANDO') say('', 'Hay señales de trabajo reciente: no lo interrumpas.');
+    return salida();
+  }
+
   if (cmd === 'avance') {
     const e = necesitaCanal(); if (!e) return salida(1);
     say(e.avance === null ? 'Aún no hay tareas medibles.' : `El proyecto está en ${e.avance} % (${e.aceptadas} de ${e.total} tareas aceptadas).`);
@@ -1055,10 +1114,10 @@ function salud(root, opts = {}) {
     const ult = est.rondas && est.rondas[rol]; const ultMin = ult ? Math.round((ahora - ult) / 60000) : null;
     const sinAt = (est.wakes || []).filter((w) => w.rol === rol && !w.visto_at).map((w) => Date.parse(w.at)).filter(Number.isFinite);
     const avisoMin = sinAt.length ? Math.round((ahora - Math.min(...sinAt)) / 60000) : null;
-    const sn = rol === 'builder' && est.sinNovedad && est.sinNovedad.builder; const sinNov = sn && sn.n >= 2 ? { n: sn.n, min: Math.round((ahora - sn.desde) / 60000), pedido: sn.pedido || null, umbral: sn.umbral || OCIO_RONDAS } : null;
+    const sn = rol === 'builder' && est.sinNovedad && est.sinNovedad.builder; const sinNov = sn && sn.n >= 2 ? { n: sn.n, min: Math.round((ahora - sn.desde) / 60000), pedido: sn.pedido || null, umbral: sn.umbral || OCIO_RONDAS, evidencia: sn.evidencia || null, veredicto: sn.veredicto || null, empujon: sn.empujon || null } : null;
     roles[rol] = { sin_novedad: sinNov, nombre: NOMBRE[rol], vigilante: v, ultima_ronda_hace_min: ultMin, loop: individual ? 'n/a' : (ultMin !== null && ultMin <= 6 ? 'ACTIVO' : 'NO FIGURA'), pendiente: a.razones.length, razones: a.razones.slice(0, 6), aviso_sin_atender_min: avisoMin };
     if (e.canal !== 'ACTIVO' || individual) continue;
-    if (sinNov && sinNov.n >= sinNov.umbral) sube(sinNov.n >= sinNov.umbral * 2 ? 2 : 1, NOMBRE[rol] + ': ' + sinNov.n + ' rondas sin trabajo (~' + sinNov.min + ' min)' + (sinNov.pedido ? '; ya pidió tareas al Director (' + sinNov.pedido + ')' : ''));
+    if (sinNov && sinNov.n >= sinNov.umbral) sube(sinNov.n >= sinNov.umbral * 2 ? 2 : 1, NOMBRE[rol] + ': ' + sinNov.n + ' rondas sin trabajo (~' + sinNov.min + ' min)' + (sinNov.pedido ? '; ya pidió tareas al Director (' + sinNov.pedido + ')' : '') + (sinNov.veredicto === 'PARADO' ? '. Evidencia: ' + sinNov.evidencia + '. Probablemente terminó su turno y espera que le escribas: pégale en su chat «' + (sinNov.empujon || 'Continúa con la cola y no te detengas a resumir.') + '»' : ''));
     if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : ''));
     if (avisoMin !== null && avisoMin >= 10) sube(2, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min (en un turno largo, o dormido: solo tú puedes despertarlo escribiéndole en su chat)');
     else if (avisoMin !== null && avisoMin >= 3) sube(1, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min');
@@ -1098,7 +1157,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { salud, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { salud, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

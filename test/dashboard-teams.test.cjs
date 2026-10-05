@@ -123,6 +123,8 @@ test('la oficina 3D en navegador real: sin TEAMS juegan; los comandos los mueven
     assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.vivo && x.estado !== 'dormido'));
     // 6) trabajo real: construyen y revisan; la auditoría pone a teclear a los tres sub-agentes
     r = await paso('trabajo', 30); assert.ok(r.find((x) => x.k === 'director').modo === 'type' && r.find((x) => x.k === 'cons').modo === 'type');
+    r = await paso('parado', 6); assert.equal(r.find((x) => x.k === 'cons').modo, 'read', 'el constructor que no avanza se ve parado (sentado, sin teclear)');
+    r = await paso('trabajo', 4);
     r = await paso('auditoria', 4); assert.deepStrictEqual(['fe', 'be', 'neg'].map((k) => r.find((x) => x.k === k).modo), ['type', 'type', 'type']);
     // 7) sin vigilante los perros se van a dormir, aunque la gente siga en su puesto
     r = await paso('alarma', 14); assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.estado === 'dormido' && !x.vivo));
@@ -205,4 +207,25 @@ test('tablero de decisiones del dueño: lista con scroll interno, modal con el m
     await page.waitForFunction(() => document.querySelectorAll('.dueno .it').length === 11, null, { timeout: 15000 });
     assert.deepStrictEqual(errores, []);
   } finally { await browser.close().catch(() => {}); d.cerrar(); }
+});
+
+test('si el puerto del tablero ya está ocupado (otro proyecto), se monta en el siguiente libre en vez de morir', async () => {
+  const net = require('net'); const { spawn } = require('child_process'); const { puertoLibre } = require('./fixtures/dashboard-fixture.cjs');
+  const dir = tmp('puerto'); crearFixture(dir);
+  const base = await puertoLibre();
+  const ocupante = net.createServer(); await new Promise((r) => ocupante.listen(base, '127.0.0.1', r));
+  const env = Object.assign({}, process.env, { AKDD_DASH_PORT: String(base), AKDD_DASH_NO_OPEN: '1' }); delete env.NODE_TEST_CONTEXT;
+  const p = spawn(process.execPath, [path.join(REPO, 'dashboard.cjs')], { cwd: dir, env, windowsHide: true });
+  let salida = '';
+  try {
+    await new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('no arrancó: ' + salida.slice(-300))), 30000);
+      const ver = (d) => { salida += d; if (/→ http:\/\/localhost:\d+/.test(salida)) { clearTimeout(t); res(); } };
+      p.stdout.on('data', ver); p.stderr.on('data', ver); p.on('exit', (c) => { clearTimeout(t); rej(new Error('terminó (' + c + '): ' + salida.slice(-300))); });
+    });
+    const puerto = Number(/→ http:\/\/localhost:(\d+)/.exec(salida)[1]);
+    assert.ok(puerto > base, `usó otro puerto (${puerto}) en vez de ${base}`);
+    assert.match(salida, /ya está en uso/);
+    const r = await fetch(`http://127.0.0.1:${puerto}/oficina`); assert.equal(r.status, 200, 'sirve en el nuevo puerto (el control de Host acepta el puerto real)');
+  } finally { try { p.kill(); } catch { /* ya */ } ocupante.close(); }
 });
