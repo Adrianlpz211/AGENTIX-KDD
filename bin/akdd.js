@@ -241,6 +241,7 @@ switch (command) {
   }
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
   case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
+  case 'ntfy': runModule('ntfy-bridge.cjs', ...args.slice(1)); break;
   case 'ws': {
     const sub = arg1 || 'estado';
     if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));

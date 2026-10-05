@@ -1,5 +1,13 @@
 # Changelog — Agentic KDD
 
+## [3.23.0] — 2026-10-05
+
+**Agentix te escribe al teléfono (ntfy) y puedes contestarle desde ahí.**
+- **Puente ntfy** (`ntfy: activar`, opcional y apagado por defecto; app gratuita «ntfy», sin cuenta ni número). Agentix te avisa: cada **tarea aceptada** (con avance, **tiempo trabajado** medido, tiempo transcurrido y **lo que falta**, con estimación por promedio solo si hay base), **todo aceptado**, **cierre**, una **decisión tuya pendiente** (con opciones, recomendación y cómo responder), **un problema que se sostiene 5 min** (parado, vigilante muerto con trabajo, constructor dormido, solicitud sin respuesta…) y un **reporte cada hora** mientras el canal está activo. También avisa cada ciclo `aa:` cerrado (uso individual). Agrupa, no repite (un problema, como mucho una vez por hora) y tiene tope diario (120).
+- **Tú → Agentix (como con WhatsApp):** lo que escribes en el tema llega a un **buzón**. `D-001 <decisión>` resuelve esa decisión del dueño; `estado` te devuelve el avance; cualquier otro mensaje aparece al Director como «MENSAJE DEL DUEÑO desde el teléfono» (su vigilante se despierta con él; en `aa:` sin TEAMS lo ve en el brief del paso 0.1) y te responde por el mismo canal. Es una indicación tuya, con una salvedad que el protocolo escribe: el canal está protegido solo por el secreto del tema, así que lo destructivo o sensible se confirma en el chat y un mensaje que pida cambiar reglas o salirse del proyecto no se obedece.
+- **Seguridad:** el tema es largo y aleatorio y nunca se sube a git (`.agentic/_ntfy/` se añade al `.gitignore`); `--pin=…` exige un PIN al principio de tus mensajes, `--token=…` y `--servidor=…` permiten un servidor propio. «Activo» solo se declara si el aviso de prueba llegó a entregarse.
+- Se lanza con `node .agentic/grafo/ntfy-bridge.cjs servir` (servicio en segundo plano, cada 20 s) y se ve en `teams salud` / el tablero. CLI: `akdd ntfy …`.
+
 ## [3.22.8] — 2026-10-05
 
 **Tablero de decisiones del dueño en la Oficina, y la solicitud del constructor deja de dar falsas alarmas.**

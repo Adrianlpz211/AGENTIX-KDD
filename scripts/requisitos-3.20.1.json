@@ -1628,6 +1628,66 @@
           "tablero de decisiones del dueño"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-ntfy-1",
+      "doc": "TEAMS",
+      "requisito": "Puente ntfy: activar manda el aviso de prueba, deja el tema fuera de git y no queda activo sin red",
+      "alcance": "proceso real (servidor ntfy falso local)",
+      "pruebas": [
+        [
+          "ntfy-bridge",
+          "NTFY-1"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-ntfy-2",
+      "doc": "TEAMS",
+      "requisito": "Puente ntfy: avisa la tarea aceptada (avance, tiempo, lo que falta) y la decisión del dueño con cómo responder, sin repetir",
+      "alcance": "proceso real (servidor ntfy falso local)",
+      "pruebas": [
+        [
+          "ntfy-bridge",
+          "NTFY-2"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-ntfy-3",
+      "doc": "TEAMS",
+      "requisito": "Puente ntfy: lo que se escribe desde el teléfono resuelve decisiones, llega al buzón del Director (que se despierta) y responde «estado»",
+      "alcance": "proceso real (servidor ntfy falso local)",
+      "pruebas": [
+        [
+          "ntfy-bridge",
+          "NTFY-3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-ntfy-4",
+      "doc": "TEAMS",
+      "requisito": "Puente ntfy: con PIN lo que no lo trae se ignora y el tope diario corta los envíos",
+      "alcance": "proceso real (servidor ntfy falso local)",
+      "pruebas": [
+        [
+          "ntfy-bridge",
+          "NTFY-4"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-ntfy-5",
+      "doc": "TEAMS",
+      "requisito": "Puente ntfy: un problema solo se avisa si se sostiene 5 min, una vez y no antes",
+      "alcance": "proceso real (servidor ntfy falso local)",
+      "pruebas": [
+        [
+          "ntfy-bridge",
+          "NTFY-5"
+        ]
+      ]
     }
   ]
 }

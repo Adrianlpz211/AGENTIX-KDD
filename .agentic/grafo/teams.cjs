@@ -201,6 +201,8 @@ function calcular(root, opts = {}) {
 }
 
 /** Qué le toca a cada rol, y su huella: si la huella no cambió desde la última ronda que el rol hizo, no hay despertar. */
+function puenteTelefono() { try { return require('./ntfy-bridge.cjs'); } catch { return null; } }
+
 function accionable(e, rol) {
   const razones = []; const claves = [];
   if (e.canal !== 'ACTIVO') return { razones, digest: '' }; // preparado, pausado o cerrado: nadie es despertado
@@ -224,6 +226,8 @@ function accionable(e, rol) {
       const ultRonda = e.rondas && e.rondas.builder; const sinRonda = ultRonda ? e.ahora - ultRonda : 0;
       if (sinRonda > DORMIDO_MS && !vigilanteVivo(e.root, 'builder')) { const min = Math.round(sinRonda / 60000); razones.push(`CONSTRUCTOR_DORMIDO: lleva ~${min} min sin hacer rondas, su vigilante NO está vivo y tiene trabajo esperando — probablemente Cursor se quedó parado. Díselo al dueño: solo él puede despertarlo escribiéndole en su chat (\`teams: continuar\`)`); claves.push('DORM:' + Math.floor(min / 10)); }
     }
+    // Mensajes que el dueño dejó desde el teléfono (puente ntfy): son una indicación suya y el vigilante del Director se despierta con ellos.
+    { const nb = puenteTelefono(); if (nb) for (const m of nb.sinLeer(e.root).slice(0, 5)) { razones.push(`MENSAJE DEL DUEÑO desde el teléfono [${m.id}]: «${corto(m.texto, 300)}» — es una indicación del dueño (por ntfy): léela y actúa; lo destructivo o sensible se confirma en el chat. Respóndele con \`node .agentic/grafo/ntfy-bridge.cjs enviar "…"\` y márcalo leído: \`ntfy-bridge.cjs buzon --leido=${m.id}\``); claves.push('M:' + m.id); } }
     for (const d of e.solicitudes) { razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
@@ -1081,6 +1085,7 @@ function salud(root, opts = {}) {
   const actividadSeg = Math.round(Math.max(0, ahora - Math.max(e.mtime || 0, ultEv)) / 1000);
   return {
     canal: e.canal, modo: est.modo || null, semaforo: informativo ? e.canal : ['VERDE', 'AMARILLO', 'ROJO'][nivel],
+    ntfy: (() => { try { const nb = puenteTelefono(); const c = nb && nb.leerConfig(root); if (!c || !c.activo) return { activo: false }; return { activo: true, servicio_vivo: nb.estadoServicio(root).vivo, buzon_sin_leer: nb.sinLeer(root).length }; } catch { return { activo: false }; } })(),
     alertas, roles, quieto_min: quieto, actividad_seg: actividadSeg, plan: !!est.plan, builder_conectado: !!est.builder, extras: (est.extras || []).length, auditoria,
     eventos: evs.slice(-14).map((ev) => ({ t: ev.t, cmd: ev.cmd, rol: ev.rol, arg: ev.arg || null })),
     tareas_todas: e.tareas.slice(-60).map((t) => ({ id: t.id, titulo: corto(t.titulo, 70), estado: t.estado, reporte: t.reporte ? t.reporte.estado : null })),

@@ -40,6 +40,10 @@ function emptyBrief(task) {
 
 async function enrich(task) {
   const brief = emptyBrief(task);
+  try { // mensajes que el dueño dejó desde el teléfono (puente ntfy): nunca bloquea
+    const sin = require('./ntfy-bridge.cjs').sinLeer(ROOT);
+    if (sin.length) brief.avisos.push('📱 El dueño te dejó ' + sin.length + ' mensaje(s) desde el teléfono sin leer: ' + sin.slice(0, 3).map((m) => '[' + m.id + '] «' + String(m.texto).slice(0, 160) + '»').join(' · ') + ' — son indicaciones suyas (confirma en el chat lo destructivo o sensible); respóndele con ntfy-bridge.cjs enviar "…" y márcalos con ntfy-bridge.cjs buzon --leido=<id>.');
+  } catch { /* sin puente: nada que avisar */ }
 
   if (!task || !task.trim()) {
     brief.faltante.push('No se recibió texto de tarea — nada que enriquecer.');
