@@ -11,6 +11,9 @@
  *   · Idempotente: una tarea aceptada se registra una vez (id de ciclo determinista `teams_<hash>`); reintentar no duplica.
  *   · No inventa evidencia: pasa los archivos reales y corre post-cycle de verdad (el mismo que `aa:`).
  *   · Sin base / sin post-cycle / update en curso → PENDIENTE visible con su causa; `observar` reintenta.
+ *   · NO da por registrado lo que no está en la base: que post-cycle salga con 0 no prueba que el ciclo exista
+ *     (con una memoria.db sin migrar sale con 0 y no deja nada: 15 tareas «REGISTRADA» con la tabla `ciclos` ausente).
+ *     Antes de lanzarlo se comprueba que el esquema base exista, y al volver se comprueba que el ciclo esté cerrado en SQL.
  */
 
 const fs = require('fs');
@@ -22,6 +25,10 @@ const REINTENTOS_MAX = 5;
 const ENFRIAMIENTO_MS = 30 * 60 * 1000; // tras agotar los intentos, a los 30 min se vuelve a probar solo
 const HIJO_MS = 4 * 60 * 1000;
 const rutaRegistro = (root) => path.join(canal.dirEstado(root), 'registro.json');
+/* Tablas que el registro necesita para existir (schema.sql). Si faltan, ningún ciclo puede quedar escrito. */
+const TABLAS_NUCLEO = ['nodos', 'ciclos', 'fases', 'episodios', 'relaciones'];
+const REPARAR = 'node .agentic/grafo/schema-columns.cjs fix';
+const PRESUPUESTO_RONDA = 3; // registros que una sola ronda puede lanzar (cada post-cycle corre los tests: hasta 4 min)
 
 function leerRegistro(root) {
   try { return JSON.parse(fs.readFileSync(rutaRegistro(root), 'utf8')); } catch { return { tareas: {}, memoria: {} }; }
@@ -41,8 +48,99 @@ function rutaSegura(root, f) {
   return n;
 }
 
-/** Archivos reales de la tarea: los declarados en la tarea + los del reporte; sin ninguno, lo que Git ve cambiado. */
-function archivosDe(root, tarea, reporte) {
+function abrirLectura(root) {
+  const p = path.join(root, '.agentic', 'memoria.db');
+  if (!fs.existsSync(p)) return null;
+  try { return require('./db-adapter.cjs').openReadOnly(p, { busyTimeout: 3000 }); } catch { return null; }
+}
+
+let _cacheBase = null;
+/** ¿Tiene memoria.db el esquema base? OK | SIN_MIGRAR (con lo que falta y cómo repararlo) | SIN_BD | NO_VERIFICABLE. Con caché de 30 s. */
+function estadoBase(root, { sinCache = false } = {}) {
+  const p = path.join(root, '.agentic', 'memoria.db');
+  let mt = 0;
+  try { mt = fs.statSync(p).mtimeMs; } catch { return { estado: 'SIN_BD' }; }
+  if (!sinCache && _cacheBase && _cacheBase.root === root && _cacheBase.mt === mt && Date.now() - _cacheBase.at < 30000) return _cacheBase.v;
+  const db = abrirLectura(root);
+  let v;
+  if (!db) v = { estado: 'NO_VERIFICABLE', motivo: 'sin conector de SQLite o la base está ocupada' };
+  else {
+    try {
+      const tablas = new Set(db.all("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
+      const faltan = TABLAS_NUCLEO.filter((t) => !tablas.has(t));
+      let pendientes = null;
+      try { const r = require('./schema-catalog.cjs').inspect(db); pendientes = r.status === 'COMPLETE' ? 0 : (r.pending || []).length; } catch { /* catálogo ausente: solo se mira el núcleo */ }
+      v = faltan.length ? { estado: 'SIN_MIGRAR', faltan, pendientes, reparar: REPARAR } : { estado: 'OK', pendientes };
+    } catch (e) { v = { estado: 'NO_VERIFICABLE', motivo: String(e.message).slice(0, 120) }; }
+    finally { try { db.close(); } catch { /* ya cerrada */ } }
+  }
+  _cacheBase = { root, mt, at: Date.now(), v };
+  return v;
+}
+
+/** ¿El ciclo está de verdad en la base y cerrado? ok:true | ok:false + causa | ok:null (no se pudo mirar). */
+function verificarConDb(db, ciclo) {
+  try {
+    const f = db.get('SELECT ciclo_id, estado FROM ciclos WHERE ciclo_id = ?', ciclo);
+    if (!f) return { ok: false, causa: 'CICLO_NO_REGISTRADO' };
+    if (/EN_CURSO/i.test(String(f.estado))) return { ok: false, causa: 'CICLO_NO_CERRADO' };
+    return { ok: true };
+  } catch (e) {
+    if (/no such table/i.test(String(e.message))) return { ok: false, causa: 'ESQUEMA_SIN_MIGRAR' };
+    return { ok: null };
+  }
+}
+function verificarCiclo(root, ciclo) {
+  const db = abrirLectura(root);
+  if (!db) return { ok: null };
+  try { return verificarConDb(db, ciclo); } finally { try { db.close(); } catch { /* ya cerrada */ } }
+}
+
+/**
+ * Las que figuran REGISTRADA sin que nadie lo comprobara (registro anterior a esta comprobación) se contrastan con la
+ * base: si el ciclo no está, vuelven a PENDIENTE para registrarse de verdad. No relanza nada aquí: lo hace `observar`.
+ */
+function reverificar(root) {
+  const reg = leerRegistro(root);
+  const dudosas = Object.values(reg.tareas || {}).filter((v) => v.estado === 'REGISTRADA' && v.verificada !== true && v.ciclo);
+  if (!dudosas.length) return { revisadas: 0, reabiertas: 0 };
+  const db = abrirLectura(root);
+  if (!db) return { revisadas: 0, reabiertas: 0 };
+  let reabiertas = 0;
+  try {
+    for (const v of dudosas) {
+      const r = verificarConDb(db, v.ciclo);
+      if (r.ok === true) v.verificada = true;
+      else if (r.ok === false) { v.estado = 'PENDIENTE'; v.causa = 'REVERIFICADA: ' + r.causa; v.intentos = 0; v.verificada = false; reabiertas++; }
+    }
+  } finally { try { db.close(); } catch { /* ya cerrada */ } }
+  if (reabiertas || dudosas.some((v) => v.verificada === true)) guardarRegistro(root, reg);
+  return { revisadas: dudosas.length, reabiertas };
+}
+
+/** Sin git: los archivos de código tocados desde que empezó la tarea (lo único que se sabe sin historial). */
+const IGNORAR_DIR = new Set(['node_modules', '.git', '.agentic', '.legion', '_output', 'dist', 'build', '.next', 'coverage', 'evidencias', 'releases', '.turbo', '.cache']);
+const EXT_CODIGO = /\.(ts|tsx|js|jsx|cjs|mjs|json|css|scss|html|md|sql|py|go|rs|java|php|rb|glsl|vue|svelte)$/i;
+function archivosPorFecha(root, desdeMs, tope = 200, msMax = 4000) {
+  if (!Number.isFinite(desdeMs)) return [];
+  const fin = Date.now() + msMax; const out = [];
+  const pila = [root];
+  while (pila.length && out.length < tope && Date.now() < fin) {
+    const dir = pila.pop();
+    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (!IGNORAR_DIR.has(e.name)) pila.push(p); continue; }
+      if (!e.isFile() || !EXT_CODIGO.test(e.name)) continue;
+      try { if (fs.statSync(p).mtimeMs >= desdeMs - 1000) out.push(path.relative(root, p).split(path.sep).join('/')); } catch { /* desapareció */ }
+    }
+  }
+  return out;
+}
+
+/** Archivos reales de la tarea: los declarados en la tarea + los del reporte; sin ninguno, lo que Git ve cambiado
+ *  (o, sin Git, lo modificado desde que empezó la tarea). */
+function archivosDe(root, tarea, reporte, inicioMs) {
   const declarados = [];
   const m = /^\s*Archivos?:\s*(.+)$/im.exec(tarea && tarea.texto ? tarea.texto : '');
   if (m) declarados.push(...m[1].split(/[,;]\s*/));
@@ -52,6 +150,7 @@ function archivosDe(root, tarea, reporte) {
     try {
       const r = spawnSync('git', ['-c', 'safe.directory=*', 'status', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 15000, windowsHide: true });
       if (r.status === 0) lista = r.stdout.split(/\r?\n/).map((l) => l.slice(3).trim().replace(/^"|"$/g, '').replace(/.* -> /, '')).map((f) => rutaSegura(root, f)).filter(Boolean).filter((f) => !/^(\.legion|\.agentic)\//.test(f));
+      else lista = archivosPorFecha(root, inicioMs).map((f) => rutaSegura(root, f)).filter(Boolean); // no es un repositorio Git
     } catch { /* sin git: lista vacía */ }
   }
   return [...new Set(lista)].slice(0, 200);
@@ -99,7 +198,7 @@ function registrarTarea(root, tarea, acept, opts = {}) {
   }
 
   const script = opts.postCycle || process.env.AKDD_TEAMS_POSTCYCLE || path.join(root, '.agentic', 'grafo', 'post-cycle.cjs');
-  const archivos = archivosDe(root, tarea, acept.reporte);
+  const archivos = archivosDe(root, tarea, acept.reporte, acept.inicio);
   const area = areaDe(archivos);
   const ciclo = 'teams_' + canal.sha('v4|' + clave).slice(0, 24);
   const base = { id: tarea.id, titulo: tarea.titulo, ciclo, area, archivos: archivos.length, intentos: (previo ? previo.intentos : 0) + 1, at: new Date().toISOString() };
@@ -109,22 +208,45 @@ function registrarTarea(root, tarea, acept, opts = {}) {
     guardarRegistro(root, reg);
     return { estado: 'PENDIENTE', causa: 'POST_CYCLE_AUSENTE', clave };
   }
+  /* El inicio del ciclo se sella siempre (es del reloj, no del esquema base): idempotente por event_id. */
   if (acept.inicio) estamparInicio(root, ciclo, acept.inicio, tarea.titulo);
+  /* Sin el esquema base post-cycle sale con 0 y no deja nada: se detecta ANTES, sin gastar los tests de la tarea. */
+  const base_bd = estadoBase(root, { sinCache: true });
+  if (base_bd.estado === 'SIN_MIGRAR') {
+    const causa = 'ESQUEMA_SIN_MIGRAR: faltan las tablas ' + base_bd.faltan.join(', ') + ' en memoria.db — repara con `' + REPARAR + '` y luego `teams.cjs observar --reintentar`';
+    reg.tareas[clave] = { ...base, estado: 'PENDIENTE', causa, verificada: false };
+    guardarRegistro(root, reg);
+    return { estado: 'PENDIENTE', causa, clave };
+  }
+  /* Cada post-cycle corre los tests de la tarea: una ronda no puede lanzar un aluvión (p. ej. al reabrir un registro viejo). */
+  if (opts.presupuesto) {
+    if (opts.presupuesto.restantes <= 0) return { ...(previo || base), estado: 'EN_ESPERA', causa: 'PRESUPUESTO_DE_RONDA', clave };
+    opts.presupuesto.restantes--;
+  }
   const tests = Number.isInteger(acept.tests) && acept.tests >= 0 ? acept.tests : 0;
   const tipo = /\b(fix|arregl|corrig|bug|error|hotfix)/i.test(tarea.titulo) ? 'fix' : 'feature';
   const args = [script, area, '--silent', '--origen=teams', '--tests=' + tests, '--tests-total=' + tests,
     '--task=' + String(tarea.titulo).replace(/[\r\n"]/g, ' ').slice(0, 160), '--type=' + tipo, '--modules=' + area, '--skip=deps,browser'];
   const r = spawnSync(process.execPath, args, {
     cwd: root, encoding: 'utf8', windowsHide: true, timeout: opts.hijoMs || HIJO_MS,
-    env: Object.assign({}, process.env, { AKDD_CYCLE_ID: ciclo, AKDD_ACTOR: 'teams-v4', AKDD_TEAMS_FILES: JSON.stringify(archivos), AKDD_TEAMS_REUSE: '{}' }),
+    env: Object.assign({}, process.env, { AKDD_CYCLE_ID: ciclo, AKDD_ACTOR: 'teams-v4', AKDD_TEAMS_REUSE: '{}' },
+      /* Una lista vacía («[]») es verdadera para post-cycle y anula su respaldo (los archivos del último commit): sin datos, sin variable. */
+      archivos.length ? { AKDD_TEAMS_FILES: JSON.stringify(archivos) } : {}),
   });
   let estado = 'REGISTRADA'; let causa = null;
   if (r.error && r.error.code === 'ETIMEDOUT') { estado = 'PENDIENTE'; causa = 'POST_CYCLE_TIMEOUT'; }
   else if (r.status === 75) { estado = 'PENDIENTE'; causa = 'UPDATE_EN_CURSO'; }
   else if (r.status !== 0) { estado = 'PENDIENTE'; causa = 'POST_CYCLE_EXIT_' + r.status + ': ' + String(r.stderr || r.stdout || '').trim().split(/\r?\n/).pop().slice(0, 160); }
-  reg.tareas[clave] = { ...base, estado, causa };
+  /* Salir con 0 no prueba que el ciclo exista: se comprueba en la base. */
+  let verificada = false;
+  if (estado === 'REGISTRADA') {
+    const v = verificarCiclo(root, ciclo);
+    if (v.ok === true) verificada = true;
+    else if (v.ok === false) { estado = 'PENDIENTE'; causa = v.causa + ': post-cycle terminó sin error pero el ciclo no quedó en la base (revisa _output/log-AAAA-MM.md)'; }
+  }
+  reg.tareas[clave] = { ...base, estado, causa, verificada };
   guardarRegistro(root, reg);
-  return { estado, causa, ciclo, area, archivos: archivos.length, clave };
+  return { estado, causa, ciclo, area, archivos: archivos.length, clave, verificada };
 }
 
 /** Un hallazgo corregido / una decisión → memoria KDD (error o decisión), una sola vez por clave. Fail-soft. */
@@ -160,6 +282,9 @@ function resumen(root) {
   const v = Object.values(reg.tareas);
   return {
     registradas: v.filter((x) => x.estado === 'REGISTRADA').length,
+    /* De las registradas, cuántas se comprobaron en la base. El resto está «dado por bueno» sin prueba. */
+    verificadas: v.filter((x) => x.estado === 'REGISTRADA' && x.verificada === true).length,
+    sin_verificar: v.filter((x) => x.estado === 'REGISTRADA' && x.verificada !== true).length,
     pendientes: v.filter((x) => x.estado === 'PENDIENTE' && (x.intentos || 0) < REINTENTOS_MAX).length,
     abandonadas: v.filter((x) => x.estado === 'PENDIENTE' && (x.intentos || 0) >= REINTENTOS_MAX).length,
     obsoletas: v.filter((x) => x.estado === 'OBSOLETA').length,
@@ -167,4 +292,5 @@ function resumen(root) {
   };
 }
 
-module.exports = { estamparInicio, registrarTarea, recordar, pendientes, descartarObsoletas, resumen, leerRegistro, archivosDe, REINTENTOS_MAX };
+module.exports = { estamparInicio, registrarTarea, recordar, pendientes, descartarObsoletas, resumen, leerRegistro, archivosDe, REINTENTOS_MAX,
+  estadoBase, verificarCiclo, reverificar, archivosPorFecha, areaDe, PRESUPUESTO_RONDA, REPARAR };

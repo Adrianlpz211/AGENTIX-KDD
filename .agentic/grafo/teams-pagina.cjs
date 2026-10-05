@@ -182,7 +182,12 @@ const PLANTILLA = `<!doctype html>
     fila(q, 'Decisiones tuyas abiertas', d.cola.decisiones_dueno.length, d.cola.decisiones_dueno.length ? 'warn' : ''); if (d.cola.decisiones_dueno.length) lista(q, d.cola.decisiones_dueno, '', function (x) { return x.id + ' — ' + x.titulo; });
 
     var rg = card('Registro en Agentix');
-    fila(rg, 'Ciclos registrados (origen teams)', d.registro.registradas, 'ok');
+    var bd = d.registro.base || {};
+    if (bd.estado === 'SIN_MIGRAR') {
+      fila(rg, 'Base de memoria SIN MIGRAR: faltan ' + (bd.faltan || []).join(', '), 'repara: ' + bd.reparar, 'bad');
+    }
+    fila(rg, 'Ciclos registrados y comprobados en la base', d.registro.verificadas == null ? d.registro.registradas : d.registro.verificadas, 'ok');
+    if (d.registro.sin_verificar) fila(rg, 'Marcados registrados SIN comprobar en la base', d.registro.sin_verificar, 'warn');
     fila(rg, 'Pendientes de registro', d.registro.pendientes, d.registro.pendientes ? 'warn' : '');
     fila(rg, 'Abandonados tras reintentos', d.registro.abandonadas, d.registro.abandonadas ? 'bad' : '');
     fila(rg, 'Entradas a la memoria KDD', d.registro.memoria);

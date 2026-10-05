@@ -1,5 +1,12 @@
 # Changelog — Agentic KDD
 
+## [3.23.9] — 2026-10-05
+
+**TEAMS ya no dice «registrada» lo que no quedó en la memoria, la lección de cada tarea puede entrar al grafo KDD, y el juez tipado queda midiendo en sombra.**
+- **TEAMS sin registro real (caso «dashboard 3d»):** la memoria.db de ese proyecto no tenía las tablas base (`nodos`, `ciclos`, `fases`, `episodios`, `relaciones`…). `post-cycle` salía con 0 sin dejar nada y `teams-registro` marcaba las 15 tareas REGISTRADA: sin ciclos no había línea de tiempo, sin nodos no había grafo, y Preservation salía UNVERIFIED (SCHEMA_AUSENTE). Ahora el registro comprueba el esquema ANTES de lanzar post-cycle (si falta: PENDIENTE con la causa y el comando de reparación `schema-columns.cjs fix`) y comprueba en SQL DESPUÉS que el ciclo existe y está cerrado; lo que figuraba REGISTRADA sin comprobar se reabre al observar (`reverificar`). Una ronda lanza como mucho 3 registros (cada post-cycle corre los tests de la tarea), no manda `AKDD_TEAMS_FILES=[]` y, sin git, toma como archivos de la tarea los modificados desde que empezó. El panel de TEAMS avisa de «base sin migrar» y separa lo comprobado de lo no comprobado.
+- **`teams: aceptar T-001 --aprendizaje="…" --tipo=decision|patron|error`:** la lección entra a la memoria KDD (una sola vez, sin frenar si la memoria no responde). En `aa:` la escriben los agentes de memoria; en TEAMS nadie lo hacía y el grafo quedaba vacío. El protocolo del Director lo explica: una línea por lección real, no una bitácora.
+- **Juez tipado en sombra (`decision-oracle.cjs`, `oraculo-motor-reglas.cjs`):** responde en paralelo, sin influir en ningún ciclo, tres preguntas tipadas (Q0 ¿tarea o conversación?, Q1 ¿terminará con STOP/FAIL/reversión?, Q2 ¿toca un valor de negocio protegido?) con el motor de reglas, y deja el registro en `.agentic/_oraculo/` (fuera de git). El paso 2.12b del post-cycle le pone la verdad mecánica (sin que el motor se califique a sí mismo). Es la base medible para decidir, con datos y no con intuición, cuándo un modo autónomo puede seguir solo y cuándo debe preguntar. Ningún motor sube de «asesor» mientras no haya ≥ 100 casos etiquetados y ≥ 30 positivos reales; hoy solo mide. Diseño en `_output/diseno-juez-tipado-modo-sombra.md`.
+
 ## [3.23.8] — 2026-10-05
 
 **Cuatro flojedades de la memoria de glowly, diagnosticadas con la base real (62 ciclos de TEAMS).**

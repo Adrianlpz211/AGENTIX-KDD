@@ -139,6 +139,7 @@ const PASOS = Object.freeze([
   { id: 'canario', paso: '2.10', funcion: 'canario-gate.revisar', registra: 'gate_events', omitible: false, idempotente: 'por event_id' },
   { id: 'preservacion', paso: '2.11', funcion: 'contract-guard.runPreservationGate', registra: 'contract_violations, regressed_by', omitible: 'si hay evidencia PASS del sujeto (preservation)', idempotente: 'sí' },
   { id: 'prediccion', paso: '2.12', funcion: 'prediccion-registro.evaluarPendientes', registra: 'prediction_log', omitible: false, idempotente: 'sí' },
+  { id: 'juez', paso: '2.12b', funcion: 'decision-oracle.etiquetar', registra: 'etiquetas del juez tipado (_oraculo/oracle-log.jsonl)', omitible: false, idempotente: 'sí: una etiqueta por respuesta' },
   { id: 'deps', paso: '2.13', funcion: 'deps-audit', registra: 'vulnerabilidades conocidas', omitible: 'sí: cuando el cierre no toca dependencias', idempotente: 'sí' },
   { id: 'memoria', paso: '2.14', funcion: 'memory-core.capturar + memory-queue.drenar', registra: 'mem_events/mem_jobs', omitible: false, idempotente: 'por host_event_id' },
   { id: 'modulos', paso: '3', funcion: 'registrarModulos', registra: 'module_registry + config.md', omitible: false, idempotente: 'sí' },
@@ -1316,6 +1317,20 @@ async function main() {
     if (!silent) console.log('  2.12 Predicción... ⚠️  omitido' +
       (process.env.AKDD_DEBUG ? ' (' + e.message + ')' : ''));
   }
+
+  // Step 2.12b: la verdad de las respuestas del juez tipado (decision-oracle).
+  //
+  // Va justo después de 2.12 porque la verdad de Q1 ("¿hubo problema?") es la calificación
+  // que acaba de escribirse arriba. Sin este paso el juez respondía en sombra en cada ciclo y
+  // nadie le ponía la verdad (28 respuestas, 0 etiquetadas): medir sin etiquetar no mide nada.
+  // Fail-soft y silencioso si no hay juez o no hay respuestas: medir es un plus.
+  try {
+    const juezPath = path.join(GRAFO_DIR, 'decision-oracle.cjs');
+    if (fs.existsSync(juezPath)) {
+      const et = require(juezPath).etiquetar(ROOT, {});
+      if (!silent && et && et.etiquetadas) console.log('  2.12b Juez tipado... ✅ ' + et.etiquetadas + ' respuesta(s) etiquetada(s)');
+    }
+  } catch { /* medir es un plus, nunca un requisito */ }
 
   // Step 2.13: dependencias con vulnerabilidades conocidas (OWASP A06).
   //

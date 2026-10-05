@@ -13,7 +13,7 @@
  *   estado [--json]            ronda --rol=builder|director [--cierre]        revisar  (= ronda --rol=director)
  *   tarea "t" [--criterio=…]   corregir "t" [--sev=] [--archivo=] [--tarea=]  resolver C-001 "qué se hizo"
  *   reportar T-001 --estado=HECHO|PARCIAL|NO_HECHO --detalle=… [--verif=] [--archivos=]
- *   auditar T-001              cancelar T-001 "motivo"   aceptar T-001 [--verifico=] [--tests=N]        observar
+ *   auditar T-001              cancelar T-001 "motivo"   aceptar T-001 [--verifico=] [--tests=N] [--aprendizaje="…" [--tipo=decision|patron|error]]        observar
  *   decision "p" --tipo=director|dueno …      decidir D-001 "decisión"       heredar
  *   reporte                    avance                                          cerrar [--forzar] | reabrir
  *   esperar --rol=… [--despertar]   comprobar   prompt director|builder|individual [--guardar]
@@ -545,6 +545,9 @@ function observar(root, e, say, forzar = false) {
   const res = [];
   const est = leerEstado(root);
   const aceps = (est.aceptaciones || []).map((a) => ({ id: a.id, at: Date.parse(a.at) })).filter((a) => Number.isFinite(a.at));
+  // Lo que figura REGISTRADA sin haberse comprobado se contrasta con la base: si el ciclo no está, vuelve a PENDIENTE (antes no se miraba).
+  try { reg.reverificar(root); } catch { /* el registro es auxiliar */ }
+  const presupuesto = { restantes: reg.PRESUPUESTO_RONDA }; // cada registro corre los tests de la tarea: la ronda no lanza un aluvión
   for (const t of e.tareas.filter((x) => x.estado === 'ACEPTADA')) {
     const ac = detalles[t.id] || { fecha: '', tests: 0 };
     // Inicio del ciclo = cuando el constructor quedó libre para ella: lo último entre «se encoló» y «se aceptó la anterior».
@@ -553,11 +556,11 @@ function observar(root, e, say, forzar = false) {
     const miAcept = aceps.filter((a) => a.id === t.id).map((a) => a.at).sort((x, y) => x - y)[0];
     const previa = Math.max(0, ...aceps.filter((a) => a.id !== t.id && (!miAcept || a.at < miAcept)).map((a) => a.at));
     const inicio = Number.isFinite(creada) ? Math.max(creada, previa) : null;
-    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio, forzar });
+    const r = reg.registrarTarea(root, t, { fecha: ac.fecha, tests: ac.tests, reporte: t.reporte, inicio, forzar }, { presupuesto });
     res.push({ id: t.id, ...r });
   }
   try { reg.descartarObsoletas(root, e.tareas.filter((x) => x.estado === 'ACEPTADA').map((x) => x.id)); } catch { /* el registro es auxiliar */ }
-  const nuevos = res.filter((x) => !['YA_REGISTRADA', 'EN_ESPERA'].includes(x.estado));
+  const nuevos = res.filter((x) => !['YA_REGISTRADA', 'EN_ESPERA'].includes(x.estado) && x.causa !== 'PRESUPUESTO_DE_RONDA');
   if (say) for (const x of nuevos) say(x.estado === 'REGISTRADA' ? `  ✔ ${x.id} registrada en el núcleo (ciclo ${x.ciclo}, área ${x.area}, ${x.archivos} archivo(s))` : `  ⚠ ${x.id} ${x.estado}${x.causa ? ': ' + x.causa : ''} — no frena nada; se reintenta en la próxima revisión`);
   return res;
 }
@@ -910,6 +913,14 @@ function ejecutarCmd(argv, root) {
       const est = leerEstado(root); est.aceptaciones = (est.aceptaciones || []).concat({ id: t.id, at: iso() }); guardarEstado(root, est);
       say(`✔ ${t.id} ACEPTADA`);
     }
+    // Lo aprendido al aceptar entra a la memoria KDD (nodos del grafo). En `aa:` lo escriben los agentes de memoria; en TEAMS nadie
+    // lo hacía y el grafo KDD quedaba vacío. Solo si el Director lo da: no se inventa un aprendizaje por cada tarea.
+    if (opt.aprendizaje && opt.aprendizaje !== true) {
+      const tipo = ['decision', 'patron', 'error'].includes(String(opt.tipo)) ? String(opt.tipo) : 'decision';
+      const arch = reg.archivosDe(root, t, t.reporte);
+      const m = reg.recordar(root, 'aceptar:' + t.id, `[${t.id}] ${t.titulo}. ${opt.aprendizaje}`, { tipo, area: reg.areaDe(arch), archivos: arch, confianza: 'MEDIA' });
+      say(m.ok ? `  🧠 memoria KDD: ${m.estado === 'YA_REGISTRADO' ? 'ya estaba' : 'registrado como ' + tipo}` : `  ⚠ memoria KDD pendiente (${m.causa}) — no frena nada`);
+    }
     for (const a of avisos) say('  ⚠ ' + a + ' (aviso: la aceptación es decisión tuya, no se bloquea)');
     const e2 = calcular(root); observar(root, e2, (x) => say(x));
     return salida();
@@ -1179,7 +1190,7 @@ function salud(root, opts = {}) {
     tareas_todas: e.tareas.slice(-60).map((t) => ({ id: t.id, titulo: corto(t.titulo, 70), estado: t.estado, reporte: t.reporte ? t.reporte.estado : null })),
     correcciones_todas: e.correcciones.slice(-30).map((k) => ({ id: k.id, resuelta: !!k.resuelto, sev: k.sev, titulo: corto(k.titulo, 70) })), avance: e.avance, aceptadas: e.aceptadas, total: e.total,
     cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map(detalleDecision) },
-    registro: reg.resumen(root), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
+    registro: Object.assign(reg.resumen(root), { base: reg.estadoBase(root) }), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
     generado: new Date(ahora).toISOString(),
   };
 }

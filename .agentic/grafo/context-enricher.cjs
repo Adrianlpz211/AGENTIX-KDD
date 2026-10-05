@@ -238,6 +238,21 @@ async function enrich(task) {
       });
     } catch { /* apuntar es un plus: si falla, el brief sigue valiendo */ }
 
+    // 6.6 JUEZ TIPADO EN SOMBRA — apunta lo que contestan los motores del juez
+    //     (Q0 tarea o conversación, Q1 riesgo de problema, Q2 valor de negocio)
+    //     para medir después con qué calidad acertarían. No influye en nada del
+    //     brief: sombra pura, fail-soft. Ver decision-oracle.cjs.
+    try {
+      const juez = require(path.join(__dirname, 'decision-oracle.cjs'));
+      juez.sombra(ROOT, {
+        tarea: task,
+        modulo: (areas && areas[0]) || 'global',
+        nivel: brief.riesgo,
+        prediccion_id: brief.prediccionId || null,
+        archivos: [],
+      });
+    } catch { /* medir es un plus, nunca un requisito */ }
+
     // 7. CURAS CONOCIDAS - el error que ya paso, con la solucion que funciono.
     //
     //    Esto ANTES no disparaba nunca. Pedia "ancla de simbolo" (0 de 29

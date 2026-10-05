@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentix 3.20 → 3.23 · Reporte de novedades</title>
+<style>
+:root {
+  --bg: #f6f7fb; --card: #ffffff; --ink: #14172b; --ink2: #4a5070; --line: #e3e6f2;
+  --brand: #5b4bff; --brand2: #00b8d9; --ok: #12a37a; --warn: #d98a00; --soft: #eef0ff;
+  --shadow: 0 6px 24px rgba(30, 30, 80, .08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0f1c; --card: #151831; --ink: #eceffd; --ink2: #a3a9cf; --line: #272b4d;
+    --brand: #8c82ff; --brand2: #3fd6f2; --ok: #3fd9a8; --warn: #f2b84b; --soft: #1b1f42;
+    --shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+header.hero { background: linear-gradient(135deg, #3a2fd6 0%, #5b4bff 45%, #00b8d9 100%); color: #fff; padding: 56px 0 72px; }
+.hero .tag { display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 14px; font-size: 13px; letter-spacing: .04em; }
+.hero h1 { font-size: clamp(30px, 5vw, 50px); line-height: 1.1; margin: 18px 0 12px; }
+.hero p { font-size: 18px; max-width: 760px; opacity: .95; margin: 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: -42px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 16px; box-shadow: var(--shadow); }
+.kpi b { display: block; font-size: 34px; line-height: 1.1; color: var(--brand); }
+.kpi span { color: var(--ink2); font-size: 14px; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 30px 0 6px; }
+nav.toc a { text-decoration: none; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+nav.toc a:hover { border-color: var(--brand); color: var(--brand); }
+section { margin: 44px 0; }
+section > h2 { font-size: 28px; margin: 0 0 6px; }
+section > .lead { color: var(--ink2); margin: 0 0 20px; max-width: 800px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+.card h3 { margin: 0 0 8px; font-size: 19px; }
+.card p { margin: 0 0 8px; color: var(--ink2); }
+.card ul { margin: 8px 0 0; padding-left: 20px; color: var(--ink2); }
+.card li { margin: 3px 0; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--soft); color: var(--brand); margin-right: 6px; }
+.pill.ok { background: rgba(18,163,122,.14); color: var(--ok); }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; }
+.step { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; font-size: 14px; font-weight: 600; }
+.arrow { color: var(--brand); font-weight: 700; }
+.timeline { position: relative; margin: 10px 0 0; padding-left: 26px; border-left: 3px solid var(--line); }
+.tl { position: relative; margin: 0 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
+.tl::before { content: ""; position: absolute; left: -36px; top: 18px; width: 14px; height: 14px; border-radius: 50%; background: var(--brand); border: 3px solid var(--bg); }
+.tl .v { font-weight: 800; color: var(--brand); margin-right: 8px; }
+.tl .d { color: var(--ink2); font-size: 13px; }
+.tl p { margin: 4px 0 0; color: var(--ink2); font-size: 15px; }
+.bars { display: grid; gap: 10px; }
+.bar { display: grid; grid-template-columns: 170px 1fr 70px; gap: 12px; align-items: center; font-size: 14px; }
+.bar .track { height: 12px; background: var(--soft); border-radius: 999px; overflow: hidden; }
+.bar .fill { height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand2)); border-radius: 999px; }
+.bar em { font-style: normal; font-weight: 700; text-align: right; }
+.callout { background: var(--soft); border: 1px solid var(--line); border-left: 5px solid var(--brand); border-radius: 12px; padding: 16px 18px; }
+.callout.ok { border-left-color: var(--ok); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.mini { color: var(--ink2); font-size: 14px; }
+footer { padding: 36px 0 60px; color: var(--ink2); font-size: 14px; border-top: 1px solid var(--line); margin-top: 50px; }
+@media (max-width: 560px) { .bar { grid-template-columns: 1fr; gap: 4px; } .bar em { text-align: left; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">Agentix · del 3 al 5 de octubre de 2026 · versiones 3.20.0 → 3.23.8</span>
+    <h1>De un motor que protege a un equipo de IA que trabaja, se ve y avisa</h1>
+    <p>En tres días Agentix pasó de “actualiza sin romper nada” a coordinar a Claude Code y Cursor como un equipo real,
+       dejar todo registrado en la memoria del proyecto, mostrarte la oficina en vivo y escribirte al teléfono cuando te necesita.
+       Esto es todo lo nuevo, explicado sin tecnicismos.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="kpis" aria-label="Cifras clave">
+    <div class="kpi"><b>21</b><span>versiones publicadas en el changelog (3.20.0 a 3.23.8)</span></div>
+    <div class="kpi"><b>+860</b><span>pruebas automáticas vigilando que nada se rompa</span></div>
+    <div class="kpi"><b>56 / 58</b><span>tareas aceptadas en la campaña real de glowly</span></div>
+    <div class="kpi"><b>62</b><span>ciclos de trabajo registrados solos en la memoria</span></div>
+    <div class="kpi"><b>8,4 h</b><span>de trabajo medido en 49 ciclos, no estimado</span></div>
+  </div>
+
+  <nav class="toc" aria-label="Secciones">
+    <a href="#base">Base sólida 3.20</a>
+    <a href="#update">Actualizar sin miedo</a>
+    <a href="#memoria">Memoria demostrable</a>
+    <a href="#teams">Equipo TEAMS</a>
+    <a href="#oficina">Oficina 3D</a>
+    <a href="#movil">Avisos al móvil</a>
+    <a href="#autoaudit">Se audita solo</a>
+    <a href="#tablero">Tablero en vivo</a>
+    <a href="#kdd">Memoria más lista</a>
+    <a href="#cronologia">Cronología</a>
+    <a href="#clientes">Para tus clientes</a>
+  </nav>
+
+  <section id="base">
+    <h2>La base: 3.20 “el blindaje”</h2>
+    <p class="lead">La pregunta detrás de todo: <em>¿se puede falsificar un verde?</em> Donde sí se podía, se cerró.</p>
+    <div class="grid">
+      <div class="card"><h3>Un “listo” solo cuenta con pruebas</h3>
+        <p>Antes un control podía aprobar por una casilla marcada. Ahora exige la evidencia de la ejecución real, sobre el código exacto. Si el código cambia después de la prueba, el verde deja de valer.</p></div>
+      <div class="card"><h3>Esfuerzo proporcional</h3>
+        <p>Agentix decide cuánto trabajar según la dificultad y el riesgo de cada tarea, con mínimos de seguridad que no se pueden quitar. En el benchmark: tareas simples con 90 % menos de lectura y 54 % menos pasos.</p></div>
+      <div class="card"><h3>Protección que no se salta</h3>
+        <p>Los commits revisan lo que realmente se va a guardar: bloquean secretos y que alguien borre casos de un test protegido. Hay puntos de restauración del código para volver atrás con vista previa.</p></div>
+      <div class="card"><h3>Memoria disponible en tu IDE</h3>
+        <p>El servidor de memoria global ahora se registra bien en Cursor y en Claude Code y abre la memoria del proyecto que tengas abierto.</p></div>
+    </div>
+  </section>
+
+  <section id="update">
+    <h2>Actualizar sin miedo</h2>
+    <p class="lead">Antes, actualizar eran dos comandos y nada demostraba que tu memoria había sobrevivido. Ahora es uno solo y lo demuestra.</p>
+    <div class="card">
+      <div class="flow" aria-label="Pasos de la actualización">
+        <span class="step">Inspecciona</span><span class="arrow">→</span>
+        <span class="step">Pausa escritores</span><span class="arrow">→</span>
+        <span class="step">Respalda y verifica</span><span class="arrow">→</span>
+        <span class="step">Aplica</span><span class="arrow">→</span>
+        <span class="step">Compara el contenido</span><span class="arrow">→</span>
+        <span class="step">Informa</span>
+      </div>
+      <ul>
+        <li><b>Tu memoria se compara fila por fila</b> antes y después: si algo no se puede comparar, lo dice; nunca da un “todo bien” falso.</li>
+        <li><b>Respaldo abierto y comprobado</b> antes del primer cambio, y reversión automática si algo falla a mitad.</li>
+        <li><b>Respeta lo tuyo:</b> lo que personalizaste se conserva y la versión nueva queda aparte.</li>
+        <li><b>Probado con bases reales de la 3.19</b> (de 40 a 59 tablas; 41.554 y 23.891 filas conservadas sin cambios) y repetible sin efectos: el segundo update no cambia nada.</li>
+        <li><b>Rollback</b> de los archivos conservando todo lo aprendido, y un modo de solo revisar el plan (<code>--check</code>).</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="memoria">
+    <h2>Una memoria que se puede demostrar</h2>
+    <p class="lead">La memoria del proyecto dejó de ser “lo que el modelo recuerda” y pasó a tener origen, evidencia y control.</p>
+    <div class="grid">
+      <div class="card"><h3>Memoria con procedencia</h3><p>Cada cosa aprendida sabe de dónde viene. Una observación nunca se da por válida sin evidencia actual; lo viejo se etiqueta, no se reescribe.</p></div>
+      <div class="card"><h3>Evidencias recuperables</h3><p>Guardadas con huella, con retención y aislamiento por proyecto. Si una evidencia cambió, lo dice en vez de inventar contenido.</p></div>
+      <div class="card"><h3>Cola durable</h3><p>Si el equipo se cae a mitad, retoma sin duplicar ni perder trabajo; los reintentos son ordenados y acotados.</p></div>
+      <div class="card"><h3>Compactar sin perder</h3><p>Recorta logs y búsquedas largas ahorrando contexto, pero el código a editar y la evidencia de los controles llegan siempre completos.</p></div>
+      <div class="card"><h3>Privacidad antes de guardar</h3><p>Los secretos se redactan <em>antes</em> de persistir; si el redactor falla, no guarda nada.</p></div>
+      <div class="card"><h3>Páginas de salud</h3><p>/memoria, /contexto y /actualizacion muestran el estado real de la memoria, del contexto ahorrado y de la última actualización.</p></div>
+    </div>
+  </section>
+
+  <section id="teams">
+    <h2>TEAMS: Claude Code dirige, Cursor construye</h2>
+    <p class="lead">Reconstruido desde cero para seguir el protocolo manual que ya funcionaba en producción: un canal, dos roles, tres auditores y cero burocracia que frene el avance.</p>
+    <div class="card">
+      <div class="flow" aria-label="Flujo del dueño">
+        <span class="step">teams: activar</span><span class="arrow">→</span>
+        <span class="step">elegir modo</span><span class="arrow">→</span>
+        <span class="step">teams: plan</span><span class="arrow">→</span>
+        <span class="step">teams: constructor</span><span class="arrow">→</span>
+        <span class="step">teams: iniciar</span><span class="arrow">→</span>
+        <span class="step">pausa / continuar</span>
+      </div>
+      <p class="mini" style="margin-top:12px">Modo <b>completo</b> (Director + 3 auditores en paralelo: interfaz, backend y negocio; Cursor construye) o <b>individual</b> (Claude Code también construye).</p>
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card"><h3>Todo queda registrado solo</h3><p>Al aceptar una tarea, Agentix la registra como si hubieras usado <code>aa:</code>: ciclo, memoria, contratos, mapa de código, decisiones de diseño y tablero. Si algo falla, reintenta con espera creciente y nunca frena el trabajo.</p></div>
+      <div class="card"><h3>Nadie se queda parado en silencio</h3><p>Vigilantes de fondo despiertan a cada rol cuando hay trabajo, repiten el aviso si nadie lo atiende y el semáforo marca verde, amarillo o rojo con la razón en palabras.</p></div>
+      <div class="card"><h3>Pausa que de verdad apaga</h3><p><code>teams: pausa</code> detiene a los dos vigilantes y manda al constructor a cancelar su loop: nadie gasta tokens esperando. <code>continuar</code> lo reactiva.</p></div>
+      <div class="card"><h3>La auditoría nunca frena</h3><p>Las correcciones llegan a media tarea; solo un bloqueante real detiene el avance. Las decisiones las toma el Director investigando; al dueño solo llega lo que no está en internet o es de seguridad.</p></div>
+    </div>
+  </section>
+
+  <section id="oficina">
+    <h2>La Oficina 3D: ves el trabajo mientras ocurre</h2>
+    <p class="lead">Un mundo 3D dentro del tablero que se actualiza cada 2 segundos y funciona con TEAMS completo, individual o con un solo modelo.</p>
+    <div class="two">
+      <div class="card">
+        <ul>
+          <li>El Director, los tres auditores y el constructor aparecen en su puesto cuando se activan; sin trabajo, juegan en la sala de descanso.</li>
+          <li>Una entrega viaja como sobre al Director; aceptar lanza confeti; devolver manda un sobre rojo.</li>
+          <li>Cada vigilante es un perro: vigila, duerme si muere y ladra si hay un aviso sin atender.</li>
+          <li>Pizarra con la cola, pantalla de flujo que se va construyendo módulo a módulo, semáforo y reloj real.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Y tú decides desde ahí</h3>
+        <p>La tarjeta <b>“Decisiones del dueño”</b> lista lo que frena trabajo. Al pulsar una ves la pregunta completa, las opciones y la recomendación, escribes tu respuesta y copias el mensaje listo para pegar. Cuando el Director la registra, desaparece sola.</p>
+        <p class="mini">Cámara isométrica o libre, atajos a cada zona y botones que siguen a cada persona.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="movil">
+    <h2>Agentix te escribe al teléfono</h2>
+    <p class="lead">Con la app gratuita <b>ntfy</b> (sin cuenta ni número), opcional y apagado por defecto.</p>
+    <div class="grid">
+      <div class="card"><h3>Te avisa lo que importa</h3><ul>
+        <li>Cada tarea aceptada, con avance, tiempo trabajado y qué falta</li>
+        <li>Todo aceptado y el cierre</li>
+        <li>Una decisión tuya pendiente, con opciones y recomendación</li>
+        <li>Un problema que se sostiene 5 minutos</li>
+        <li>Un reporte cada hora mientras hay trabajo</li></ul></div>
+      <div class="card"><h3>Y le contestas desde ahí</h3><p><code>D-001 &lt;decisión&gt;</code> resuelve esa decisión; <code>estado</code> te devuelve el avance; cualquier otro mensaje llega al Director como indicación tuya.</p>
+        <p class="mini">Tema largo y aleatorio que nunca se sube a git, PIN opcional, tope diario y lo destructivo se confirma siempre en el chat.</p></div>
+    </div>
+  </section>
+
+  <section id="autoaudit">
+    <h2>Agentix se audita solo, y por eso mejora rápido</h2>
+    <p class="lead">Durante la campaña real, una revisión continua cada 3 minutos encontró siete detalles y los dejó resueltos en el mismo día. Cada uno es un falso aviso o una fricción menos para tus clientes.</p>
+    <div class="grid">
+      <div class="card"><span class="pill ok">Resuelto</span><h3>Detecta a Cursor parado… con evidencia</h3><p>Nuevo <code>teams: diagnostico</code>: último archivo tocado, último reporte y última ronda dan un veredicto TRABAJANDO / PARADO, con el mensaje listo para reactivarlo.</p></div>
+      <div class="card"><span class="pill ok">Resuelto</span><h3>Cero falsas alarmas con el constructor trabajando</h3><p>“Cursor dormido”, “parcial estancada” y “nadie avanza” ya miran los archivos tocados antes de alarmar.</p></div>
+      <div class="card"><span class="pill ok">Resuelto</span><h3>Registro que no se atasca</h3><p>Una tarea cancelada ya no cuenta como “pendiente” para siempre, y reencolar lo recién cancelado avisa que eso no despierta a Cursor.</p></div>
+      <div class="card"><span class="pill ok">Resuelto</span><h3>Tablero sin congelarse</h3><p>El sondeo ya no espera a quien escribe en la base: antes la Oficina se trababa 2–10 s justo al aceptar una tarea.</p></div>
+    </div>
+  </section>
+
+  <section id="tablero">
+    <h2>Tablero con datos reales, sin matar el servidor</h2>
+    <p class="lead">Antes, el grafo, la estructura de código, los tiempos y la visita se calculaban una sola vez al arrancar. Ahora siempre ves lo de ahora.</p>
+    <div class="two">
+      <div class="card"><h3>Qué cambió</h3><ul>
+        <li>Cada carga trae la página con los datos del momento.</li>
+        <li>El servidor avisa cuando algo cambió y aparece “Hay datos nuevos” con un botón <b>Actualizar ahora</b>.</li>
+        <li>Si dejas de usar el tablero 30 s, se recarga sola y te devuelve a donde estabas: pestañas, filtros, búsqueda y nodo elegido.</li>
+        <li>Las tarjetas y las pestañas Oficina, Memoria, Contexto y Actualización se mueven en vivo, sin recargar.</li></ul></div>
+      <div class="card"><h3>Un puerto por proyecto</h3><p>Cada proyecto abre siempre en su propio puerto, calculado a partir de su carpeta. Dos tableros ya no se tapan entre sí y la dirección no cambia de un día para otro.</p>
+        <p class="mini">Se puede fijar uno a mano con <code>AKDD_DASH_PORT</code>.</p></div>
+    </div>
+  </section>
+
+  <section id="kdd">
+    <h2>Una memoria más lista</h2>
+    <p class="lead">Con los datos reales de la campaña (62 ciclos) se encontraron y corrigieron cuatro puntos flojos.</p>
+    <div class="grid">
+      <div class="card"><h3>Riesgo por evidencia</h3><p>La predicción dejó de decir “medio” casi siempre. Ahora mide cuántos archivos dependen de lo que vas a tocar, si hay comportamientos protegidos y errores previos. En glowly: un archivo central sale ALTO (98 dependientes) y uno sin historia sale BAJO.</p></div>
+      <div class="card"><h3>Control de regresiones activo</h3><p>El control que verifica que lo nuevo no rompa lo viejo no tenía a qué test apuntar. Con el nuevo <code>backfill-test-files</code> lo hace: <b>PASS sobre 75 contratos</b>, y los próximos ciclos deberían cerrar verificados en lugar de “con pendientes”.</p></div>
+      <div class="card"><h3>Datos de ciclo fieles</h3><p>El campo “AST indexado” ahora refleja que el mapa de código sí se indexó.</p></div>
+      <div class="card"><h3>La memoria aprende de las auditorías</h3><p>Los hallazgos de los auditores entran solos al grafo como errores con su archivo, y el Director puede añadir una lección al aceptar con <code>--aprendizaje</code>.</p></div>
+    </div>
+    <div class="bars" style="margin-top:20px" aria-label="Lo registrado en la campaña real">
+      <div class="bar"><span>Contratos registrados</span><div class="track"><div class="fill" style="width:100%"></div></div><em>162</em></div>
+      <div class="bar"><span>Símbolos de código mapeados</span><div class="track"><div class="fill" style="width:85%"></div></div><em>2.283</em></div>
+      <div class="bar"><span>Decisiones de diseño vigiladas</span><div class="track"><div class="fill" style="width:50%"></div></div><em>81</em></div>
+      <div class="bar"><span>Ciclos registrados</span><div class="track"><div class="fill" style="width:38%"></div></div><em>62</em></div>
+      <div class="bar"><span>Nodos de memoria</span><div class="track"><div class="fill" style="width:30%"></div></div><em>48+</em></div>
+    </div>
+    <p class="mini">Cifras reales de la memoria del proyecto glowly al cerrar este reporte. Las barras son proporcionales entre sí.</p>
+  </section>
+
+  <section id="cronologia">
+    <h2>Cronología de versiones</h2>
+    <p class="lead">Una línea por entrega, de la más reciente a la más antigua.</p>
+    <div class="timeline">
+      <div class="tl"><span class="v">3.23.8</span><span class="d">5 oct</span><p>Riesgo por evidencia de archivos, control de regresiones activo y datos de ciclo fieles.</p></div>
+      <div class="tl"><span class="v">3.23.7</span><span class="d">5 oct</span><p>Tablero con datos reales sin reiniciar y un puerto propio por proyecto.</p></div>
+      <div class="tl"><span class="v">3.23.3 – 3.23.6</span><span class="d">5 oct</span><p>Siete hallazgos de la revisión continua resueltos: sin falsas alarmas, registro que no se atasca, mensajes para reactivar roles.</p></div>
+      <div class="tl"><span class="v">3.23.1 – 3.23.2</span><span class="d">5 oct</span><p>Detección de Cursor parado con evidencia, <code>teams: diagnostico</code> y tablero en otro puerto si el suyo está ocupado.</p></div>
+      <div class="tl"><span class="v">3.23.0</span><span class="d">5 oct</span><p>Avisos al teléfono con ntfy y respuestas desde el móvil.</p></div>
+      <div class="tl"><span class="v">3.22.6 – 3.22.8</span><span class="d">4–5 oct</span><p>Oficina 3D en vivo, regla de las 3 rondas, constructor dormido avisado y tablero de decisiones del dueño.</p></div>
+      <div class="tl"><span class="v">3.22.4 – 3.22.5</span><span class="d">4 oct</span><p>Blindaje tras la primera campaña real: vigilantes que no mueren, semáforo, loop de respaldo verificable y pestaña TEAMS.</p></div>
+      <div class="tl"><span class="v">3.22.0</span><span class="d">4 oct</span><p>Flujo del dueño: activar → modo → plan → constructor → iniciar → pausa / continuar.</p></div>
+      <div class="tl"><span class="v">3.21.0</span><span class="d">4 oct</span><p>TEAMS reconstruido desde cero: 4 archivos pequeños que observan en lugar de mandar, un canal único conectado al núcleo.</p></div>
+      <div class="tl"><span class="v">3.20.1 – 3.20.4</span><span class="d">3–4 oct</span><p>Update seguro y verificable, memoria con procedencia, evidencias, cola durable, compactación, páginas dentro del tablero.</p></div>
+      <div class="tl"><span class="v">3.20.0</span><span class="d">3 oct</span><p>El blindaje: cierre con evidencia, preservación más fina, hooks sobre el índice, restauración y MCP global que funciona.</p></div>
+    </div>
+  </section>
+
+  <section id="clientes">
+    <h2>Lo que gana quien trabaja con Agentix full</h2>
+    <div class="grid">
+      <div class="card"><h3>Empieza en minutos</h3><p>Activar, elegir modo, pasar el plan e iniciar. Claude Code y Cursor ya saben su papel.</p></div>
+      <div class="card"><h3>Ve lo que pasa</h3><p>Oficina 3D, semáforo y tablero con datos reales: no hay que preguntar “¿cómo vamos?”.</p></div>
+      <div class="card"><h3>Duerme tranquilo</h3><p>Si algo se atasca o necesita su decisión, el teléfono se lo dice con la respuesta a un mensaje de distancia.</p></div>
+      <div class="card"><h3>Nada se pierde</h3><p>Actualiza con respaldo verificado, comparación de la memoria y marcha atrás. Cada tarea aceptada queda registrada.</p></div>
+      <div class="card"><h3>Mide, no adivina</h3><p>Tiempos medidos, riesgo por evidencia y un control que confirma que lo nuevo no rompe lo viejo.</p></div>
+      <div class="card"><h3>Pausa cuando quiera</h3><p><code>teams: pausa</code> detiene todo sin gastar un token y <code>continuar</code> retoma donde quedó.</p></div>
+    </div>
+    <div class="callout ok" style="margin-top:22px">
+      <b>Transparencia, para que la entrega sea redonda:</b>
+      el aviso al teléfono se probó contra un servidor de pruebas y falta confirmarlo con el móvil de cada cliente en su primer uso; el tablero actualiza solo las tarjetas y los paneles en vivo, y el resto de vistas se recarga sola con datos reales; y Agentix puede detectar y avisar cuando Cursor se detiene, pero reactivarlo siempre lo hace un mensaje de la persona. Todo lo demás de este reporte se comprobó con pruebas automáticas y en la campaña real.
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">Agentix · reporte de novedades 3.20.0 → 3.23.8 · generado a partir del CHANGELOG y de la memoria real de la campaña · 5 de octubre de 2026</div>
+</footer>
+
+</body>
+</html>

@@ -36,6 +36,7 @@ vendor/
 .agentic/_restore/
 .agentic/_whatsapp/
 .agentic/_ntfy/
+.agentic/_oraculo/
 .agentic/_hooks-host.json
 .agentic/checkpoint.md
 

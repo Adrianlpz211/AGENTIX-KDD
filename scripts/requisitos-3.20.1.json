@@ -1880,6 +1880,50 @@
           "CFILE-2"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-registro-comprobado",
+      "doc": "TEAMS",
+      "requisito": "Una tarea solo figura REGISTRADA si el ciclo existe y está cerrado en la base; sin esquema queda PENDIENTE con la reparación",
+      "alcance": "proceso real (teams-registro)",
+      "pruebas": [
+        [
+          "teams-registro-bd",
+          "esquema base ausente"
+        ],
+        [
+          "teams-registro-bd",
+          "post-cycle deja el ciclo cerrado"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-aprendizaje-kdd",
+      "doc": "TEAMS",
+      "requisito": "aceptar --aprendizaje manda la lección a la memoria KDD una sola vez",
+      "alcance": "proceso real (teams)",
+      "pruebas": [
+        [
+          "teams-registro-bd",
+          "aceptar --aprendizaje"
+        ]
+      ]
+    },
+    {
+      "id": "JUEZ-sombra",
+      "doc": "KDD",
+      "requisito": "El juez tipado responde en sombra (Q0, Q1, Q2) sin influir en ningún ciclo y su registro no guarda secretos",
+      "alcance": "proceso real (decision-oracle)",
+      "pruebas": [
+        [
+          "decision-oracle",
+          "Q0 distingue"
+        ],
+        [
+          "decision-oracle",
+          "Q1 sube"
+        ]
+      ]
     }
   ]
 }
