@@ -1604,6 +1604,30 @@
           "OCIO-3"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-oficina-4",
+      "doc": "TEAMS",
+      "requisito": "La decisión del dueño llega al tablero con pregunta, opciones y recomendación y desaparece al resolverse",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "OFICINA-3"
+        ]
+      ]
+    },
+    {
+      "id": "TEAMS-v4-oficina-5",
+      "doc": "TEAMS",
+      "requisito": "Tablero de decisiones del dueño: scroll interno, modal con el mensaje listo para pegar y se vacía al resolverse",
+      "alcance": "navegador real",
+      "pruebas": [
+        [
+          "dashboard-teams",
+          "tablero de decisiones del dueño"
+        ]
+      ]
     }
   ]
 }

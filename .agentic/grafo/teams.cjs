@@ -30,7 +30,7 @@ const SONDEO_MS = 10000;
 const MAX_ESPERA_MS = 105 * 60 * 1000;
 const OCIOSO_MS = 6 * 60 * 1000;
 const OCIO_RONDAS = 3;          // rondas seguidas SIN nada que hacer (~9 min con el loop de 3 min) → el constructor le pide trabajo al Director
-const OCIO_RONDAS_CON_PENDIENTE = 5;  // con pendientes que no se mueven (sin reportar ni resolver nada) esperamos más antes de preguntar
+const OCIO_RONDAS_CON_PENDIENTE = 8;  // con pendientes que no se mueven (sin reportar ni resolver nada) esperamos más antes de preguntar
 const DORMIDO_MS = 10 * 60 * 1000;    // el constructor tiene trabajo, su vigilante está muerto y no hace rondas desde hace tanto → se lo decimos al Director (y por él, al dueño)
 const OCIO_ESPACIO_MS = 90 * 1000;     // dos llamadas a `ronda` pegadas (ronda + ronda --cierre) cuentan como UNA ronda
 const REPETIR_MS = 10 * 60 * 1000; // un aviso de «nadie tiene nada» se repite cada tanto mientras siga igual
@@ -247,6 +247,7 @@ function seguimientoOcio(root, e, est) {
   const hizo = leerEventos(root, 300).some((ev) => ev.rol === 'builder' && ['reportar', 'resolver', 'decision'].includes(ev.cmd) && Date.parse(ev.t) > prevAt);
   const umbral = razones.length ? OCIO_RONDAS_CON_PENDIENTE : OCIO_RONDAS;
   let s = est.sinNovedad.builder;
+  if (s && s.pedido && (hizo || s.huella !== huella)) atenderSolicitudes(root, 'el constructor volvió a avanzar (reportó o cambió su cola)');
   if (!s || s.huella !== huella || hizo) { s = est.sinNovedad.builder = { huella, n: 1, desde: ahora, ultimo: ahora, pedido: null, umbral }; return { s, aviso: null }; }
   s.umbral = umbral;
   if (ahora - s.ultimo >= OCIO_ESPACIO_MS) { s.n++; s.ultimo = ahora; }
@@ -1028,6 +1029,16 @@ function leerVigilante(root, rol) {
   return { vivo: proceso && hace < Math.max(60, (v.sondeo_s || 10) * 4), pid: v.pid, latido_hace_s: hace, desde: v.desde };
 }
 
+/** Una decisión del dueño lista para mostrar en el tablero: la pregunta, sus opciones, la recomendación del Director y desde cuándo espera. */
+function detalleDecision(d) {
+  const lineas = String(d.texto || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const cab = lineas[0] || '';
+  const campo = (re) => { const l = lineas.find((x) => re.test(x)); return l ? corto(l.replace(re, '').trim(), 400) : null; };
+  const sello = /(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})/.exec(lineas[1] || '');
+  const cuerpo = lineas.slice(1).filter((l) => !/^(Tipo|Opciones|Recomendaci[óo]n|Elegida|Porque|Fuentes):/i.test(l) && !/^Decisi[óo]n del due/i.test(l));
+  return { id: d.id, titulo: corto(d.titulo || cab.replace(/^###\s*\[[^\]]+\]\s*/, ''), 160), detalle: corto(cuerpo.join(' '), 600), opciones: campo(/^Opciones:\s*/i), recomendacion: campo(/^Recomendaci[óo]n:\s*/i), desde: sello ? sello[1] : null };
+}
+
 /** Semáforo + detalle por rol. Se deriva SOLO de archivos y procesos (sin demonio propio): lo que ve el tablero es lo que hay. */
 function salud(root, opts = {}) {
   const e = calcular(root, opts); if (!e) return null;
@@ -1074,7 +1085,7 @@ function salud(root, opts = {}) {
     eventos: evs.slice(-14).map((ev) => ({ t: ev.t, cmd: ev.cmd, rol: ev.rol, arg: ev.arg || null })),
     tareas_todas: e.tareas.slice(-60).map((t) => ({ id: t.id, titulo: corto(t.titulo, 70), estado: t.estado, reporte: t.reporte ? t.reporte.estado : null })),
     correcciones_todas: e.correcciones.slice(-30).map((k) => ({ id: k.id, resuelta: !!k.resuelto, sev: k.sev, titulo: corto(k.titulo, 70) })), avance: e.avance, aceptadas: e.aceptadas, total: e.total,
-    cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map((d) => ({ id: d.id, titulo: corto(d.titulo, 90) })) },
+    cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map(detalleDecision) },
     registro: reg.resumen(root), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
     generado: new Date(ahora).toISOString(),
   };
@@ -1082,7 +1093,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { salud, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { salud, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

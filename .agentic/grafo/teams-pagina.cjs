@@ -36,6 +36,17 @@ const PLANTILLA = `<!doctype html>
   .sem { border-width:2px; } .sem.VERDE { border-color:var(--ok); } .sem.AMARILLO { border-color:var(--warn); } .sem.ROJO { border-color:var(--bad); }
   .bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:6px 0 10px; } .bar > i { display:block; height:100%; background:var(--ok); }
   button { background:transparent; color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:5px 12px; cursor:pointer; font:inherit; }
+  .dueno { max-height:340px; overflow-y:auto; }
+  .dueno .it { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; cursor:pointer; }
+  .dueno .it:hover { border-color:var(--ok); }
+  .dueno .it b { color:var(--warn); } .dueno .it small { display:block; color:var(--dim); }
+  .velo { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .velo.on { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; width:min(640px,100%); max-height:90vh; overflow-y:auto; }
+  .modal h3 { margin:0 0 6px; font-size:16px; } .modal p { margin:6px 0; overflow-wrap:anywhere; }
+  .modal textarea { width:100%; min-height:90px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px; font:inherit; }
+  .modal .acc { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; flex-wrap:wrap; }
+  .modal pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
   .foot { padding:0 24px 24px; color:var(--dim); font-size:12px; }
   #mundo { margin:8px 24px 0; max-width:1300px; padding:0; overflow:hidden; }
   #mundo h2 { margin:0; padding:12px 16px 0; }
@@ -79,6 +90,7 @@ const PLANTILLA = `<!doctype html>
 </section>
 <main id="raiz" aria-live="polite"></main>
 <div class="foot">Solo lectura, en vivo (se refresca cada 2 s). «Vigilante vivo» = el proceso que avisa al modelo cuando hay algo; «loop de respaldo» = su ronda periódica de ~3 min. Si un rol está en rojo, solo tú puedes despertarlo escribiéndole en su chat.</div>
+<div class="velo" id="velo"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 <script src="/vendor/three.min.js"></script>
 <script>
 /*__MUNDO__*/
@@ -98,6 +110,33 @@ const PLANTILLA = `<!doctype html>
     var vivos = act && act.actores ? act.actores.filter(function (a) { return a.activa; }) : [];
     if (!vivos.length) { c.appendChild(el('div', 'dim', 'Nadie tiene una tarea aa: abierta. Cada modelo se marca con «linea-tiempo inicio --actor=<quién eres>» al arrancar.')); return; }
     vivos.forEach(function (a) { fila(c, a.actor === 'default' ? 'agente' : a.actor, a.tarea + (a.desde_seg !== null ? ' · hace ' + Math.max(1, Math.round(a.desde_seg / 60)) + ' min' : ''), 'ok'); });
+  }
+  // Modal de una decisión del dueño. NO escribe nada: prepara el texto para que lo pegues en el chat de Claude Code
+  // (así la respuesta sigue entrando por el único canal que el Director lee y el tablero se mantiene de solo lectura).
+  var velo = document.getElementById('velo'), modal = document.getElementById('modal');
+  function cerrarModal() { velo.classList.remove('on'); modal.textContent = ''; }
+  velo.addEventListener('click', function (e) { if (e.target === velo) cerrarModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarModal(); });
+  function abrirDecision(x) {
+    modal.textContent = '';
+    modal.appendChild(el('h3', null, x.id + ' — ' + x.titulo));
+    if (x.detalle) modal.appendChild(el('p', null, x.detalle));
+    if (x.opciones) { var po = el('p'); po.appendChild(el('b', null, 'Opciones: ')); po.appendChild(document.createTextNode(x.opciones)); modal.appendChild(po); }
+    if (x.recomendacion) { var pr = el('p'); pr.appendChild(el('b', 'ok', 'Recomendación del Director: ')); pr.appendChild(document.createTextNode(x.recomendacion)); modal.appendChild(pr); }
+    modal.appendChild(el('p', 'dim', 'Escribe tu respuesta y copia el mensaje: pégalo en el chat de Claude Code (Director). Cuando la decisión quede resuelta en el canal, desaparece de este tablero.'));
+    var ta = el('textarea'); ta.placeholder = 'Tu decisión, con el porqué si lo tienes…'; modal.appendChild(ta);
+    var pre = el('pre', null, ''); modal.appendChild(pre);
+    function armar() { pre.textContent = 'teams: resolver ' + x.id + ' ' + (ta.value.trim() || '<tu decisión>'); }
+    ta.addEventListener('input', armar); armar();
+    var acc = el('div', 'acc'), cp = el('button', null, 'Copiar mensaje'), ce = el('button', null, 'Cerrar');
+    cp.type = 'button'; ce.type = 'button';
+    cp.addEventListener('click', function () {
+      var txt = pre.textContent, ok = function () { cp.textContent = 'Copiado ✔'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function () { pre.focus(); });
+      else { var r = document.createRange(); r.selectNodeContents(pre); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); try { document.execCommand('copy'); ok(); } catch (e) { /* queda seleccionado: copiar a mano */ } }
+    });
+    ce.addEventListener('click', cerrarModal); acc.appendChild(ce); acc.appendChild(cp); modal.appendChild(acc);
+    velo.classList.add('on'); ta.focus();
   }
   function pintar(j) {
     var d = j.data; raiz.textContent = '';
@@ -125,6 +164,16 @@ const PLANTILLA = `<!doctype html>
       if (r.razones.length) { var ul = el('ul'); r.razones.forEach(function (x) { ul.appendChild(el('li', null, x)); }); c.appendChild(ul); }
     });
 
+    var dc = card('Decisiones del dueño' + (d.cola.decisiones_dueno.length ? ' · ' + d.cola.decisiones_dueno.length : ''), false, 'dueno');
+    if (!d.cola.decisiones_dueno.length) dc.appendChild(el('div', 'ok', 'Nada espera por ti: el Director no tiene preguntas abiertas.'));
+    else {
+      dc.appendChild(el('div', 'dim', 'Preguntas que frenan trabajo. Pulsa una para verla completa y preparar tu respuesta; se quitan solas cuando quedan resueltas.'));
+      d.cola.decisiones_dueno.forEach(function (x) {
+        var it = el('div', 'it'); it.appendChild(el('b', null, x.id)); it.appendChild(document.createTextNode(' ' + x.titulo));
+        if (x.desde) it.appendChild(el('small', null, 'abierta desde ' + x.desde));
+        it.addEventListener('click', function () { abrirDecision(x); }); dc.appendChild(it);
+      });
+    }
     var q = card('Cola y revisión', true);
     fila(q, 'En cola del constructor', d.cola.tareas.length); lista(q, d.cola.tareas, 'Cola vacía.', function (t) { return t.id + ' — ' + t.titulo; });
     fila(q, 'Por aceptar (esperan al Director)', d.cola.por_aceptar.length, d.cola.por_aceptar.length ? 'warn' : ''); if (d.cola.por_aceptar.length) lista(q, d.cola.por_aceptar, '', function (t) { return t.id + ' — ' + t.titulo; });

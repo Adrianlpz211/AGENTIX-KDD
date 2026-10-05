@@ -1059,3 +1059,15 @@ test('OCIO-3 — con trabajo esperando, sin vigilante y ~10 min sin rondas, el D
   poner(15); assert.match(razones()[0], /lleva ~15 min sin hacer rondas.*solo él puede despertarlo/);
   vigilanteFalso(root, 'builder'); assert.equal(razones().length, 0, 'con su vigilante vivo no está dormido');
 });
+
+test('OFICINA-3 — la decisión del dueño llega al tablero con su pregunta, opciones y recomendación, y desaparece al resolverse', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'decision', '¿Qué proveedor de correo uso para las confirmaciones?', '--tipo=dueno', '--opciones=Resend|SES', '--recomendacion=Resend: menos configuración');
+  let s = T.salud(root); const d = s.cola.decisiones_dueno;
+  assert.equal(d.length, 1); assert.equal(d[0].id, 'D-001');
+  assert.match(d[0].titulo, /proveedor de correo/);
+  assert.equal(d[0].opciones, 'Resend|SES'); assert.match(d[0].recomendacion, /Resend: menos configuración/);
+  assert.match(d[0].desde || '', /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/);
+  salida(root, 'decidir', 'D-001', 'Resend', '--porque=ya lo usamos');
+  s = T.salud(root); assert.equal(s.cola.decisiones_dueno.length, 0, 'resuelta: sale del tablero');
+});

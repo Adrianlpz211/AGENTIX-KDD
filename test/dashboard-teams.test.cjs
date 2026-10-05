@@ -175,3 +175,34 @@ test('/api/v1/oficina: la oficina vive con un solo modelo — la actividad sale 
     assert.equal(j.data.teams.modo, 'individual'); assert.equal(j.data.teams_instalado, true);
   } finally { d2.cerrar(); }
 });
+
+test('tablero de decisiones del dueño: lista con scroll interno, modal con el mensaje listo para pegar y se vacía al resolverse', { timeout: 120000, skip: hayNavegador() ? false : 'sin playwright-core' }, async () => {
+  const dir = tmp('dec'); crearFixture(dir); conTeams(dir);
+  for (const a of [['activar'], ['modo', 'completo'], ['iniciar']]) assert.equal(teams(dir, ...a).status, 0);
+  for (let i = 1; i <= 12; i++) assert.equal(teams(dir, 'decision', '¿Pregunta número ' + i + ' del dueño?', '--tipo=dueno', '--opciones=a|b', '--recomendacion=a').status, 0);
+  const d = await arrancarDashboard(dir);
+  const bg = require(path.join(REPO, '.agentic', 'grafo', 'browser-gate.cjs'));
+  const browser = await bg.launchBrowser('system');
+  const errores = [];
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.on('pageerror', (e) => errores.push(String(e.message || e).slice(0, 200)));
+    await page.goto(d.url.replace(/\/$/, '') + '/oficina', { waitUntil: 'load', timeout: 60000 });
+    await page.waitForSelector('.dueno .it', { timeout: 30000 });
+    assert.equal(await page.locator('.dueno .it').count(), 12);
+    const scroll = await page.evaluate(() => { const c = document.querySelector('.dueno'); return [c.scrollHeight, c.clientHeight]; });
+    assert.ok(scroll[0] > scroll[1], 'con muchas preguntas la tarjeta tiene scroll interno: ' + scroll);
+    await page.locator('.dueno .it').first().click();
+    assert.ok(await page.locator('#velo.on').count() === 1, 'se abre el modal');
+    assert.match(await page.locator('#modal').innerText(), /Pregunta número 1 del dueño/);
+    assert.match(await page.locator('#modal').innerText(), /Recomendación del Director: a/);
+    await page.locator('#modal textarea').fill('Usa Resend, ya lo tenemos');
+    assert.equal(await page.locator('#modal pre').innerText(), 'teams: resolver D-001 Usa Resend, ya lo tenemos');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#velo.on').count(), 0, 'Escape cierra el modal');
+    // el Director la resuelve en su chat → el tablero la quita solo
+    assert.equal(teams(dir, 'decidir', 'D-001', 'Resend').status, 0);
+    await page.waitForFunction(() => document.querySelectorAll('.dueno .it').length === 11, null, { timeout: 15000 });
+    assert.deepStrictEqual(errores, []);
+  } finally { await browser.close().catch(() => {}); d.cerrar(); }
+});
