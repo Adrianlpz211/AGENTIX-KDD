@@ -155,7 +155,8 @@ function calcular(root, opts = {}) {
     // PARCIAL que lleva > PARCIAL_MS sin un reporte nuevo: casi siempre está bloqueado por algo que el constructor no puede resolver
     // (entorno, credenciales, una decisión). Medido en glowly: dos tareas PARCIAL por Docker caído dejaron al constructor ocioso
     // una hora y el Director sin enterarse. Pasa a «devuelta»: el Director decide (aceptar así, reformular, desbloquear, cancelar).
-    else if (r && r.estado === 'PARCIAL' && !completa && r.at && (ahora - r.at) > (opts.parcialMs || PARCIAL_MS)) estado = 'DEVUELTA';
+    // Pero si el constructor SIGUE tocando archivos (menos de PARCIAL_MS), no está bloqueado: está trabajando esa misma tarea (H-006, glowly 05/10/2026).
+    else if (r && r.estado === 'PARCIAL' && !completa && r.at && (ahora - r.at) > (opts.parcialMs || PARCIAL_MS) && !trabajoReciente(root, opts.parcialMs || PARCIAL_MS)) estado = 'DEVUELTA';
     else if (hechaBuilder) estado = 'HECHA_SIN_ACEPTAR';
     const estancada = estado === 'DEVUELTA' && r && r.estado === 'PARCIAL';
     return { ...t, estado, reporte: r, completa, estancada, aceptacion: detAcept[t.id] || null };
@@ -258,6 +259,13 @@ function cambioReciente(root) {
     }
     return { t: max, archivo: quien };
   } catch { return null; }
+}
+/** ¿Se tocó algún archivo del proyecto en los últimos `ms`? Caché de 15 s: calcular() se llama mucho y git status no es gratis. Sin git: false. */
+const _trabajoCache = new Map();
+function trabajoReciente(root, ms) {
+  const k = root, ahora = Date.now(), h = _trabajoCache.get(k);
+  let c; if (h && ahora - h.en < 15000 && !process.env.AKDD_TEAMS_ULTIMO_CAMBIO) c = h.c; else { c = cambioReciente(root); _trabajoCache.set(k, { en: ahora, c }); }
+  return !!(c && c.t && ahora - c.t < ms);
 }
 function ultimoCambioArchivos(root) { const c = cambioReciente(root); return c === null ? null : c.t; }
 

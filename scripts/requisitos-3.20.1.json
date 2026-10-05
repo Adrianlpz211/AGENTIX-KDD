@@ -1784,6 +1784,18 @@
           "H-005"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-006",
+      "doc": "TEAMS",
+      "requisito": "Una tarea PARCIAL no pasa a ESTANCADA mientras el constructor sigue tocando archivos",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-006"
+        ]
+      ]
     }
   ]
 }

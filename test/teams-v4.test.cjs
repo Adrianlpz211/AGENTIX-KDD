@@ -1164,3 +1164,14 @@ test('H-004 — CONSTRUCTOR_DORMIDO no se dice si el constructor tiene señales 
   process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 40 * 60000);  // nada desde hace 40 min y sin reportes: ahora sí
   try { assert.match(dormido()[0], /lleva ~15 min sin hacer rondas/); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
 });
+
+test('H-006 — una tarea PARCIAL no pasa a ESTANCADA mientras el constructor sigue tocando archivos', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Tarea larga', '--criterio=a', '--sin-contexto');
+  salida(root, 'reportar', 'T-001', '--estado=PARCIAL', '--detalle=voy por la mitad, sigo con las pruebas');
+  const tarde = Date.now() + 12 * 60000;
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(tarde - 60000);          // tocó un archivo hace 1 min (respecto de «ahora» del test)
+  try { const e = T.calcular(root, { ahora: tarde }); assert.equal(e.tareas[0].estado, 'PENDIENTE', 'trabajando: no se le devuelve'); assert.equal(e.devueltas.length, 0); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 40 * 60000); // nada desde hace 40 min: ahora sí es una espera real
+  try { const e = T.calcular(root, { ahora: tarde }); assert.equal(e.tareas[0].estado, 'DEVUELTA'); assert.equal(e.tareas[0].estancada, true); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});

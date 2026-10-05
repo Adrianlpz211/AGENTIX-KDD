@@ -1,5 +1,10 @@
 # Changelog — Agentic KDD
 
+## [3.23.5] — 2026-10-05
+
+**Un hallazgo más de la revisión profunda de glowly.**
+- **H-006 — «PARCIAL ESTANCADA» con el constructor trabajando:** una tarea reportada PARCIAL pasaba a «devuelta/estancada» a los 10 min del reporte aunque el constructor siguiera construyendo esa misma tarea (archivos tocados hace menos de un minuto), y el Director recibía «decide: aceptar, reformular o cancelar» sobre algo que no estaba bloqueado. Ahora solo se declara estancada si además no se tocó ningún archivo del proyecto en esos 10 min (consulta a git con caché de 15 s); sin git se comporta como antes.
+
 ## [3.23.4] — 2026-10-05
 
 **Dos hallazgos más de la revisión profunda de glowly.**
