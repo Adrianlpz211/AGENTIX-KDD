@@ -1,5 +1,13 @@
 # Changelog — Agentic KDD
 
+## [3.23.7] — 2026-10-05
+
+**Todo el tablero en vivo: se acabó matar el servidor para ver datos nuevos.**
+- **Causa:** hasta ahora solo las tarjetas de arriba se actualizaban solas. El grafo de conocimiento, la estructura de código, los tiempos, la visita guiada y los docs se calculaban UNA vez al arrancar el servidor y quedaban incrustados en el HTML: por mucho que se recargara, la página era la misma hasta reiniciar.
+- **Ahora:** (1) cada carga de `/` trae la página con los datos de ese momento: si cambió el contenido, el servidor la regenera en un proceso hijo (`dashboard.cjs --emitir-html`, ~2,5 s en un proyecto grande) y no se congela mientras tanto; (2) el SSE avisa con un evento `pagina` cuando cambia algo de lo que la página pinta (filas de las tablas del grafo, AST, ciclos, contratos… y los archivos que lee: config.md, memoria/*.md, specs, logs, tour, overlay); (3) la página muestra «Hay datos nuevos» con un botón «Actualizar ahora» y se recarga sola cuando dejas de usar el tablero 30 s (`AKDD_DASH_AUTO_REFRESH_MS`, 0 = solo el botón), recordando dónde estabas: pestañas, filtros, búsqueda, nodo elegido y scroll. No entra en bucle si el servidor no logra regenerar.
+- **Un puerto por proyecto:** el tablero ya no usa siempre el 3847 (el de un proyecto tapaba al de otro: glowly vs dashboard 3d). Ahora cada proyecto abre en 3847 + (hash de su carpeta % 100), siempre el mismo; `AKDD_DASH_PORT` sigue mandando y, si aun así está ocupado, se prueba el siguiente.
+- **Límite honesto:** el grafo no se redibuja en sitio, la página se recarga (cámara 3D reiniciada). Las tarjetas y las pestañas Oficina, Memoria, Contexto y Actualización siguen actualizándose sin recargar.
+
 ## [3.23.6] — 2026-10-05
 
 - **H-007 — «Nadie avanza» (semáforo ROJO) con el constructor trabajando:** la alerta saltaba a los 20 min de canal quieto aunque el constructor siguiera tocando archivos en una tarea larga. Ahora, si hay evidencia de trabajo reciente, las tareas y correcciones del constructor no cuentan como paradas; sigue contando lo que espera al Director (entregas por revisar, tareas devueltas). Sin git se comporta como antes.

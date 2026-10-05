@@ -1,11 +1,24 @@
 #!/usr/bin/env node
 'use strict';
 
+// --emitir-html: modo hijo. Calcula TODA la página con los datos de AHORA, la imprime por stdout y termina, sin abrir puerto ni navegador.
+// El servidor lo lanza cuando el contenido de la base o de los archivos cambió: así la página se regenera sin reiniciar el servidor
+// (antes el grafo, la estructura de código, los tiempos y la visita guiada quedaban congelados con los datos del arranque).
+const EMITIR_HTML = process.argv.includes('--emitir-html');
+if (EMITIR_HTML) console.log = (...a) => console.error(...a);
+
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-let PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || 3847; // override: AKDD_DASH_PORT. Si está ocupado (otro proyecto con su tablero abierto) se prueba el siguiente, como hace Node/Vite
 const projectPath = process.cwd();
+// Puerto propio de cada proyecto: 3847 + (hash de su carpeta % 100). Antes todos usaban el 3847 y el tablero de un proyecto tapaba el de otro
+// (glowly vs dashboard 3d, 05/10/2026); así cada proyecto abre siempre en el MISMO puerto y dos proyectos casi nunca coinciden.
+// Override: AKDD_DASH_PORT. Si aun así está ocupado se prueba el siguiente, como hace Node/Vite.
+function puertoDelProyecto(ruta) {
+  const n = require('crypto').createHash('sha1').update(String(ruta).split('\\').join('/').replace(/\/+$/, '').toLowerCase()).digest().readUInt32BE(0);
+  return 3847 + (n % 100);
+}
+let PORT = parseInt(process.env.AKDD_DASH_PORT, 10) || puertoDelProyecto(projectPath);
 const dbPath = path.join(projectPath, '.agentic', 'memoria.db');
 const grafoPath = fs.existsSync(path.join(projectPath, '.agentic', 'grafo', 'grafo.cjs'))
   ? path.join(projectPath, '.agentic', 'grafo', 'grafo.cjs')
@@ -28,6 +41,10 @@ const fechaMod = cargarGrafo('fecha-utc.cjs');
 const metricasServicio = cargarGrafo('metricas-servicio.cjs');
 const vista = cargarGrafo('dashboard-vista.cjs');
 const apiMod = cargarGrafo('dashboard-api.cjs');
+// Huella del contenido ANTES de leer los datos: si algo cambia mientras se arma la página, la huella queda vieja y el aviso de «datos nuevos» no se pierde.
+// Milisegundos sin tocar el tablero tras los cuales se recarga solo cuando hay datos nuevos (AKDD_DASH_AUTO_REFRESH_MS; 0 = nunca solo, solo el botón).
+const AUTO_REFRESH_MS = (() => { const v = process.env.AKDD_DASH_AUTO_REFRESH_MS; return v === undefined || v === '' || !Number.isFinite(Number(v)) ? 30000 : Math.max(0, Math.round(Number(v))); })();
+const HUELLA_PAGINA = (() => { try { return apiMod.huellaPaginaDe({ dbPath, projectPath }); } catch { return null; } })();
 const operativaMod = cargarGrafo('operativa.cjs');
 // Zona para mostrar fechas: "Zona horaria:" en config.md; sin ella, la del sistema.
 const ZONA = fechaMod.zonaDeConfig(fs.readFileSync(configPath, 'utf8'));
@@ -2542,6 +2559,7 @@ ${vista.kpisVista.toString()}
 // Solo cambia texto y título de las tarjetas por su data-kpi: el grafo, la
 // cámara y la selección no se tocan. Sin modelo, sin sync: lee /api/v1/summary.
 (function vivo() {
+  var HUELLA = ${jsonSafe(HUELLA_PAGINA)};
   var rev = ${jsonSafe(REVISION_INICIAL)}, etag = null, modo = 'conectando', ultima = null, fallos = 0, sondeo = null;
   var POLL = ${Number(process.env.AKDD_DASH_CLIENT_POLL_MS) || 10000};
   var dot = document.querySelector('.hdr .dot');
@@ -2581,6 +2599,46 @@ ${vista.kpisVista.toString()}
     traer().catch(function () { marcar('desconectado'); });
     sondeo = setInterval(function () { traer().then(function () { if (modo !== 'sondeo') marcar('sondeo'); }, function () { marcar('desconectado'); }); }, POLL);
   }
+  // ── Datos nuevos ────────────────────────────────────────────────────────────
+  // Las tarjetas de arriba y las pestañas Oficina/Memoria/Contexto/Actualización ya se actualizan solas. El resto de la página (grafo de
+  // conocimiento, estructura de código, tiempos, visita guiada, docs) se pinta con los datos de cuando el servidor la generó: cuando esos
+  // datos cambian, el servidor avisa (evento «pagina»), regenera la página sin reiniciarse y esta se recarga SOLA en cuanto dejas de usar
+  // el tablero (o ya, con el botón), guardando dónde estabas (pestañas, filtros, búsqueda, nodo elegido).
+  var IDLE_MS = ${AUTO_REFRESH_MS}, nuevaHuella = null, ultimaAccion = Date.now(), aviso = null;
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (t) { document.addEventListener(t, function () { ultimaAccion = Date.now(); }, { passive: true, capture: true }); });
+  function guardarVista() {
+    try {
+      var grupos = ['.mode-tab', '.gst', '.nav-item', '.sb-tab', '.fpill:not(.side-pill)', '.side-pill'];
+      var act = grupos.map(function (sel) { var l = document.querySelectorAll(sel), i = -1; for (var k = 0; k < l.length; k++) { if (l[k].classList.contains('active')) { i = k; break; } } return i; });
+      var q = document.querySelector('input[oninput*="filterSearch"]'), dm = document.querySelector('.docs-main');
+      sessionStorage.setItem('akdd-vista', JSON.stringify({ t: Date.now(), act: act, busca: q ? q.value : '', sel: (typeof selectedNodeId !== 'undefined') ? selectedNodeId : null, scroll: dm ? dm.scrollTop : 0 }));
+      sessionStorage.setItem('akdd-recarga-por', String(nuevaHuella || ''));
+    } catch (x) { /* sin almacenamiento: se recarga igual, sin recordar dónde estabas */ }
+  }
+  window.__akddRecargar = function () { guardarVista(); location.reload(); };
+  function mostrarAviso(auto) {
+    if (!aviso) {
+      aviso = document.createElement('div');
+      aviso.id = 'akdd-datos-nuevos'; aviso.setAttribute('role', 'status');
+      aviso.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:99999;display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:8px;background:#111827;color:#e5e7eb;border:1px solid #f59e0b;font:12px/1.3 system-ui,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.45)';
+      var t = document.createElement('span'); t.className = 'akdd-aviso-texto'; aviso.appendChild(t);
+      var b = document.createElement('button'); b.textContent = 'Actualizar ahora'; b.style.cssText = 'cursor:pointer;border:1px solid #f59e0b;background:transparent;color:#fbbf24;border-radius:6px;padding:3px 8px;font:inherit';
+      b.addEventListener('click', function () { window.__akddRecargar(); }); aviso.appendChild(b);
+      document.body.appendChild(aviso);
+    }
+    aviso.querySelector('.akdd-aviso-texto').textContent = auto ? 'Hay datos nuevos · se actualiza sola cuando dejes de usar el tablero' : 'Hay datos nuevos en la memoria';
+  }
+  function yaIntentado(h) { try { return sessionStorage.getItem('akdd-recarga-por') === h; } catch (x) { return false; } }
+  function hayDatosNuevos(h) {
+    if (nuevaHuella === h) return;
+    nuevaHuella = h; window.__akddHuellaNueva = h;
+    mostrarAviso(IDLE_MS > 0 && !yaIntentado(h));
+  }
+  setInterval(function () {
+    if (!nuevaHuella || IDLE_MS <= 0 || yaIntentado(nuevaHuella)) return;   // ya se recargó por esta huella y el servidor no la reflejó: no entrar en bucle
+    if (document.hidden || Date.now() - ultimaAccion >= IDLE_MS) window.__akddRecargar();
+  }, 5000);
+
   if (!window.EventSource || !window.fetch) { sondear(); return; }
   function conectar() {
     var es = new EventSource('/api/v1/events');
@@ -2596,6 +2654,11 @@ ${vista.kpisVista.toString()}
     });
   }
   conectar();
+  // Canal aparte para «la página quedó vieja»: no mezcla ids con las revisiones de las tarjetas. EventSource reintenta solo.
+  try {
+    var ep = new EventSource('/api/v1/events?topics=pagina');
+    ep.addEventListener('pagina', function (e) { try { var h = JSON.parse(e.data).huella; if (h && HUELLA && h !== HUELLA) hayDatosNuevos(h); } catch (x) {} });
+  } catch (x) { /* sin SSE: queda el botón de recarga manual */ }
 })();
 
 // ─── "¡NO ENTIENDO!" — explicación de ESE nodo específico, no un glosario ───
@@ -5108,6 +5171,26 @@ if((!TOUR_DATA || (!TOUR_DATA.front||!TOUR_DATA.front.length)&&(!TOUR_DATA.back|
 activarTeclado();
 renderNodeList();
 renderGraph();
+// Tras una recarga por «datos nuevos»: volver a donde estabas (pestañas, filtros, búsqueda, nodo elegido, scroll).
+(function restaurarVista(){
+  let raw=null;
+  try{ raw=sessionStorage.getItem('akdd-vista'); sessionStorage.removeItem('akdd-vista'); }catch(e){}
+  if(!raw) return;
+  let v; try{ v=JSON.parse(raw); }catch(e){ return; }
+  if(!v || Date.now()-v.t>60000) return;
+  const grupos=['.mode-tab','.gst','.nav-item','.sb-tab','.fpill:not(.side-pill)','.side-pill'];
+  (v.act||[]).forEach(function(idx,i){
+    if(idx<0) return;
+    const el=document.querySelectorAll(grupos[i])[idx];
+    if(el && !el.classList.contains('active')) el.click();
+  });
+  const q=document.querySelector('input[oninput*="filterSearch"]');
+  if(q && v.busca){ q.value=v.busca; if(typeof filterSearch==='function') filterSearch(v.busca); }
+  setTimeout(function(){
+    if(v.sel && typeof nodeMap!=='undefined' && nodeMap[v.sel] && typeof selectNode==='function') selectNode(v.sel);
+    const dm=document.querySelector('.docs-main'); if(dm && v.scroll) dm.scrollTop=v.scroll;
+  },800);
+})();
 </script>
 
   </body>
@@ -5142,6 +5225,45 @@ const HOSTS_PERMITIDOS = new Set(['localhost', '127.0.0.1', '[::1]']);
 function hostPermitido(h) {
   const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(h || '').toLowerCase());
   return !!m && HOSTS_PERMITIDOS.has(m[1]) && (!m[2] || Number(m[2]) === Number(PORT));
+}
+
+// ─── Página siempre fresca (sin reiniciar el servidor) ───────────────────────
+// El HTML del tablero incrusta datos (grafo, código, tiempos, visita). Se generaba UNA vez al arrancar; ahora, si la huella del contenido
+// cambió, cada carga pide una página nueva a un proceso hijo (--emitir-html) y se sirve esa. El hijo es un proceso aparte: calcular la
+// página tarda segundos y NO debe congelar el servidor (lección H-005: una espera síncrona congela también el SSE y las demás rutas).
+const REGEN_ENFRIAR_MS = 3000;       // no regenerar más de una vez cada 3 s aunque la huella siga cambiando
+const REGEN_FALLA_MS = 15000;        // tras un fallo, no insistir durante 15 s: se sirve la última página buena
+const REGEN_TIMEOUT_MS = 90000;
+let paginaHtml = HTML, paginaHuella = HUELLA_PAGINA, regenEnCurso = null, regenUltima = 0, regenFalla = 0;
+function huellaActual() { try { return API.huellaPagina(); } catch { return paginaHuella; } }
+function regenerarPagina() {
+  if (regenEnCurso) return regenEnCurso;
+  regenEnCurso = new Promise((resolve) => {
+    const { spawn } = require('child_process');
+    let hijo;
+    try { hijo = spawn(process.execPath, [__filename, '--emitir-html'], { cwd: projectPath, env: Object.assign({}, process.env, { AKDD_DASH_NO_OPEN: '1' }), stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); }
+    catch { regenFalla = Date.now(); return resolve(); }
+    const trozos = [];
+    const t = setTimeout(() => { try { hijo.kill(); } catch { /* ya terminó */ } }, REGEN_TIMEOUT_MS);
+    hijo.stdout.on('data', (d) => trozos.push(d));
+    hijo.on('error', () => { clearTimeout(t); regenFalla = Date.now(); resolve(); });
+    hijo.on('close', (code) => {
+      clearTimeout(t);
+      const html = Buffer.concat(trozos).toString('utf8');
+      if (code === 0 && /<\/html>\s*$/.test(html)) {
+        const m = /var HUELLA = ("[^"]*"|null);/.exec(html);
+        paginaHtml = html; paginaHuella = m ? JSON.parse(m[1]) : paginaHuella; regenUltima = Date.now();
+      } else regenFalla = Date.now();
+      resolve();
+    });
+  }).then(() => { regenEnCurso = null; }, () => { regenEnCurso = null; });
+  return regenEnCurso;
+}
+async function paginaFresca() {
+  const h = huellaActual();
+  if (h && h !== paginaHuella && Date.now() - regenFalla > REGEN_FALLA_MS && Date.now() - regenUltima > REGEN_ENFRIAR_MS) await regenerarPagina();
+  else if (regenEnCurso) await regenEnCurso;
+  return paginaHtml;
 }
 
 const server = require('http').createServer((req, res) => {
@@ -5187,8 +5309,10 @@ const server = require('http').createServer((req, res) => {
     return;
   }
   if (ruta !== '/' && ruta !== '/index.html') return fin(404, 'No encontrado');
-  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_RAIZ }, base));
-  res.end(req.method === 'HEAD' ? undefined : HTML);
+  paginaFresca().then((html) => {
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_RAIZ }, base));
+    res.end(req.method === 'HEAD' ? undefined : html);
+  }, () => fin(500, 'No se pudo generar la página'));
 });
 
 // Si el puerto ya lo usa otro tablero (p. ej. el de otro proyecto), se monta en el siguiente libre en vez de morir.
@@ -5222,4 +5346,5 @@ function alEscuchar() {
   });
   console.log('  Press Ctrl+C to stop\n');
 }
-escuchar(INTENTOS_PUERTO);
+if (EMITIR_HTML) process.stdout.write(HTML, () => process.exit(0));
+else escuchar(INTENTOS_PUERTO);

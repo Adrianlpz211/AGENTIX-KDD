@@ -1808,6 +1808,50 @@
           "H-007"
         ]
       ]
+    },
+    {
+      "id": "TABLERO-vivo-pagina",
+      "doc": "TABLERO",
+      "requisito": "La página del tablero se regenera con los datos de ahora sin reiniciar el servidor y el SSE avisa cuando cambia",
+      "alcance": "proceso real (dashboard.cjs)",
+      "pruebas": [
+        [
+          "dashboard-vivo",
+          "VIVO-1"
+        ],
+        [
+          "dashboard-vivo",
+          "VIVO-3"
+        ]
+      ]
+    },
+    {
+      "id": "TABLERO-vivo-archivos",
+      "doc": "TABLERO",
+      "requisito": "La huella de la página cubre también los archivos que lee, no solo la base",
+      "alcance": "proceso real (dashboard-api.cjs)",
+      "pruebas": [
+        [
+          "dashboard-vivo",
+          "VIVO-2"
+        ],
+        [
+          "dashboard-vivo",
+          "VIVO-5"
+        ]
+      ]
+    },
+    {
+      "id": "TABLERO-puerto-propio",
+      "doc": "TABLERO",
+      "requisito": "Cada proyecto abre su tablero en un puerto propio y estable",
+      "alcance": "proceso real (dashboard.cjs)",
+      "pruebas": [
+        [
+          "dashboard-vivo",
+          "PUERTO-1"
+        ]
+      ]
     }
   ]
 }

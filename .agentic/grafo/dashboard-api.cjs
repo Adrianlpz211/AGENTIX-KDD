@@ -89,6 +89,34 @@ function paginar(lista, q) {
   return { pagina, coverage: { total: lista.length, shown: pagina.length, truncated: lista.length > pagina.length, offset: desde, next_cursor: siguiente } };
 }
 
+/**
+ * Huella de TODO lo que la página del tablero pinta al generarse (grafo de conocimiento, estructura de código, tiempos, visita, docs…).
+ * La revisión de /summary solo cubre las tarjetas; esta cubre además filas de las tablas y los archivos que la página lee, para que el
+ * tablero sepa cuándo su contenido quedó viejo SIN reiniciar el servidor. Solo lectura y barata: conteos + último rowid + mtimes.
+ */
+const TABLAS_PAGINA = ['nodos', 'relaciones', 'ciclos', 'fases', 'verified_contracts', 'protected_behaviors', 'ast_symbols', 'ast_edges', 'ui_layout_decisions', 'code_summaries', 'module_registry', 'spec_registry', 'gate_events', 'prediction_log', 'reasoning_bank', 'episodios'];
+function huellaArchivos(projectPath) {
+  const partes = [];
+  const mt = (p) => { try { return Math.round(fs.statSync(p).mtimeMs); } catch { return '-'; } };
+  const ag = path.join(projectPath, '.agentic');
+  for (const f of [path.join(ag, 'config.md'), path.join(ag, 'PLAN.md'), path.join(ag, 'diff-overlay.json'), path.join(ag, 'tour.json'), path.join(projectPath, 'package.json')]) partes.push(mt(f));
+  for (const dir of [path.join(ag, 'memoria'), path.join(ag, 'specs'), path.join(projectPath, '_output')]) {
+    try { for (const f of fs.readdirSync(dir)) if (/\.(md|json)$/.test(f) && (dir.endsWith('_output') ? /^log-/.test(f) : true)) partes.push(f + ':' + mt(path.join(dir, f))); } catch { /* carpeta ausente */ }
+  }
+  return partes.join('|');
+}
+function huellaDb(dbPath, opts) {
+  const consultas = {};
+  for (const t of TABLAS_PAGINA) consultas[t] = { tabla: t, sql: 'SELECT COUNT(*) AS n, COALESCE(MAX(rowid), 0) AS m FROM "' + t + '"' };
+  const r = datos.filas(dbPath, consultas, Object.assign({ snapshot: true }, opts || {}));
+  if (r.status !== 'OK') return null;                  // base ocupada o ilegible: quien llama conserva la anterior
+  return TABLAS_PAGINA.map((t) => { const f = (r.value[t] || [])[0]; return f ? f.n + ':' + f.m : '-'; }).join(',');
+}
+function huellaPaginaDe({ dbPath, projectPath, busyMs } = {}) {
+  const d = huellaDb(dbPath, busyMs ? { busyMs } : null);
+  return hash((d === null ? 'sin-db' : d) + '#' + huellaArchivos(projectPath));
+}
+
 function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir } = {}) {
   const opts = abrir ? { abrir } : {};
   const intervalo = Number(pollMs || process.env.AKDD_DASH_POLL_MS || 2000);
@@ -287,11 +315,29 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
   let actual = null;
   let firmaArchivo = null;
   let temporizador = null;
+  const suscritosPagina = new Set();
 
   const firma = () => ['', '-wal'].map((s) => { try { const st = fs.statSync(dbPath + s); return st.size + ':' + st.mtimeMs; } catch { return '-'; } }).join('|');
   const enviar = (res, ev) => res.write(`id: ${ev.id}\nevent: ${ev.tipo}\ndata: ${JSON.stringify(ev.data)}\n\n`);
 
+  // Huella de la página: la parte de la base solo se recalcula si el archivo cambió; la de archivos (mtimes) siempre, es barata.
+  let huellaPag = null, huellaDbCache = null, huellaDbFirma = null;
+  function huellaPaginaActual() {
+    const f = firma();
+    if (f !== huellaDbFirma) { const d = huellaDb(dbPath, { busyMs: 150 }); if (d !== null) { huellaDbCache = d; huellaDbFirma = f; } }
+    return hash((huellaDbCache === null ? 'sin-db' : huellaDbCache) + '#' + huellaArchivos(projectPath));
+  }
+  function avisarPagina() {
+    const h = huellaPaginaActual();
+    if (h === huellaPag) return;
+    const primera = huellaPag === null; huellaPag = h;
+    if (primera) return;
+    // Canal APARTE (?topics=pagina): el de las revisiones de los grafos no recibe estos avisos ni cambia sus ids.
+    for (const c of suscritosPagina) c.write(`event: pagina\ndata: ${JSON.stringify({ huella: h, at: new Date().toISOString() })}\n\n`);
+  }
+
   function sondear() {
+    if (suscritosPagina.size) { try { avisarPagina(); } catch { /* el aviso es auxiliar */ } }
     const f = firma();
     if (suscritosMemoria.size && (f + '|' + firmaExtra()) !== firmaMem) sondearMemoria();
     if (f === firmaArchivo && actual !== null) return;
@@ -306,7 +352,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     for (const c of clientes) enviar(c, ev);
   }
   function arrancar() { if (!temporizador) { temporizador = setInterval(sondear, intervalo); temporizador.unref(); } }
-  function parar() { if (temporizador && !clientes.size && !suscritosMemoria.size) { clearInterval(temporizador); temporizador = null; } }
+  function parar() { if (temporizador && !clientes.size && !suscritosMemoria.size && !suscritosPagina.size) { clearInterval(temporizador); temporizador = null; } }
 
   function abrirStream(req, res) {
     if (clientes.size + suscritosMemoria.size >= tope) {
@@ -358,6 +404,25 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     bufferMem.push(ev);
     if (bufferMem.length > 100) bufferMem.shift();
     for (const c of suscritosMemoria) enviar(c, ev);
+  }
+
+  // ─── SSE «la página quedó vieja» (?topics=pagina) ──────────────────────────────
+  // Sin ids ni búfer: solo viaja la huella. Al conectarse recibe la actual (el cliente la compara con la de SU página: si ya difiere,
+  // nació vieja) y después un evento por cada cambio de lo que la página pinta. El cliente reconsulta la página, no hay nada que reponer.
+  function abrirStreamPagina(req, res) {
+    if (clientes.size + suscritosMemoria.size + suscritosPagina.size >= tope) {
+      res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '10' });
+      return res.end(JSON.stringify({ schema_version: SCHEMA_VERSION, status: 'UNAVAILABLE', reason_code: 'DEMASIADOS_CLIENTES', errors: [{ code: 'DEMASIADOS_CLIENTES' }] }));
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Content-Type-Options': 'nosniff' });
+    res.write('retry: 3000\n\n');
+    try { avisarPagina(); } catch { /* auxiliar */ }
+    res.write(`event: pagina\ndata: ${JSON.stringify({ huella: huellaPag, inicial: true })}\n\n`);
+    suscritosPagina.add(res);
+    arrancar();
+    const latido = setInterval(() => res.write(': keepalive\n\n'), 15000);
+    latido.unref();
+    req.on('close', () => { clearInterval(latido); suscritosPagina.delete(res); parar(); });
   }
 
   function abrirStreamMemoria(req, res) {
@@ -422,7 +487,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     if (!def) { sobre(res, req, { status: 'UNAVAILABLE', data: null, errors: [{ code: 'RUTA_DESCONOCIDA' }], reason_code: 'RUTA_DESCONOCIDA' }, 404); return true; }
     if (nombre === 'events' && /text\/event-stream/.test(String(req.headers.accept || ''))) {
       // ?topics=memory: canal propio de los paneles Memoria/Contexto (sus ids y su búfer). Sin topics: el canal de siempre, intacto.
-      if (qs.get('topics') === 'memory') abrirStreamMemoria(req, res); else abrirStream(req, res);
+      if (qs.get('topics') === 'memory') abrirStreamMemoria(req, res); else if (qs.get('topics') === 'pagina') abrirStreamPagina(req, res); else abrirStream(req, res);
       return true;
     }
     let q;
@@ -443,12 +508,12 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
   }
 
   function cerrar() {
-    for (const c of [...clientes, ...suscritosMemoria]) { try { c.end(); } catch { /* ya cerrado */ } }
-    clientes.clear(); suscritosMemoria.clear();
+    for (const c of [...clientes, ...suscritosMemoria, ...suscritosPagina]) { try { c.end(); } catch { /* ya cerrado */ } }
+    clientes.clear(); suscritosMemoria.clear(); suscritosPagina.clear();
     if (temporizador) { clearInterval(temporizador); temporizador = null; }
   }
 
-  return { manejar, manejarAccion, cerrar, revision, leerResumen, clientes: () => clientes.size };
+  return { manejar, manejarAccion, cerrar, revision, leerResumen, huellaPagina: huellaPaginaActual, clientes: () => clientes.size };
 }
 
-module.exports = { crearApi, integraciones, leerQuery, SCHEMA_VERSION, LIMITE_MAX };
+module.exports = { crearApi, integraciones, leerQuery, huellaPaginaDe, SCHEMA_VERSION, LIMITE_MAX };
