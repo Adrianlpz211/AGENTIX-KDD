@@ -42,3 +42,18 @@ test('base bloqueada por un escritor: se sirve la última lectura buena marcada 
     assert.equal(fresco.body.stale, undefined, 'liberada la base ya no está marcado como viejo');
   } finally { try { if (bloqueo) { bloqueo.exec('ROLLBACK'); bloqueo.close(); } } catch { /* ya cerrada */ } d.cerrar(); }
 });
+
+test('H-005 — el sondeo periódico del tablero no se queda esperando a un escritor: devuelve enseguida y reintenta (la lectura normal sí espera)', () => {
+  const dir = tmp('sondeo'); crearFixture(dir);
+  const { crearApi } = require(path.join(require('./fixtures/dashboard-fixture.cjs').REPO, '.agentic', 'grafo', 'dashboard-api.cjs'));
+  const api = crearApi({ dbPath: dbDe(dir), projectPath: dir, projectId: 'x' });
+  const bloqueo = new DatabaseSync(dbDe(dir));
+  try {
+    assert.ok(!/^sin-dato/.test(api.revision(true)), 'sin escritor: lectura normal');
+    bloqueo.exec('BEGIN EXCLUSIVE');
+    const t0 = Date.now(); const ligera = api.revision(true); const msLigera = Date.now() - t0;
+    assert.match(ligera, /^sin-dato-DB_BLOQUEADA/); assert.ok(msLigera < 1500, 'el sondeo no congela el proceso: ' + msLigera + ' ms');
+    const t1 = Date.now(); api.revision(); const msNormal = Date.now() - t1;
+    assert.ok(msLigera < msNormal * 0.6, 'el sondeo espera mucho menos que la lectura normal (' + msLigera + ' ms vs ' + msNormal + ' ms)');
+  } finally { try { bloqueo.exec('ROLLBACK'); } catch { /* ya */ } bloqueo.close(); api.cerrar(); }
+});

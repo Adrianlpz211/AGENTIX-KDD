@@ -95,11 +95,11 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
   const tope = Number(maxClientes || process.env.AKDD_DASH_MAX_SSE || 8);
 
   /** Lectura única del resumen: métricas, contratos y memoria en una transacción. */
-  function leerResumen() {
+  function leerResumen(ligero) {
     const r = datos.filas(dbPath, Object.assign({}, servicio.CONSULTAS, {
       contratos: { tabla: 'verified_contracts', sql: "SELECT status, COUNT(*) AS n FROM verified_contracts WHERE status IS NULL OR status != 'deprecated' GROUP BY status" },
       nodos: { tabla: 'nodos', sql: 'SELECT tipo, COUNT(*) AS n FROM nodos GROUP BY tipo' },
-    }), Object.assign({ snapshot: true }, opts));
+    }), Object.assign({ snapshot: true }, opts, ligero ? { busyMs: 150 } : {}));
     if (r.status !== 'OK') return { status: r.status, reason_code: r.reason_code, data: null, faltan: [] };
     const v = r.value;
     const faltan = r.faltan || [];
@@ -119,8 +119,8 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     return { status: m || contratos || memoria ? 'OK' : 'EMPTY', reason_code: faltan.length ? 'TABLAS_AUSENTES' : null, data, faltan };
   }
 
-  function revision() {
-    const r = leerResumen();
+  function revision(ligero) {
+    const r = leerResumen(ligero);
     return r.data ? hash(r.data) : 'sin-dato-' + (r.reason_code || r.status);
   }
 
@@ -296,7 +296,8 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     if (suscritosMemoria.size && (f + '|' + firmaExtra()) !== firmaMem) sondearMemoria();
     if (f === firmaArchivo && actual !== null) return;
     firmaArchivo = f;
-    const rev = revision();
+    const rev = revision(true);
+    if (/^sin-dato-DB_BLOQUEADA/.test(rev)) { firmaArchivo = null; return; }   // base ocupada: no se espera, se reintenta en el próximo turno
     if (rev === actual) return;
     actual = rev;
     const ev = { id: ++seq, tipo: 'revision', data: { snapshot_revision: rev, at: new Date().toISOString() } };

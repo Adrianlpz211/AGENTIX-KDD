@@ -1760,6 +1760,30 @@
           "H-003"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-004",
+      "doc": "TEAMS",
+      "requisito": "CONSTRUCTOR_DORMIDO no se dice si el constructor tiene señales de trabajo reciente",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-004"
+        ]
+      ]
+    },
+    {
+      "id": "TABLERO-sondeo-h-005",
+      "doc": "TEAMS",
+      "requisito": "El sondeo periódico del tablero no se queda esperando a un escritor de la base",
+      "alcance": "proceso real (tablero)",
+      "pruebas": [
+        [
+          "dashboard-bloqueo",
+          "H-005"
+        ]
+      ]
     }
   ]
 }

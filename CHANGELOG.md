@@ -1,5 +1,11 @@
 # Changelog — Agentic KDD
 
+## [3.23.4] — 2026-10-05
+
+**Dos hallazgos más de la revisión profunda de glowly.**
+- **H-004 — «Cursor dormido» con Cursor trabajando:** el aviso CONSTRUCTOR_DORMIDO (sin rondas ~10 min + vigilante muerto) saltaba aunque el constructor estuviera construyendo una tarea larga (archivo tocado hace 1 min, terminales activas) y la sesión del Director se lo decía al dueño como si estuviera parado — dos veces seguidas en glowly. Ahora solo se dice si la evidencia del disco no muestra trabajo reciente (archivos tocados o reportes); sin git no se puede saber y se avisa como antes.
+- **H-005 — el tablero se congelaba a ratos:** el sondeo periódico del tablero (cada 2 s, cuando hay una pestaña abierta) leía la base de forma síncrona esperando hasta 2 s a un escritor (post-cycle al aceptar una tarea). Una espera síncrona congela TODO el proceso: la Oficina medía 2–4 s (hasta 10 s) justo al aceptar. Ahora el sondeo espera como mucho 150 ms y, si la base está ocupada, salta ese turno y reintenta en el siguiente. (Hubo además un bloqueo de 3 s sin escritor, sin causa clara.)
+
 ## [3.23.3] — 2026-10-05
 
 **Tres hallazgos de la revisión profunda de glowly (loop de 3 min), resueltos.**

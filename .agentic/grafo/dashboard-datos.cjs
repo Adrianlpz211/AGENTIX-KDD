@@ -48,7 +48,9 @@ const driversEnv = () => (process.env.AKDD_DB_DRIVERS ? process.env.AKDD_DB_DRIV
 const BUSY_LECTURA_MS = Number(process.env.AKDD_DASH_BUSY_MS) || 2000;
 const abrirPorDefecto = (p) => adapter.openReadOnly(p, { drivers: driversEnv(), busyTimeout: BUSY_LECTURA_MS });
 
-function conLectura(dbPath, fn, { abrir = abrirPorDefecto } = {}) {
+function conLectura(dbPath, fn, { abrir: abrirOpt, busyMs } = {}) {
+  // busyMs: espera máxima por un escritor. El sondeo periódico usa una corta: una lectura SÍNCRONA que espera 2 s congela TODO el proceso (HTTP incluido).
+  const abrir = abrirOpt || (busyMs ? (p) => adapter.openReadOnly(p, { drivers: driversEnv(), busyTimeout: busyMs }) : abrirPorDefecto);
   if (!fs.existsSync(dbPath)) return sobre('UNAVAILABLE', null, 'DB_AUSENTE');
   let db;
   try {

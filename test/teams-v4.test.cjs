@@ -1152,3 +1152,15 @@ test('H-003 — reencolar lo que acabas de cancelar avisa que NO reactiva a Curs
   assert.match(r, /diagnostico/);
   assert.doesNotMatch(salida(root, 'tarea', 'S03-01: otra cosa totalmente distinta', '--criterio=a', '--sin-contexto'), /reencolando/);
 });
+
+test('H-004 — CONSTRUCTOR_DORMIDO no se dice si el constructor tiene señales de trabajo reciente (archivos tocados)', () => {
+  const root = proyecto(); arrancado(root);
+  salida(root, 'tarea', 'Algo largo', '--criterio=a', '--sin-contexto');
+  const estadoF = path.join(root, '.agentic', '_teams', 'estado.json');
+  const est = JSON.parse(fs.readFileSync(estadoF, 'utf8')); est.rondas = { ...(est.rondas || {}), builder: Date.now() - 15 * 60000 }; fs.writeFileSync(estadoF, JSON.stringify(est));
+  const dormido = () => T.accionable(T.calcular(root), 'director').razones.filter((x) => /CONSTRUCTOR_DORMIDO/.test(x));
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 60000);       // tocó un archivo hace 1 min: está construyendo, solo no hace rondas
+  try { assert.equal(dormido().length, 0, 'trabajando (archivos recientes): NO se le llama dormido'); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(Date.now() - 40 * 60000);  // nada desde hace 40 min y sin reportes: ahora sí
+  try { assert.match(dormido()[0], /lleva ~15 min sin hacer rondas/); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});
