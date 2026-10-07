@@ -71,7 +71,13 @@ function leerArranqueTarea() {
 
 const fs   = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync: spawnSyncDirecto } = require('child_process');
+
+/** Corre un script de Node SIN shell: con execSync() el timeout, en Windows, mata el cmd.exe y deja el node huérfano vivo (visto en medinet: varios grafo.cjs sync a la vez, peleando por la base). */
+function correrNode(script, args, ms) {
+  const r = spawnSyncDirecto(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'pipe', timeout: ms, windowsHide: true });
+  return !r.error && r.status === 0;
+}
 // parallel-guard se requiere perezoso (dentro del try del Paso 10) — post-cycle
 // es core y debe poder CARGAR aunque un módulo de nivel superior se rompa.
 
@@ -825,8 +831,7 @@ function syncGrafo() {
   const grafoCjs = path.join(GRAFO_DIR, 'grafo.cjs');
   if (!fs.existsSync(grafoCjs)) return false;
   try {
-    execSync(`node "${grafoCjs}" sync`, { cwd: ROOT, stdio: 'pipe', timeout: 30000 });
-    return true;
+    return correrNode(grafoCjs, ['sync'], 120000);
   } catch(e) { return false; }
 }
 
@@ -839,8 +844,7 @@ function indexarAst() {
   const astCjs = path.join(GRAFO_DIR, 'ast-indexer.cjs');
   if (!fs.existsSync(astCjs)) return false;
   try {
-    execSync(`node "${astCjs}" index`, { cwd: ROOT, stdio: 'pipe', timeout: 120000 });
-    return true;
+    return correrNode(astCjs, ['index'], 120000);
   } catch(e) { return false; }
 }
 

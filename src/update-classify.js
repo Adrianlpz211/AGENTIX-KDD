@@ -40,10 +40,16 @@ const ESENCIALES = [
 ];
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
-/** Mismo hash que scripts/gen-release-manifests.cjs: contenido con CRLF→LF, 24 hex. */
+/**
+ * Mismo hash que scripts/gen-release-manifests.cjs: contenido con CRLF→LF, sin espacios al final de línea y con las
+ * líneas en blanco seguidas colapsadas, 24 hex. Un editor, git (autocrlf) o un agente que solo reacomoda blancos NO
+ * convierten un archivo del framework en «personalizado» (medinet: CLAUDE.md, .cursorrules y dashboard.cjs quedaron sin
+ * actualizar por eso y la pestaña Decisiones nunca llegó).
+ */
 function hashNorm(buf) {
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-  return sha(Buffer.from(b.toString('latin1').replace(/\r\n/g, '\n'), 'latin1')).slice(0, 24);
+  const t = b.toString('latin1').replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '');
+  return sha(Buffer.from(t + '\n', 'latin1')).slice(0, 24);
 }
 const leer = (f) => fs.readFileSync(f);
 

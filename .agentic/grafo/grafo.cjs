@@ -287,6 +287,7 @@ function sincronizar() {
     );
   } catch { /* ast_symbols puede no existir si nunca se corrió ast-indexer.cjs */ }
 
+  enTransaccion(db, () => {
   for (const { file, tipo } of archivos) {
     const fp = path.join(MEMORIA_PATH, file);
     if (!fs.existsSync(fp)) continue;
@@ -330,6 +331,7 @@ function sincronizar() {
       }
     }
   }
+  });
   if (db.type === 'sqljs' && db.save) db.save();
   detectarRelaciones(db);
   // Gap CoALA: consolidación episódica automática
@@ -414,8 +416,19 @@ Razón: ${ep.razon_resultado || 'ver episodio original'}`;
 }
 
 // ─── RELACIONES ────────────────────────────────────────────────────────────────
+/**
+ * Ejecuta `fn` en UNA transacción si el driver las ofrece. Sin ella cada INSERT es su propio commit con fsync:
+ * detectarRelaciones hace hasta ~4·n² escrituras (n = nodos) y, con 169 nodos en medinet, el sync pasaba de 8 s a más de 5 minutos
+ * (y el post-cycle lo daba por fallado a los 30 s, dejando el proceso huérfano peleando por la base con el siguiente).
+ */
+function enTransaccion(db, fn) {
+  if (db && db.capabilities && db.capabilities.transactions && typeof db.transaction === 'function') return db.transaction(fn, { immediate: true })();
+  return fn();
+}
+
 function detectarRelaciones(db) {
   const nodos = db.all('SELECT * FROM nodos');
+  enTransaccion(db, () => {
   for (const n of nodos) for (const o of nodos) {
     if (n.id === o.id) continue;
     if (n.tipo==='error'  && o.tipo==='patron'   && (n.area===o.area||o.area==='global'))
@@ -427,6 +440,7 @@ function detectarRelaciones(db) {
     if (n.confianza==='ALTA' && o.confianza==='ALTA' && n.area===o.area && n.id<o.id)
       try { db.run('INSERT OR IGNORE INTO relaciones (desde_id,tipo,hacia_id,peso) VALUES (?,?,?,?)', n.id,'aplica_a',o.id,1.5); } catch(e) {}
   }
+  });
   if (db.type === 'sqljs' && db.save) db.save();
 }
 
@@ -2058,6 +2072,7 @@ function syncCompleto({ via = 'motor' } = {}) {
 
 module.exports.sincronizar = function () { return syncCompleto({ via: 'motor' }).result; };
 module.exports.syncCompleto = syncCompleto;
+module.exports.detectarRelaciones = detectarRelaciones; // para pruebas: su coste no puede crecer con un commit por INSERT
 module.exports.pasosSync = pasosSync;
 
 /** Migración explícita con respaldo y transacción; nunca ejecutada al importar. */

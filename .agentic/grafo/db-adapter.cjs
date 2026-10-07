@@ -36,7 +36,9 @@ function abrirNativo(dbPath, readOnly, busyTimeout, permitidos) {
     const db = new BS3(dbPath, { readonly: readOnly, fileMustExist: readOnly });
     if (!readOnly) {
       db.pragma('busy_timeout = ' + busyTimeout);
-      db.pragma('journal_mode = DELETE');
+      // NO se cambia el journal_mode al abrir: la base vive en WAL (post-cycle y lock-manager la dejan así) y pasar a DELETE
+      // exige un bloqueo exclusivo, que falla con «database is locked» —sin esperar el busy_timeout— en cuanto otro proceso
+      // (vigilante, MCP, tablero) la tiene abierta. Caso real: medinet, con better-sqlite3 instalado, no registró un solo ciclo en una semana.
       db.pragma('synchronous = FULL');
     }
     return { db, type: 'better-sqlite3', save: null };

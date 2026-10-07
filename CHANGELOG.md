@@ -1,5 +1,14 @@
 # Changelog — Agentic KDD
 
+## [3.24.1] — 2026-10-07
+
+**Reparaciones del caso real de medinet: TEAMS aceptó 16 tareas y Agentix registró 0 ciclos en una semana; tras `akdd update` no aparecía la pestaña Decisiones.**
+- **`database is locked` (el registro nunca se completaba):** con `better-sqlite3` instalado en el proyecto, `db-adapter.cjs` forzaba `journal_mode = DELETE` en cada apertura; pasar de WAL a DELETE exige un bloqueo exclusivo y falla al instante en cuanto otro proceso (vigilante, MCP, tablero) tiene la base abierta. Reproducido en una copia de la base real. Ya no se toca el modo. (Este repo no lo veía porque no trae `better-sqlite3`: usa `node:sqlite`.)
+- **`sync` que no terminaba:** `detectarRelaciones` hacía hasta ~4·n² `INSERT` sueltos, cada uno con su commit y fsync (170 nodos → más de 5 min en medinet, 8 s en una copia). Ahora corre en UNA transacción (y el bucle principal de `sincronizar` también): 5 s en medinet real. Además `post-cycle` lanzaba `sync` y el índice AST con `execSync(`node …`)`: en Windows el timeout mata el `cmd.exe` y deja el `node` huérfano vivo; se acumulaban peleando por la base. Ahora se lanzan sin shell, con su timeout real (120 s).
+- **`akdd update` dejaba sin actualizar archivos intactos:** `CLAUDE.md`, `.cursorrules` y `dashboard.cjs` se clasificaban como «personalizados» por tres motivos: el manifiesto de versiones publicadas llegaba solo a 3.20.0 (ahora hasta 3.24.0), el hash distinguía CRLF/espacios/líneas en blanco de más (git `autocrlf=true` en Windows, un editor) y el `owned.json` quedaba desfasado. El hash ahora normaliza finales de línea, blancos finales y líneas en blanco seguidas; una edición real sigue siendo personalizada. `scripts/gen-release-manifests.cjs` ya no se ejecuta al importarlo (una prueba lo regeneraba y pisaba el manifiesto) y lleva todas las versiones publicadas por defecto.
+- **El mod no llegaba al proyecto:** `.agentic/mods` no estaba entre los archivos que entrega el update, así que `akdd mod on` no tenía fuente. Añadido.
+- Pruebas: `test/reparaciones-medinet.test.cjs` (7; una más se omite si no hay `better-sqlite3`), con mutantes comprobados sobre los tres arreglos.
+
 ## [3.24.0] — 2026-10-07
 
 **Tablero de decisiones del dueño (pestaña 🗳️ Decisiones) y el mod «agentix-live» de Claude Code.**
