@@ -339,7 +339,10 @@ function procesar(host, evento, entrada, root) {
     const prompt = entrada.prompt || entrada.user_prompt || '';
     const ws = origenWhatsapp(root, prompt, host);
     if (ws) return salida(host, evento, null, ws);
-    return salida(host, evento, null, host === 'claude' ? enriquecer(root, prompt).contexto : null);
+    // Decisiones del dueño respondidas en el tablero y aún sin ejecutar (o pendientes): llegan al modelo en CADA turno, sin pegar nada.
+    let dec = null; if (host === 'claude') { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } }
+    const enr = host === 'claude' ? enriquecer(root, prompt).contexto : null;
+    return salida(host, evento, null, [enr, dec].filter(Boolean).join('\n\n') || null);
   }
   return null;
 }

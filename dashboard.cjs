@@ -1493,6 +1493,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="mode-tab" onclick="setMode('memoria',this)" title="Memoria con procedencia: actividad, observaciones, conocimiento y evidencia">🧬 Memoria</div>
   <div class="mode-tab" onclick="setMode('contexto',this)" title="Contexto recuperable, esfuerzo y métricas de payload">📦 Contexto y esfuerzo</div>
   <div class="mode-tab" onclick="setMode('teams',this)" title="La oficina de la agencia en 3D: quién trabaja, en vivo (TEAMS completo o individual, o un solo modelo con aa:)">🏢 Oficina</div>
+  <div class="mode-tab" onclick="setMode('decisiones',this)" title="Decisiones del dueño: lo que los modelos te preguntan, lo que respondiste y lo que ya se ejecutó">🗳️ Decisiones</div>
   <div class="mode-tab" onclick="setMode('actualizacion',this)" title="Estado de la última actualización y de la memoria">🔄 Actualización</div>
 </div>
 
@@ -2325,6 +2326,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <div id="mode-memoria" class="mode-embed"><iframe data-src="/memoria?embed=1" title="Memoria"></iframe></div>
 <div id="mode-contexto" class="mode-embed"><iframe data-src="/contexto?embed=1" title="Contexto y esfuerzo"></iframe></div>
 <div id="mode-teams" class="mode-embed"><iframe data-src="/oficina?embed=1" title="Oficina"></iframe></div>
+<div id="mode-decisiones" class="mode-embed"><iframe data-src="/decisiones?embed=1" title="Decisiones"></iframe></div>
 <div id="mode-actualizacion" class="mode-embed"><iframe data-src="/actualizacion?embed=1" title="Actualización"></iframe></div>
 
 <div id="mode-tiempos">
@@ -3017,7 +3019,7 @@ function setMode(mode,el){
   if(mt)mt.style.display=mode==='tiempos'?'flex':'none';
   // Memoria, Contexto y Actualización: la página se muestra DENTRO del layout (como Línea de Tiempo o Preservation Intel).
   // Se carga al abrir la pestaña y se refresca si pasaron más de 30 s desde la última carga.
-  ['memoria','contexto','teams','actualizacion'].forEach(function(m){
+  ['memoria','contexto','teams','decisiones','actualizacion'].forEach(function(m){
     var p=document.getElementById('mode-'+m); if(!p) return;
     p.style.display=mode===m?'flex':'none';
     if(mode!==m) return;
@@ -5271,7 +5273,7 @@ const server = require('http').createServer((req, res) => {
   const fin = (status, texto, extra) => { res.writeHead(status, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, base, extra)); res.end(req.method === 'HEAD' ? undefined : texto); };
   if (!hostPermitido(req.headers.host)) return fin(403, 'Host no permitido');
   // Única escritura de los paneles nuevos: reintentar un job muerto de la cola (valida origen, cabecera y límites).
-  if (req.method === 'POST' && String(req.url || '').split('?')[0] === '/api/v1/memory-retry') return API.manejarAccion(req, res);
+  if (req.method === 'POST' && ['/api/v1/memory-retry', '/api/v1/decision-answer'].includes(String(req.url || '').split('?')[0])) return API.manejarAccion(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') return fin(405, 'Método no permitido', { Allow: 'GET, HEAD' });
   let url;
   try { url = new URL(String(req.url || '/'), 'http://127.0.0.1'); } catch { return fin(400, 'URL inválida'); }
@@ -5293,6 +5295,12 @@ const server = require('http').createServer((req, res) => {
     // Pestaña TEAMS (solo lectura): semáforo, vigilantes, cola y registro. No toca el tablero de grafos.
     res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
     res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('teams-pagina.cjs').HTML, url));
+    return;
+  }
+  if (ruta === '/decisiones') {
+    // Tablero de decisiones del dueño: lee /api/v1/decisiones y responde con POST /api/v1/decision-answer (origen exacto + cabecera de acción).
+    res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP_EMBEBIBLE }, base));
+    res.end(req.method === 'HEAD' ? undefined : paraEmbeber(cargarGrafo('decisiones-pagina.cjs').HTML, url));
     return;
   }
   if (ruta === '/actualizacion') {

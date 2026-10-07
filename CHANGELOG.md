@@ -1,5 +1,14 @@
 # Changelog — Agentic KDD
 
+## [3.24.0] — 2026-10-07
+
+**Tablero de decisiones del dueño (pestaña 🗳️ Decisiones) y el mod «agentix-live» de Claude Code.**
+- **Decisiones del dueño, con ciclo completo:** una pestaña nueva del dashboard (`/decisiones`) con tres columnas — Pendientes, Respondidas, Ejecutadas — sobre la misma sección «Decisiones» del canal TEAMS (una sola fuente de verdad, sin otro archivo de datos; funciona igual en Claude Code y en Cursor). El dueño responde desde el tablero (opciones, «Otra: la escribo yo» con texto obligatorio, «Aceptar recomendación»); la respuesta se escribe en el canal (`Estado: DECIDIDA`, `Respondida por: dashboard`) y el modelo la ejecuta y la cierra con `decisiones.cjs aplicada D-001 "qué hice"` (`Estado: EJECUTADA`; no cierra sin evidencia). Comandos: `akdd decisiones [listar|responder|aplicada]`.
+- **Le llega al modelo sin pegar nada:** el vigilante del Director ya despierta con la respuesta; el hook `UserPromptSubmit` (`host-guard.cjs`) inyecta «el dueño respondió… ejecútalo y ciérralo» en cada turno de Claude Code; Cursor la lee en su siguiente ronda; respaldo: «Copiar para Claude». El tablero indica si el Director está atento.
+- **Seguridad:** el POST `/api/v1/decision-answer` exige origen exacto, cabecera de acción, JSON acotado y valida id/opción; lo que escribe la persona se aplana a una línea (no puede fabricar bloques ni campos del canal) y es dato, no orden. Una ejecutada deja de despertar al Director. `teams.cjs decision` acepta `--impacto`.
+- **Mod `agentix-live` (Claude Code):** panel en vivo con el consumo de la sesión (tokens, USD, contexto, herramientas, tiempo) y el estado de Agentix; reporta el uso real del host a `costo-uso.cjs`. `akdd mod on|off|status`; `akdd update` solo refresca la copia si el dueño la tenía encendida. Pendiente de comprobar: que Claude Code la cargue sola al abrir una sesión nueva.
+- Pruebas: `test/decisiones.test.cjs` (10) y `test/mods-manager.test.cjs` (7).
+
 ## [3.23.9] — 2026-10-05
 
 **TEAMS ya no dice «registrada» lo que no quedó en la memoria, la lección de cada tarea puede entrar al grafo KDD, y el juez tipado queda midiendo en sombra.**

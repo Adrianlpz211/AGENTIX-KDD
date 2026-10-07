@@ -152,6 +152,8 @@ const HELP = `
     akdd restore <list|create --label=L [--files=a,b]|show|preview|apply <id> --expected-current-hash=H>
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
+    akdd decisiones [listar|responder|aplicada]   Owner decisions board (dashboard tab 🗳️ Decisiones): list, answer, close
+    akdd mod <on|off|status|list> [--mod=name]   Claude Code mods shipped with Agentix (live panel); installed into .claude/skills/
     akdd teams <activar|estado|ronda|revisar|tarea|corregir|resolver|reportar|aceptar|cerrar|…>   Claude Code directs, Cursor builds (one MD channel)
     akdd ws <activar|estado|desactivar>   Optional WhatsApp notices (needs a real browser session)
     akdd simple            Simplicity gate: duplicated code, deps with native equivalent
@@ -239,6 +241,12 @@ switch (command) {
     else uso('akdd host-hooks <install|uninstall|status> [--host=cursor|claude|all]');
     break;
   }
+  case 'mod': case 'mods': {
+    if (['on', 'off', 'status', 'list', 'refresh'].includes(arg1 || 'status')) runModule('mods-manager.cjs', arg1 || 'status', ...args.slice(2));
+    else uso('akdd mod <on|off|status|list> [--mod=name]');
+    break;
+  }
+  case 'decisiones': case 'decision': runModule('decisiones.cjs', ...args.slice(1)); break;
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
   case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
   case 'ntfy': runModule('ntfy-bridge.cjs', ...args.slice(1)); break;

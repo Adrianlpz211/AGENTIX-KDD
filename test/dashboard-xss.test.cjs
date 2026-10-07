@@ -84,7 +84,7 @@ test('D25: las cargas de la memoria no se ejecutan ni rompen el DOM en ninguna v
     assert.deepStrictEqual(r.ejecutadas, [], 'cargas ejecutadas (paso → payload)');
     assert.deepStrictEqual(r.handlersInyectados, []);
     assert.strictEqual(r.javascriptUrls, 0);
-    assert.strictEqual(r.pestañas, 8, '4 pestañas de grafos y documentación + Memoria, Contexto, TEAMS y Actualización');
+    assert.strictEqual(r.pestañas, 9, '4 pestañas de grafos y documentación + Memoria, Contexto, TEAMS, Decisiones y Actualización');
     assert.strictEqual(r.grafos, 3);
     assert.deepStrictEqual(errores, [], 'errores de página');
   } finally {

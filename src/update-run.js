@@ -492,6 +492,16 @@ async function ejecutar(ctx) {
     }
   } catch (e) { R.hooks = { status: 'FALLO', message: e.message }; R.warnings.push('hooks de Git no instalados (' + e.message + '): se ve con akdd health'); }
 
+  // Mods de Claude Code: se refresca SOLO lo que el dueño ya tenía encendido (akdd mod on).
+  R.mods = { status: 'OMITIDO' };
+  try {
+    const modsJs = path.join(projectPath, '.agentic', 'grafo', 'mods-manager.cjs');
+    if (fs.existsSync(modsJs)) {
+      nodo(modsJs, ['refresh', '--quiet'], { cwd: projectPath, timeout: 15000 });
+      R.mods = { status: 'OK' };
+    }
+  } catch (e) { R.mods = { status: 'FALLO', message: e.message }; R.warnings.push('mods de Claude Code no refrescados (' + e.message + '): corre akdd mod on'); }
+
   const pasos = [];
   if (opts.deps) {
     try { herramienta('npm', ['rebuild', 'better-sqlite3'], { cwd: projectPath }); pasos.push('better-sqlite3 reconstruido'); }

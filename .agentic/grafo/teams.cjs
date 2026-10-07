@@ -196,7 +196,7 @@ function calcular(root, opts = {}) {
     c, root, canal: c.estado, mecanica: c.mecanica, ahora, mtime,
     rondas: (() => { try { return leerEstado(root).rondas || {}; } catch { return {}; } })(), modo: (() => { try { return leerEstado(root).modo || null; } catch { return null; } })(),
     correcciones, corrPend, tareas, tareasPend, hechasSinAceptar, devueltas, omisiones, decisiones,
-    solicitudes: decisiones.filter((d) => d.solicitud && d.abierta), decisionesDueno: decisiones.filter((d) => d.dueno && d.abierta), decididasDueno: decisiones.filter((d) => d.dueno && !d.abierta),
+    solicitudes: decisiones.filter((d) => d.solicitud && d.abierta), decisionesDueno: decisiones.filter((d) => d.dueno && d.abierta), decididasDueno: decisiones.filter((d) => d.dueno && !d.abierta && !/Estado:\s*EJECUTADA/i.test(d.texto)),
     aceptadas: aceptadasN, total: vivas, avance: vivas ? Math.round((aceptadasN / vivas) * 100) : null,
     constructorSinTrabajo, listo, ocioso,
   };
@@ -231,7 +231,7 @@ function accionable(e, rol) {
     // Mensajes que el dueño dejó desde el teléfono (puente ntfy): son una indicación suya y el vigilante del Director se despierta con ellos.
     { const nb = puenteTelefono(); if (nb) for (const m of nb.sinLeer(e.root).slice(0, 5)) { razones.push(`MENSAJE DEL DUEÑO desde el teléfono [${m.id}]: «${corto(m.texto, 300)}» — es una indicación del dueño (por ntfy): léela y actúa; lo destructivo o sensible se confirma en el chat. Respóndele con \`node .agentic/grafo/ntfy-bridge.cjs enviar "…"\` y márcalo leído: \`ntfy-bridge.cjs buzon --leido=${m.id}\``); claves.push('M:' + m.id); } }
     for (const d of e.solicitudes) { const evid = /Evidencia:\s*([^\n]+)/.exec(d.texto); razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)}${evid ? ' [' + corto(evid[1], 260) + ']' : ''} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
-    for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)}`); claves.push('D:' + d.id); }
+    for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)} — léela con: node .agentic/grafo/decisiones.cjs listar --respondidas · ejecútala y ciérrala con: node .agentic/grafo/decisiones.cjs aplicada ${d.id} "qué hiciste"`); claves.push('D:' + d.id); }
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
     // (el caso «los dos esperando al otro» que dejó glowly parado).
     const quieto = Math.max(0, e.ahora - e.mtime);
@@ -935,7 +935,7 @@ function ejecutarCmd(argv, root) {
 
   if (cmd === 'decision') {
     if (!necesitaCanal()) return salida(1);
-    const pregunta = arg.join(' ').trim(); if (!pregunta) { say('Uso: teams.cjs decision "pregunta" --tipo=director|dueno [--elegida=…] [--porque=…] [--fuentes=u1,u2] [--opciones="a|b"] [--recomendacion=…]'); return salida(2); }
+    const pregunta = arg.join(' ').trim(); if (!pregunta) { say('Uso: teams.cjs decision "pregunta" --tipo=director|dueno [--elegida=…] [--porque=…] [--fuentes=u1,u2] [--opciones="a|b"] [--recomendacion=…] [--impacto=…]'); return salida(2); }
     const dueno = /^due/i.test(String(opt.tipo || ''));
     let id = '';
     canal.mutar(root, (lineas, c) => {
@@ -944,6 +944,7 @@ function ejecutarCmd(argv, root) {
       const b = [`### [${id}] ${pregunta}`, `Tipo: ${dueno ? 'DUEÑO' : 'DIRECTOR'} · Estado: ${decidida ? 'DECIDIDA' : 'ABIERTA'} · ${canal.sello()}`];
       if (opt.opciones && opt.opciones !== true) b.push('Opciones: ' + opt.opciones);
       if (opt.recomendacion && opt.recomendacion !== true) b.push('Recomendación: ' + opt.recomendacion);
+      if (opt.impacto && opt.impacto !== true) b.push('Impacto: ' + opt.impacto);
       if (decidida) b.push('Elegida: ' + opt.elegida);
       if (opt.porque && opt.porque !== true) b.push('Porque: ' + opt.porque);
       if (opt.fuentes && opt.fuentes !== true) b.push('Fuentes: ' + lista(opt.fuentes).join(', '));
@@ -1133,7 +1134,7 @@ function detalleDecision(d) {
   const cab = lineas[0] || '';
   const campo = (re) => { const l = lineas.find((x) => re.test(x)); return l ? corto(l.replace(re, '').trim(), 400) : null; };
   const sello = /(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})/.exec(lineas[1] || '');
-  const cuerpo = lineas.slice(1).filter((l) => !/^(Tipo|Opciones|Recomendaci[óo]n|Elegida|Porque|Fuentes):/i.test(l) && !/^Decisi[óo]n del due/i.test(l));
+  const cuerpo = lineas.slice(1).filter((l) => !/^(Tipo|Opciones|Recomendaci[óo]n|Impacto|Elegida|Porque|Fuentes|Respondida por):/i.test(l) && !/^Decisi[óo]n del due/i.test(l));
   return { id: d.id, titulo: corto(d.titulo || cab.replace(/^###\s*\[[^\]]+\]\s*/, ''), 160), detalle: corto(cuerpo.join(' '), 600), opciones: campo(/^Opciones:\s*/i), recomendacion: campo(/^Recomendaci[óo]n:\s*/i), desde: sello ? sello[1] : null };
 }
 

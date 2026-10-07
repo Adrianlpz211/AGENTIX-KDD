@@ -1,0 +1,6 @@
+{
+  "name": "agentix-live",
+  "version": "0.1.0",
+  "description": "Panel en vivo: consumo de la sesión (tokens, USD, contexto, herramientas, tiempo) y estado de Agentix (ciclo, tarea, gate, guardia, TEAMS). Reporta el uso real del host a costo-uso.cjs.",
+  "types": "./types/index.d.ts"
+}

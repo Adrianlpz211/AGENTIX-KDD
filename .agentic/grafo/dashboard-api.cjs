@@ -238,6 +238,11 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       try { return { status: 'OK', data: require('./oficina-datos.cjs').leer(projectPath) }; }
       catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
+    // Tablero de decisiones del dueño (pendientes / respondidas / ejecutadas). Lee el canal TEAMS; sin canal → lista vacía.
+    decisiones: { params: ['project_id'], fn: () => {
+      try { const l = require('./decisiones.cjs').leer(projectPath); return { status: l.canal ? 'OK' : 'EMPTY', data: l, reason_code: l.canal ? null : 'SIN_CANAL' }; }
+      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
     // 3.20.1 — salud funcional, panel Memoria y panel Contexto y esfuerzo. Solo lectura; el proyecto lo fija el servidor.
     'memory-health': { params: ['project_id'], fn: () => {
       try {
@@ -453,16 +458,26 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     const responder = (http, extra) => sobre(res, req, Object.assign({ status: 'UNAVAILABLE', data: null }, extra), http);
     const origen = req.headers.origin;
     if (!origen || origen !== 'http://' + req.headers.host) return responder(403, { errors: [{ code: 'ORIGEN_NO_PERMITIDO' }], reason_code: 'ORIGEN_NO_PERMITIDO' });
-    if (req.headers['x-akdd-action'] !== 'memory-retry') return responder(403, { errors: [{ code: 'ACCION_NO_AUTORIZADA' }], reason_code: 'ACCION_NO_AUTORIZADA' });
+    const accion = req.headers['x-akdd-action'];
+    if (accion !== 'memory-retry' && accion !== 'decision-answer') return responder(403, { errors: [{ code: 'ACCION_NO_AUTORIZADA' }], reason_code: 'ACCION_NO_AUTORIZADA' });
+    const tope = accion === 'decision-answer' ? 8192 : 1024;
     if (!/^application\/json(\s*;|$)/i.test(String(req.headers['content-type'] || ''))) return responder(415, { errors: [{ code: 'CONTENT_TYPE_INVALIDO' }], reason_code: 'CONTENT_TYPE_INVALIDO' });
     let cuerpo = ''; let excedido = false;
     req.setEncoding('utf8');
-    req.on('data', (d) => { cuerpo += d; if (cuerpo.length > 1024) { excedido = true; req.destroy(); } });
+    req.on('data', (d) => { cuerpo += d; if (cuerpo.length > tope) { excedido = true; req.destroy(); } });
     req.on('error', () => {});
     req.on('end', () => {
       if (excedido) return;
       let j = null;
       try { j = JSON.parse(cuerpo); } catch { return responder(400, { errors: [{ code: 'JSON_INVALIDO' }], reason_code: 'JSON_INVALIDO' }); }
+      if (accion === 'decision-answer') {
+        if (!j || typeof j !== 'object' || typeof j.id !== 'string') return responder(400, { errors: [{ code: 'ID_REQUERIDO' }], reason_code: 'ID_REQUERIDO' });
+        let r;
+        try { r = require('./decisiones.cjs').responder(projectPath, j.id, { opcion: j.opcion, texto: j.texto, porque: j.porque, via: 'dashboard' }); } catch (e) { return responder(500, { reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }); }
+        if (r.ok) return responder(200, { status: 'OK', data: { id: r.id, estado: r.estado } });
+        const http = r.code === 'NO_EXISTE' ? 404 : (r.code === 'YA_RESPONDIDA' ? 409 : (r.code === 'SIN_CANAL' ? 409 : 400));
+        return responder(http, { errors: [{ code: r.code, message: r.message || null }], reason_code: r.code });
+      }
       if (!j || typeof j !== 'object' || typeof j.job_id !== 'string') return responder(400, { errors: [{ code: 'JOB_ID_REQUERIDO' }], reason_code: 'JOB_ID_REQUERIDO' });
       let r;
       try { r = panelMem().reintentar(projectPath, j.job_id, { source: 'dashboard' }); } catch (e) { return responder(500, { reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }); }

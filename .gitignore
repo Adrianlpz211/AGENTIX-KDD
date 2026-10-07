@@ -108,3 +108,7 @@ _output/*-baseline/
 # 3.20.1: originales recuperables (pueden contener salidas de herramientas del cliente), caché y cola de memoria
 .agentic/_evidence/
 .agentic/memoria.db.bak-*
+
+# Copia instalada del mod de Claude Code (la fuente vive en .agentic/mods/) — la pone `akdd mod on`
+.claude/skills/agentix-live/
+.agentic/_mods-host.json
