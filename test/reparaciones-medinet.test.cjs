@@ -127,12 +127,12 @@ test('update: el manifiesto de versiones publicadas llega hasta la última publi
   for (const muestra of ['a\r\nb\r\n', 'a\n\n\n\nb  \n', 'x']) assert.equal(hashNorm(Buffer.from(muestra)), hashNormalizado(Buffer.from(muestra)), 'el clasificador y el generador deben hashear igual');
 });
 
-// ───────────────────────────── 4. el mod viaja con el update ─────────────────────────────
+// ───────────────────────────── 4. el update ya no entrega mods ─────────────
 
-test('update: .agentic/mods es un archivo administrado (el update entrega el mod agentix-live)', () => {
+test('update: .agentic/mods ya no existe como archivo administrado (el mod de Claude Code se eliminó)', () => {
   const manifest = require(path.join(RAIZ, 'src', 'managed-manifest.js'));
-  assert.equal(manifest.esManaged('.agentic/mods/agentix-live/SKILL.md'), true);
-  assert.equal(manifest.esManaged('.agentic/mods/agentix-live/hooks/register.tsx'), true);
-  const lista = manifest.archivos(RAIZ).filter((r) => r.startsWith('.agentic/mods/'));
-  assert.ok(lista.length >= 5, 'el paquete debe listar los archivos del mod: ' + lista.length);
+  assert.equal(manifest.esManaged('.agentic/mods/agentix-live/SKILL.md'), false);
+  assert.equal(manifest.archivos(RAIZ).filter((r) => r.startsWith('.agentic/mods/')).length, 0);
+  assert.equal(fs.existsSync(path.join(RAIZ, '.agentic', 'mods')), false);
+  assert.equal(fs.existsSync(path.join(RAIZ, '.agentic', 'grafo', 'mods-manager.cjs')), false);
 });

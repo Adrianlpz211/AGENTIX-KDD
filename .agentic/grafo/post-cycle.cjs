@@ -302,6 +302,12 @@ function cerrarCicloConGates(db, results) {
   const salida = { estado: estadoFinal(results), stops: null, cierre: null };
   try {
     const gt = require(path.join(GRAFO_DIR, 'gate-telemetry.cjs'));
+    // Un ciclo bloqueado por una compuerta es un STOP aunque la compuerta no lo haya escrito con el id del ciclo (idempotente por event_id).
+    if (results.ciclo) {
+      for (const s of require(path.join(GRAFO_DIR, 'estado-ciclo.cjs')).stopsDeCierre(results)) {
+        gt.recordGateEvent(db, { gate: s.gate, verdict: 'STOP', cycle_id: results.ciclo, event_id: 'cierre-stop-' + results.ciclo + '-' + s.gate, incident_id: 'cierre-' + results.ciclo + '-' + s.gate, detalle: { motivo: s.motivo, origen: 'cierre-del-ciclo' } });
+      }
+    }
     salida.stops = gt.contarStopsDelCiclo(db, results.ciclo);
   } catch (e) { salida.stops = { status: 'ERROR', incidentes: null, error: e.message }; }
   if (!results.ciclo) return Object.assign(salida, { cierre: { status: 'ERROR', reason_code: 'SIN_CICLO' } });

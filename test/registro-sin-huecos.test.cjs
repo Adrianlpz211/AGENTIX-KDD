@@ -193,3 +193,18 @@ test('métricas: el uso de memoria cuenta lo declarado y lo CONSULTADO; la «rel
   let m; try { m = metrics.computeCycleMetrics(rd); } finally { rd.close(); }
   assert.equal(m.memoria_consultada, 3, 'solo cuenta lo que el enricher mostró; las 12 derivadas no suman');
 });
+
+test('cierre: un ciclo BLOQUEADO por el TDD deja su STOP en la libreta y stops_count lo cuenta (no 0)', () => {
+  const { stopsDeCierre, estadoFinal } = require('../.agentic/grafo/estado-ciclo.cjs');
+  const gt = require('../.agentic/grafo/gate-telemetry.cjs');
+  const { DatabaseSync } = require('node:sqlite');
+  const r = { ciclo: 'commit-abc', contratos: { status: 'BLOCKED', reason_code: 'SAME_FAILURE_AFTER_REPAIR' } };
+  assert.strictEqual(estadoFinal(r), 'BLOQUEADO');
+  const stops = stopsDeCierre(r);
+  assert.deepStrictEqual(stops.map((s) => s.gate), ['tdd']);
+  assert.deepStrictEqual(stopsDeCierre({ contratos: { status: 'PASS' } }), [], 'sin bloqueo no inventa STOP');
+  const db = new DatabaseSync(':memory:');
+  gt.ensureTelemetrySchema(db);
+  for (let i = 0; i < 2; i++) for (const s of stops) gt.recordGateEvent(db, { gate: s.gate, verdict: 'STOP', cycle_id: 'commit-abc', event_id: 'cierre-stop-commit-abc-' + s.gate, incident_id: 'cierre-commit-abc-' + s.gate, detalle: { motivo: s.motivo } });
+  assert.strictEqual(gt.contarStopsDelCiclo(db, 'commit-abc').incidentes, 1, 'idempotente: dos cierres, un solo STOP');
+});

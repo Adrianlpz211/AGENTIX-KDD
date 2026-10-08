@@ -134,7 +134,20 @@ function tasaTests(ciclos) {
 const ICONO = { VERIFICADO: '✅', COMPLETADO_SIN_VEREDICTO: '✅', CON_PENDIENTES: '🟡', DETENIDO: '🛑', FALLIDO: '❌', CANCELADO: '⏹', EN_CURSO: '⏳', DESCONOCIDO: '❔' };
 const icono = (estado) => ICONO[clasificar(estado)];
 
+/**
+ * Los STOP que el cierre del ciclo DEBE dejar en la libreta aunque la compuerta no los haya escrito sola. Caso medinet: ciclos en estado
+ * BLOQUEADO (TDD en BLOCKED) con `stops_count` 0 porque el TDD gate frenaba sin dejar el evento con el id del ciclo. Un ciclo bloqueado
+ * por una compuerta ES un STOP: si no queda contado, el 0 de stops_count miente.
+ */
+function stopsDeCierre(r) {
+  const tdd = (r && r.contratos) || {};
+  const out = [];
+  if (tdd.status === 'BLOCKED') out.push({ gate: 'tdd', motivo: String(tdd.reason_code || tdd.reason || 'BLOCKED').slice(0, 120) });
+  return out;
+}
+
 module.exports = {
+  stopsDeCierre,
   estadoFinal, clasificar, esCierreIntegro, resumenCierre, incidentesStop, autonomia, tasaTests, stopsDelCiclo, stopsPorCiclo, icono,
   CLASES, CLASE_POR_ESTADO,
 };
