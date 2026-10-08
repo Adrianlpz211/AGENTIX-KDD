@@ -46,9 +46,14 @@ test('MCP: el servidor REAL pausa, deja el ack que el actualizador espera, recha
     const normal = await llamar('tools/call', { name: 'recall', arguments: { query: 'regla' } });
     assert.ok(normal.result, 'antes del update atiende');
 
+    // El servidor MCP se registra como escritor un instante DESPUÉS de responder; con la suite en paralelo ese instante se alarga. Se espera a que su
+    // registro EXISTA (no un tiempo fijo) y la ventana de confirmación es holgada: waitForWriters vuelve en cuanto el MCP confirma.
+    const dirEscritores = path.join(root, '.agentic', '_update', 'writers');
+    for (let i = 0; i < 300 && !(fs.existsSync(dirEscritores) && fs.readdirSync(dirEscritores).some((n) => n.includes('-mcp'))); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fs.existsSync(dirEscritores) && fs.readdirSync(dirEscritores).some((n) => n.includes('-mcp')), 'el MCP quedó registrado como escritor');
     const h = guard.acquire(root, { opId: 'op-mcp', timeoutMs: 100 });
     try {
-      const w = await guard.waitForWriters(root, 'op-mcp', 6000);
+      const w = await guard.waitForWriters(root, 'op-mcp', 30000);
       assert.equal(w.ok, true, JSON.stringify(w));
       assert.equal(w.acked.length, 1, 'el MCP confirmó la pausa');
       const pausado = await llamar('tools/call', { name: 'recall', arguments: { query: 'regla' } });
