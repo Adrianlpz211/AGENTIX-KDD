@@ -128,10 +128,11 @@ test('base CORRUPTA o ilegible: BLOCKED antes de escribir nada', async () => {
 
 test('base TOMADA por un proceso externo que no respeta el protocolo: BLOCKED (DB_OCUPADA) sin aplicar nada', async () => {
   const p = legacy.proyectoReal('3.20.0', 'ocupada');
-  const externo = spawn(process.execPath, ['-e', `const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(${JSON.stringify(p.dbPath)});d.exec('BEGIN IMMEDIATE');console.log('TOMADA');setTimeout(()=>{d.exec('ROLLBACK');process.exit(0)},15000)`], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, NODE_NO_WARNINGS: '1' } });
+  const externo = spawn(process.execPath, ['-e', `const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(${JSON.stringify(p.dbPath)});d.exec('BEGIN IMMEDIATE');console.log('TOMADA');setTimeout(()=>{d.exec('ROLLBACK');process.exit(0)},300000)`], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, NODE_NO_WARNINGS: '1' } });
   let s = ''; externo.stdout.on('data', (d) => { s += d; });
   try {
-    for (let i = 0; i < 80 && !s.includes('TOMADA'); i++) await new Promise((r) => setTimeout(r, 100));
+    // La base se retiene hasta que el test la suelta (kill en finally): un update lento por la carga de la suite en paralelo no la encuentra libre.
+    for (let i = 0; i < 300 && !s.includes('TOMADA'); i++) await new Promise((r) => setTimeout(r, 100));
     assert.ok(s.includes('TOMADA'));
     const antes = framework(p.root);
     const r = await correr(p.root, { busyMs: 300 });
@@ -165,7 +166,8 @@ test('escritores con conexión persistente: el que confirma la pausa deja pasar;
     const f=path.join(dir,process.pid+'-mudo.json');setInterval(()=>fs.writeFileSync(f,JSON.stringify({id:process.pid+'-mudo',name:'mcp-falso',pid:process.pid,host:require('os').hostname(),heartbeat_at:Date.now()})),100);console.log('LISTO')`], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, NODE_NO_WARNINGS: '1' } });
   let s = ''; mudo.stdout.on('data', (d) => { s += d; });
   try {
-    for (let i = 0; i < 60 && !s.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 300 && !s.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(s.includes('LISTO'), 'el escritor mudo de prueba no llegó a registrarse');
     await new Promise((r) => setTimeout(r, 500)); // deja que escriba su primer latido
     const antes = framework(p.root);
     const r = await correr(p.root, { writerAckMs: 700 });
@@ -181,8 +183,11 @@ test('escritores con conexión persistente: el que confirma la pausa deja pasar;
     let db=a.openWrite(${JSON.stringify(q.dbPath)});g.registerWriter(${JSON.stringify(q.root)},'servicio',{intervaloMs:100,onPause:()=>{db.close();db=null;console.log('PAUSADO')}});console.log('LISTO');setTimeout(()=>process.exit(0),60000)`], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, NODE_NO_WARNINGS: '1' } });
   let s2 = ''; servicio.stdout.on('data', (d) => { s2 += d; });
   try {
-    for (let i = 0; i < 60 && !s2.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
-    const r = await correr(q.root, { writerAckMs: 5000 });
+    // Bajo la carga de la suite en paralelo el hijo tarda en arrancar y registrarse: se espera a que esté LISTO y la ventana de confirmación es holgada
+    // (el update vuelve en cuanto el servicio confirma, así que una ventana grande no alarga la prueba).
+    for (let i = 0; i < 300 && !s2.includes('LISTO'); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(s2.includes('LISTO'), 'el servicio de prueba no llegó a registrarse');
+    const r = await correr(q.root, { writerAckMs: 30000 });
     assert.ok(r.ok, JSON.stringify([r.status, r.errors]));
     // La salida del hijo llega por una tubería asíncrona: puede tardar unos ms más que el propio update en verse.
     for (let i = 0; i < 30 && !s2.includes('PAUSADO'); i++) await new Promise((r) => setTimeout(r, 100));
