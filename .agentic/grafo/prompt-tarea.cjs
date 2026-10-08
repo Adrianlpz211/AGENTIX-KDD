@@ -38,6 +38,8 @@ function clasificarPrompt(prompt) {
   const txt = String(prompt == null ? '' : prompt).trim();
   if (EXPLICITO.test(txt)) return { esTarea: true, explicito: true, p: 0.99, razones: ['prefijo explícito aa:'] };
   if (!txt) return { esTarea: false, explicito: false, p: 0, razones: ['sin texto'] };
+  // Avisos automáticos del host (tareas en segundo plano, recordatorios): no los escribió la persona, nunca son una tarea.
+  if (/^<(task-notification|system-reminder|ci-monitor-event)/i.test(txt)) return { esTarea: false, explicito: false, p: 0, razones: ['aviso automático del host'] };
   if (txt.startsWith('/')) return { esTarea: false, explicito: false, p: 0, razones: ['comando de barra'] };
   if (COMANDO_AJENO.test(txt)) return { esTarea: false, explicito: false, p: 0, razones: ['otro prefijo de comando (audit:/teams:/ws:/akdd…)'] };
   if (ACUSE.test(txt)) return { esTarea: false, explicito: false, p: 0.05, razones: ['acuse de recibo'] };

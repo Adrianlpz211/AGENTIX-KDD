@@ -125,3 +125,9 @@ test('informe: commits exactos (con y sin ciclo), calidad por origen y mensajes 
   assert.match(txt, /3 de 4 commits tienen ciclo en la base → 75 %/);
   assert.match(txt, /Lo que este informe NO dice/);
 });
+
+test('un aviso automático del host (task-notification) nunca es una tarea', () => {
+  const { clasificarPrompt } = require('../.agentic/grafo/prompt-tarea.cjs');
+  const r = clasificarPrompt('<task-notification><summary>Background command "node scripts/run-tests.cjs" failed</summary></task-notification>');
+  assert.strictEqual(r.esTarea, false);
+});
