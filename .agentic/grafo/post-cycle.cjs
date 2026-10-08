@@ -45,9 +45,13 @@ function leerArranqueTarea() {
       const yo = (process.env.AKDD_ACTOR || '').trim();
       const abiertos = Object.entries(m.actores).filter(([, v]) => v && v.abierta);
       const mio = yo && m.actores[yo] && m.actores[yo].abierta ? m.actores[yo] : null;
+      // Con actor declarado (p. ej. «teams-v4» en el registro de TEAMS) y SIN medición propia: no hay dato. Antes caía a «la única
+      // medición abierta» y le pegaba a CADA ciclo el inicio y la duración de la tarea de OTRO actor: en medinet, 40 ciclos de
+      // un día con idéntico inicio (10:25) e idéntica duración (97,8 s). Un número ajeno es peor que ningún número.
+      if (yo) t = mio ? mio.abierta : null;
       // Sin actor declarado solo se puede atribuir si hay UNA sola medición abierta:
       // con varias, adivinar sería atribuir el tiempo de otro.
-      t = mio ? mio.abierta : (abiertos.length === 1 ? abiertos[0][1].abierta : null);
+      else t = abiertos.length === 1 ? abiertos[0][1].abierta : null;
     } else {
       t = m && m.abierta;
     }
@@ -107,6 +111,17 @@ const taskType   = opts.type || 'feature';
 const modules    = (opts.modules || opts.m || area).split(',').map(s => s.trim()).filter(Boolean);
 const hookMode   = opts.hook === true || opts.hook === 'true';
 const silent     = opts.silent === true || opts.silent === 'true' || hookMode;
+
+/* Pasos de registro que fallaron. Antes cada uno tenía un `catch {}` vacío: el comando terminaba «bien» sin haber escrito
+   nada (medinet: module_registry, spec_registry y la guarda anti-duplicados fallaban con «db.run is not a function» durante
+   semanas). Ahora el fallo se cuenta y se escribe en stderr SIEMPRE (también en --silent / hook: la cola del post-commit
+   anexa stderr a post-cycle.log) y queda en results.fallos. Un fallo sigue sin frenar el ciclo: se ve, no se calla. */
+const fallosRegistro = [];
+function anotarFallo(paso, e) {
+  const msg = String(e && e.message || e).slice(0, 200);
+  fallosRegistro.push(paso + ': ' + msg);
+  try { console.error('[post-cycle] FALLO en ' + paso + ': ' + msg); } catch { /* stderr cerrado */ }
+}
 /* Desde la cola del post-commit llega el SHA exacto: se analiza ESE commit,
    no el HEAD de cuando le toque correr. */
 const COMMIT_REF = /^[0-9a-f]{7,64}$/i.test(String(opts.commit || '')) ? String(opts.commit) : 'HEAD';
@@ -177,26 +192,36 @@ function openDB() {
     const projNodeModules = path.join(ROOT, 'node_modules');
     if (!module.paths.includes(projNodeModules)) module.paths.unshift(projNodeModules);
     const BS3 = require('better-sqlite3');
-    const db  = BS3(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('busy_timeout = 5000');
+    const db  = new BS3(DB_PATH);
+    // La espera ANTES que cualquier otra cosa: sin ella, un escritor concurrente da «database is locked» al instante.
+    try { db.pragma('busy_timeout = 5000'); } catch { /* sin espera: se sigue */ }
+    // El modo WAL solo se pide si la base aún no lo tiene: cambiar el journal_mode exige un bloqueo exclusivo y falla
+    // con otro proceso conectado. Antes ese fallo caía al `catch {}` y, SIN CERRAR este handle, se pasaba a node:sqlite.
+    try { if (String(db.pragma('journal_mode', { simple: true })).toLowerCase() !== 'wal') db.pragma('journal_mode = WAL'); } catch { /* otro proceso la usa: se deja el modo que tenga */ }
+    // better-sqlite3 NO trae run/get/all(sql, ...params): el resto de este archivo los usa (registrarModulos, generarSpec,
+    // episodio duplicado, config). Sin estos métodos fallaban con «db.run is not a function» dentro de catch vacíos,
+    // y con better-sqlite3 instalado (medinet) module_registry, spec_registry y la guarda anti-duplicados no escribían nada.
+    db.run = (sql, ...p) => db.prepare(sql).run(...p.flat());
+    db.get = (sql, ...p) => db.prepare(sql).get(...p.flat());
+    db.all = (sql, ...p) => db.prepare(sql).all(...p.flat());
     db._type = 'better-sqlite3';
     return db;
-  } catch {}
+  } catch { /* sin better-sqlite3 (o no carga): se usa node:sqlite */ }
 
   // Fall back to node:sqlite (Node.js 22+)
   try {
     const { DatabaseSync } = require('node:sqlite');
-    const db = new DatabaseSync(DB_PATH);
+    // node:sqlite espera 0 ms por defecto: con otro proceso escribiendo, «database is locked» al instante.
+    const db = new DatabaseSync(DB_PATH, { timeout: 5000 });
     // Wrap to match better-sqlite3 API
-    db.run   = (sql, ...p) => db.prepare(sql).run(...p);
-    db.get   = (sql, ...p) => db.prepare(sql).get(...p);
-    db.all   = (sql, ...p) => db.prepare(sql).all(...p);
-    db.exec  = (sql)       => db.prepare(sql).run();
+    db.run   = (sql, ...p) => db.prepare(sql).run(...p.flat());
+    db.get   = (sql, ...p) => db.prepare(sql).get(...p.flat());
+    db.all   = (sql, ...p) => db.prepare(sql).all(...p.flat());
+    // exec NATIVO (varias sentencias): el envoltorio anterior (prepare().run()) solo ejecutaba la primera, sin error.
     db.close = ()          => {};
     db._type = 'node:sqlite';
     return db;
-  } catch {}
+  } catch { /* sin ningún driver: openDB() devuelve null y el llamador decide */ }
 
   return null;
 }
@@ -295,11 +320,22 @@ function cerrarCicloConGates(db, results) {
 }
 
 
+/** Stack del proyecto para `ciclos.stack_detected` (columna que nadie escribía): {front, back} del perfil autodetectado. */
+function stackActual() {
+  try {
+    const p = require('./stack-profile.cjs').detectProfile(ROOT);
+    return JSON.stringify({ front: p.front_framework || null, back: p.back_framework || null });
+  } catch { return null; }
+}
+
 function registrarCiclo(db, cycleData) {
   try {
     // Cuánto tomó de verdad, si alguien marcó el arranque. Sin marca: null,
     // y el ciclo se registra como siempre en lugar de inventar un número.
-    const arranqueTarea = leerArranqueTarea();
+    // La marca de «tarea en curso» es de UNA tarea del modelo (pipeline aa:). Un ciclo que nace de un commit (hook) o del cierre
+    // de TEAMS NO es esa tarea: copiarle su inicio y su duración repetía el mismo número en decenas de ciclos distintos.
+    // Esos orígenes miden por sus propias huellas (reloj-derivado: sello de TEAMS, ventanas de lock, tandas de commits).
+    const arranqueTarea = (hookMode || ORIGEN === 'teams') ? null : leerArranqueTarea();
     const cicloPath = path.join(AGENTIC_DIR, '_ciclo_tmp.json');
 
     // Use existing _ciclo_tmp.json if available (written by memory agent)
@@ -338,6 +374,7 @@ function registrarCiclo(db, cycleData) {
       duracion_ms:        (arranqueTarea && arranqueTarea.duracion_ms) || datos.duracion_ms || 0,
       fecha_inicio:       (arranqueTarea && arranqueTarea.fecha_inicio) || null,
       modules_touched:    JSON.stringify(modules),
+      stack_detected:     stackActual(),
       post_cycle_ran:     'true',
       fases: modules.map((m, i) => ({
         num:     i + 1,
@@ -486,7 +523,7 @@ function registrarModulos(db) {
           updated_at=excluded.updated_at
       `, mod, testsPassing);
       registered.push(mod);
-    } catch(e) {}
+    } catch(e) { anotarFallo('module_registry(' + mod + ')', e); }
   }
 
   // Update config.md modules section
@@ -531,7 +568,7 @@ function registrarModulos(db) {
     }
 
     fs.writeFileSync(CONFIG_PATH, config, 'utf8');
-  } catch(e) {}
+  } catch(e) { anotarFallo('config.md(módulos)', e); }
 
   return registered;
 }
@@ -543,12 +580,13 @@ function detectarYEscribirPatrones(db) {
   const newPatterns   = [];
 
   // Scan source files to detect stack-specific patterns
-  const srcDirs = ['src', 'app', 'lib', 'backend/app', 'backend/src'].map(d => path.join(ROOT, d));
+  // Una sola definición de «dónde está el código» (code-roots.cjs), compartida con generarSpec.
+  const srcDirs = require('./code-roots.cjs').raicesDeCodigo(ROOT).map(d => path.join(ROOT, d));
   const files   = [];
 
   for (const dir of srcDirs) {
     if (!fs.existsSync(dir)) continue;
-    collectFiles(dir, files, ['.ts', '.tsx', '.js', '.py'], 3);
+    collectFiles(dir, files, ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.py'], 3);
   }
 
   const sample = files.slice(0, 40);
@@ -664,13 +702,16 @@ function generarSpec(db) {
 
     // Find relevant test files
     const testFiles = [];
-    collectFiles(ROOT, testFiles, ['.test.ts', '.test.tsx', '.spec.ts', '.test.js'], 5);
+    collectFiles(ROOT, testFiles, ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx', '.test.js', '.test.jsx', '.test.mjs', '.test.cjs', '.test.mts'], 5);
     const relevantTests = testFiles.filter(f => f.toLowerCase().includes(mod.toLowerCase()));
 
-    // Find source files for this module
+    // Find source files for this module: en TODAS las raíces de código reales (antes solo `src/`, que en un proyecto
+    // Next.js —app/, lib/, components/— no existe y dejaba 0 fuentes por módulo en cada spec).
     const srcFiles = [];
-    collectFiles(path.join(ROOT, 'src'), srcFiles, ['.ts', '.tsx'], 4);
-    const relevantSrc = srcFiles.filter(f =>
+    for (const raiz of require('./code-roots.cjs').raicesDeCodigo(ROOT)) {
+      collectFiles(path.join(ROOT, raiz), srcFiles, ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.py'], 4);
+    }
+    const relevantSrc = [...new Set(srcFiles)].filter(f =>
       f.toLowerCase().includes(mod.toLowerCase()) ||
       f.toLowerCase().includes(mod.replace('-', '/').toLowerCase())
     ).map(f => path.relative(ROOT, f));
@@ -695,7 +736,7 @@ function generarSpec(db) {
       `, mod, path.relative(ROOT, specPath));
 
       specs.push(mod);
-    } catch(e) {}
+    } catch(e) { anotarFallo('spec_registry(' + mod + ')', e); }
   }
 
   return specs;
@@ -774,7 +815,7 @@ function guardarConfigEnBD(db) {
     if (allModules.length > 0) {
       upsert.run('modules_implemented', JSON.stringify(allModules.map(m => m.name)));
     }
-  } catch(e) {}
+  } catch(e) { anotarFallo('project_settings(modules_implemented)', e); }
 }
 
 // ── Step 7: Escribir log de observabilidad ────────────────────────────────────
@@ -852,7 +893,7 @@ function indexarAst() {
 
 function collectFiles(dir, results, extensions, maxDepth, depth = 0) {
   if (depth > maxDepth || !fs.existsSync(dir)) return;
-  const skip = new Set(['node_modules', '.git', '__pycache__', '.next', 'dist', 'build', '.agentic']);
+  const skip = new Set(['node_modules', '.git', '__pycache__', '.next', 'dist', 'build', '.agentic', 'coverage', 'out', '.turbo', 'storybook-static', 'test-results', 'playwright-report']);
   try {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (skip.has(entry.name)) continue;
@@ -943,7 +984,7 @@ async function main() {
       let yaEpisodio = false;
       if (ORIGEN === 'teams') {
         yaEpisodio = !results.ciclo;
-        if (results.ciclo) { try { yaEpisodio = !!db.get("SELECT 1 AS x FROM episodios WHERE ciclo_id = ? AND tipo = 'ciclo_teams'", String(results.ciclo)); } catch { /* sin tabla: se crea */ } }
+        if (results.ciclo) { try { yaEpisodio = !!db.get("SELECT 1 AS x FROM episodios WHERE ciclo_id = ? AND tipo = 'ciclo_teams'", String(results.ciclo)); } catch (e) { if (!/no such table/i.test(String(e && e.message))) anotarFallo('episodio duplicado?', e); /* sin tabla: se crea */ } }
       }
       if (!yaEpisodio) g.registrarEpisodio({
         ciclo_id: results.ciclo,
@@ -957,7 +998,7 @@ async function main() {
         modulo: area,
       });
     }
-  } catch { /* episodio es un plus, nunca bloquea post-cycle */ }
+  } catch (e) { anotarFallo('episodio', e); /* episodio es un plus, nunca bloquea post-cycle: pero se ve */ }
 
   // Step 2.55: Potenciadores de memoria (Plan 5) — anclar errores recientes del
   // área con los símbolos del changeset, enlazar error→fix por INTERSECCIÓN de
@@ -1419,7 +1460,7 @@ async function main() {
       let pins = 0;
       try { pins = require(path.join(GRAFO_DIR, 'evidence-store.cjs')).soltar(ROOT, 'task', tarea).released || 0; } catch { /* sin almacén */ }
       try { require(path.join(GRAFO_DIR, 'evidence-store.cjs')).limpiar(ROOT, {}); } catch { /* caché auxiliar */ }
-      if (!silent) console.log('  2.14 Memoria con procedencia... ' + (cap.ok ? '✅' : '⚠️  ' + (cap.code || cap.status)) + ' · cola: ' + dr.done + ' procesado(s)' + (dr.dead_letter ? ', ' + dr.dead_letter + ' en dead-letter' : '') + (inv.suspect && inv.suspect.length ? ' · ' + inv.suspect.length + ' conocimiento(s) a revisar' : '') + (pins ? ' · ' + pins + ' pin(s) liberado(s)' : ''));
+      if (!silent) console.log('  2.14 Memoria con procedencia... ' + (cap.ok ? '✅' : '⚠️  ' + (cap.code || cap.status) + (cap.message ? ' (' + String(cap.message).slice(0, 90) + ')' : '')) + ' · cola: ' + dr.done + ' procesado(s)' + (dr.dead_letter ? ', ' + dr.dead_letter + ' en dead-letter' : '') + (inv.suspect && inv.suspect.length ? ' · ' + inv.suspect.length + ' conocimiento(s) a revisar' : '') + (pins ? ' · ' + pins + ' pin(s) liberado(s)' : ''));
     } else if (!silent) {
       console.log('  2.14 Memoria con procedencia... — (' + disp.state + (disp.hint ? ': ' + disp.hint : '') + ')');
     }
@@ -1536,9 +1577,15 @@ async function main() {
     if (!silent) console.log(fresh.ok ? `✅ ${fresh.commit.slice(0, 8)}` : `⚠️  (${fresh.reason})`);
   } catch (e) { if (!silent) console.log('⚠️  (omitido)'); }
 
+  results.fallos = fallosRegistro;
+  if (fallosRegistro.length) {
+    // Siempre a stderr (aunque sea --silent o hook): un registro que no se escribió no puede pasar por «hecho».
+    console.error('[post-cycle] ⚠️ ' + fallosRegistro.length + ' paso(s) de registro con error: ' + fallosRegistro.join(' | '));
+  }
+
   if (!silent) {
     console.log('\n══════════════════════════════════════════════════');
-    console.log('  ✅ Post-Cycle completado');
+    console.log('  ✅ Post-Cycle completado' + (fallosRegistro.length ? ' — CON ' + fallosRegistro.length + ' PASO(S) CON ERROR (ver arriba)' : ''));
     console.log(`  Ciclo: ${results.ciclo ? String(results.ciclo).slice(0,8) : '—'} | Contratos: ${results.contratos?.success ? '✅' : '⚠️'}`);
     console.log(`  Módulos: ${results.modulos.length} | Patrones: ${results.patrones.length} nuevos | Specs: ${results.specs.length}`);
     if (results.parallelGuard) {

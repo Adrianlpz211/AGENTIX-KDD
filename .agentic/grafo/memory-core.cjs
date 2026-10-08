@@ -244,7 +244,10 @@ function capturar(root, ev, opts = {}) {
   } catch (e) {
     // Un update en curso tiene la exclusión de escritores: la captura se degrada de forma explícita (no se pierde
     // en silencio ni bloquea al agente) y el evento puede reenviarse cuando el update termine.
-    const code = e && (e.code === 'DB_BUSY' || e.code === 'UPDATE_IN_PROGRESS') ? e.code : 'CAPTURE_FAILED';
+    // «database is locked» llega con el código NATIVO de SQLite (ERR_SQLITE_ERROR / SQLITE_BUSY), no con DB_BUSY: sin este mapeo
+    // un simple bloqueo pasaba por «CAPTURE_FAILED» (fallo sin causa visible) en vez de por el estado reintentable que es.
+    const bloqueo = !!e && /locked|busy/i.test(String(e.message || ''));
+    const code = e && (e.code === 'DB_BUSY' || e.code === 'UPDATE_IN_PROGRESS') ? e.code : (bloqueo ? 'DB_BUSY' : 'CAPTURE_FAILED');
     return { ok: false, status: 'DEGRADED', code, message: e && e.message };
   } finally { try { if (db) db.close(); } catch { /* ya cerrada */ } }
 }

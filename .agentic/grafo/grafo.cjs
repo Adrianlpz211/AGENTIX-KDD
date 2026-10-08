@@ -583,11 +583,15 @@ function registrarCiclo(datos) {
       }
     }
     const snap = snapshotMemoria(db);
+    // modules_touched / stack_detected: post-cycle los enviaba y este INSERT no los nombraba, así que quedaron en NULL en el
+    // 100% de los ciclos (medinet, 174). Las columnas pueden no existir en una base vieja: se crean aquí, idempotente.
+    for (const col of ['modules_touched', 'stack_detected']) { try { db.run(`ALTER TABLE ciclos ADD COLUMN ${col} TEXT`); } catch { /* ya existe */ } }
+    const comoTexto = (v) => (v === undefined || v === null) ? null : (typeof v === 'string' ? v : JSON.stringify(v));
     db.run(`INSERT INTO ciclos (ciclo_id,tarea,tipo_tarea,modulo,area,estado,context_guard,
       fases_total,fases_completadas,patrones_aplicados,errores_evitados,decisiones_usadas,
       memory_trace,tests_generados,tests_pasando,review_blockers,review_required,stops_count,
-      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,post_cycle_ran,fecha_inicio,fecha_fin)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+      sync_grafo,duracion_ms,snapshot_inicio,snapshot_fin,post_cycle_ran,modules_touched,stack_detected,fecha_inicio,fecha_fin)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
               COALESCE(?, datetime('now')), ${enCurso ? 'NULL' : "datetime('now')"})`,
       ciclo_id,
       datos.tarea||'',
@@ -615,6 +619,8 @@ function registrarCiclo(datos) {
          quedo en null en los 155 ciclos. Un campo que siempre es null ensena a
          desconfiar del esquema entero. */
       datos.post_cycle_ran || null,
+      comoTexto(datos.modules_touched),
+      comoTexto(datos.stack_detected),
       datos.fecha_inicio || null
     );
     if (datos.fases && Array.isArray(datos.fases)) {
@@ -626,13 +632,18 @@ function registrarCiclo(datos) {
             ciclo_id,f.num||0,f.nombre||'',f.agente||'',f.estado||'COMPLETADO',
             JSON.stringify(f.memoria_leida||[]),f.decision||'',f.resultado||'',
             f.intentos||1,f.duracion_ms||0);
-        } catch(e) {}
+        } catch(e) { console.error('[grafo] registrarCiclo: no se pudo guardar la fase ' + (f && f.num) + ': ' + e.message); }
       });
     }
     if (db.type==='sqljs' && db.save) db.save();
     db.close();
     return ciclo_id;
-  } catch(e) { return null; }
+  } catch(e) {
+    // Antes: `return null` mudo. Un ciclo que no se escribe (esquema, lock, columna) quedaba como «ciclos sin registrar» sin una
+    // sola línea que dijera por qué. Se sigue devolviendo null (los llamadores ya lo tratan), pero con el motivo a la vista.
+    console.error('[grafo] registrarCiclo FALLÓ: ' + (e && e.message));
+    return null;
+  }
 }
 
 const ESTADOS_CIERRE = ['COMPLETADO_VERIFICADO', 'COMPLETADO_CON_PENDIENTES', 'FALLIDO', 'BLOQUEADO'];

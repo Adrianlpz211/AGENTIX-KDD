@@ -1288,7 +1288,32 @@ function analyzeImpact(db, target) {
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '.agentic', 'dist', 'build', '.next',
   'coverage', '__pycache__', '.pytest_cache', 'vendor', 'target',
+  // Carpetas GENERADAS: sin esto cada regeneración (p. ej. brag-output*/work/brag.html) contaba como «archivo cambiado» y
+  // se reindexaba y ensuciaba el mapa en cada ciclo (medinet).
+  'out', 'storybook-static', 'venv', 'env', 'tmp', 'temp', 'generated', '__generated__',
+  'bower_components', 'Pods', 'test-results', 'playwright-report',
 ]);
+const IGNORE_PREFIJOS = ['brag-output'];
+
+/**
+ * Carpetas que el PROPIO proyecto declara como no indexables: nombres de carpeta simples del .gitignore («build/», «tmp»,
+ * sin comodines ni rutas) y una línea por nombre en .agentic/ignore-index. Lo ya ignorado por git no aporta código que mapear.
+ */
+function carpetasDelProyecto(projectRoot) {
+  const out = new Set();
+  const leer = (f) => { try { return fs.readFileSync(path.join(projectRoot, f), 'utf8').split(/\r?\n/); } catch { return []; } };
+  for (const raw of [...leer('.gitignore'), ...leer('.agentic/ignore-index')]) {
+    const l = raw.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+    if (l && !l.startsWith('#') && !l.startsWith('!') && /^[\w.-]+$/.test(l) && !l.includes('.')) out.add(l);
+  }
+  return out;
+}
+const _cacheCarpetas = new Map();
+function carpetasIgnoradas(projectRoot) {
+  const k = projectRoot || '';
+  if (!_cacheCarpetas.has(k)) _cacheCarpetas.set(k, carpetasDelProyecto(k));
+  return _cacheCarpetas.get(k);
+}
 
 function getAllSourceFiles(dir, projectRoot, results = []) {
   let entries;
@@ -1297,6 +1322,8 @@ function getAllSourceFiles(dir, projectRoot, results = []) {
   for (const e of entries) {
     if (e.name.startsWith('.') && e.name !== '.agentic') continue;
     if (IGNORE_DIRS.has(e.name)) continue;
+    if (e.isDirectory() && (IGNORE_PREFIJOS.some((p) => e.name.startsWith(p)) || carpetasIgnoradas(projectRoot).has(e.name))) continue;
+    if (/\.min\.[a-z]+$/i.test(e.name)) continue;
 
     const fullPath = path.join(dir, e.name);
     if (e.isDirectory()) {
@@ -1532,4 +1559,6 @@ module.exports = {
   // Export aditivo (Pieza 7): resolver compartido de imports, memoizado y con
   // alias — indexProject lo crea una vez por corrida; expuesto para tests.
   createImportResolver,
+  // Para pruebas: qué archivos recorre el indexado (exclusiones de carpetas generadas / .gitignore).
+  getAllSourceFiles,
 };

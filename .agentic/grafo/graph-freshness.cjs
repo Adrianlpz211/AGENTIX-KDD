@@ -47,7 +47,8 @@ function openDB(projectRoot) {
   const dbPath = resolveDbPath(projectRoot);
   let db;
   try { db = new (require('better-sqlite3'))(dbPath); }
-  catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath); } catch { return null; } }
+  // node:sqlite espera 0 ms por defecto (better-sqlite3 espera 5 s): con post-cycle escribiendo en paralelo, «write failed» al instante.
+  catch { try { const { DatabaseSync } = require('node:sqlite'); db = new DatabaseSync(dbPath, { timeout: 5000 }); } catch { return null; } }
   // project_settings existe en las generaciones recientes; crearla si no (aditivo)
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS project_settings (
@@ -82,17 +83,24 @@ function stampGraph(projectRoot, db) {
   if (ownDb) db = openDB(projectRoot);
   if (!db) return { ok: false, reason: 'DB unavailable' };
 
-  const ok = safe(() => {
-    db.prepare(`
-      INSERT INTO project_settings (key, value, updated_at)
-      VALUES ('graph_commit_hash', ?, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).run(head);
-    return true;
-  }, false);
+  // Un reintento ante bloqueo (otro proceso escribiendo) y el MOTIVO real en `reason`: antes solo decía «write failed».
+  let ok = false; let motivo = null;
+  for (let intento = 0; intento < 2 && !ok; intento++) {
+    try {
+      db.prepare(`
+        INSERT INTO project_settings (key, value, updated_at)
+        VALUES ('graph_commit_hash', ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run(head);
+      ok = true;
+    } catch (e) {
+      motivo = String(e && e.message || e).slice(0, 120);
+      if (intento === 0 && /locked|busy/i.test(motivo)) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } catch { /* sin espera */ } } else break;
+    }
+  }
 
   if (ownDb) safe(() => db.close());
-  return ok ? { ok: true, commit: head } : { ok: false, reason: 'write failed' };
+  return ok ? { ok: true, commit: head } : { ok: false, reason: 'write failed' + (motivo ? ': ' + motivo : '') };
 }
 
 // ─── CHECK ────────────────────────────────────────────────────────────────────
