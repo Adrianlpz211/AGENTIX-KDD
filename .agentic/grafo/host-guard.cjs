@@ -169,6 +169,24 @@ function enriquecer(root, prompt, opciones) {
   return { contexto: txt || null, motivo: truncado ? 'TRUNCADO' : 'OK' };
 }
 
+/**
+ * Cursor no deja que un hook de prompt agregue contexto al modelo, pero SÍ deja correr un proceso: se lanza el enricher
+ * DESACOPLADO (no se espera, no bloquea el prompt) para que queden sus efectos — marca de arranque, predicción apuntada y el
+ * sidecar _brief_<ciclo>.json que luego usa memory_trace. El brief en sí no le llega al modelo de Cursor: eso NO se finge.
+ * AKDD_NO_ENRICHER_BG=1 lo apaga (pruebas, o quien no quiera procesos en segundo plano).
+ */
+function enriquecerEnSegundoPlano(root, prompt) {
+  if (process.env.AKDD_NO_ENRICHER_BG === '1') return { lanzado: false, motivo: 'APAGADO' };
+  try {
+    const { spawn } = require('child_process');
+    const script = path.join(__dirname, 'context-enricher.cjs');
+    if (!fs.existsSync(script)) return { lanzado: false, motivo: 'SIN_ENRICHER' };
+    const p = spawn(process.execPath, [script, String(prompt).replace(/^\s*aa:\s*/i, '')], { cwd: root, detached: true, stdio: 'ignore', windowsHide: true });
+    p.on('error', () => {}); p.unref();
+    return { lanzado: true, motivo: 'SEGUNDO_PLANO' };
+  } catch (e) { return { lanzado: false, motivo: 'ERROR' }; }
+}
+
 // ─── adaptadores de host ─────────────────────────────────────────────────────
 
 function objetoDe(entrada) {
@@ -356,6 +374,7 @@ function procesar(host, evento, entrada, root) {
     let dec = null; if (host === 'claude') { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } }
     let enr = null; let motivo = 'NO_APLICA';
     if (host === 'claude' && (cls.explicito || implicito)) { const e = enriquecer(root, prompt, { implicito }); enr = e.contexto; motivo = e.motivo; }
+    else if (host === 'cursor' && (cls.explicito || implicito)) { motivo = enriquecerEnSegundoPlano(root, prompt).motivo; }
     // Aviso de trabajo sin commit (lo único que NO se registra solo) y, si no había aa:, una línea que le dice al modelo que lo trate como tal.
     let sinCommit = null; if (host === 'claude') { try { sinCommit = require('./cobertura.cjs').avisoSinCommit(root); } catch { sinCommit = null; } }
     const nota = implicito && host === 'claude'
@@ -367,7 +386,7 @@ function procesar(host, evento, entrada, root) {
   return null;
 }
 
-module.exports = { raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenWhatsapp, sinCitas, ENRIQ };
+module.exports = { enriquecerEnSegundoPlano, raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenWhatsapp, sinCitas, ENRIQ };
 
 if (require.main === module) {
   const opt = Object.fromEntries(process.argv.slice(2).map((a) => /^--([^=]+)=(.*)$/.exec(a)).filter(Boolean).map((m) => [m[1], m[2]]));

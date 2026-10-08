@@ -84,7 +84,7 @@ const r = spawnSync(process.execPath, ['--test',
   cwd: RAIZ,
   // Las pruebas ejercitan la guardia del host y el MCP CONTRA ESTE REPO: sin este aislamiento anotarían sus eventos
   // en la memoria real del proyecto. Los tests de captura lo activan explícitamente en SU proceso.
-  env: { ...process.env, AKDD_NO_MEMORY_CAPTURE: process.env.AKDD_NO_MEMORY_CAPTURE || '1' },
+  env: { ...process.env, AKDD_NO_MEMORY_CAPTURE: process.env.AKDD_NO_MEMORY_CAPTURE || '1', AKDD_NO_ENRICHER_BG: process.env.AKDD_NO_ENRICHER_BG || '1' },
   stdio: ['inherit', 'pipe', 'pipe'],
   encoding: 'utf8',
   maxBuffer: 256 * 1024 * 1024,

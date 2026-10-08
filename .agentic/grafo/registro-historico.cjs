@@ -52,7 +52,7 @@ function registrar(root, commit) {
     if (!cid) return { ok: false, motivo: 'registrarCiclo no escribió (¿ya existe o está cerrado?)' };
     // registrarCiclo pone fecha_fin = ahora: en un ciclo retroactivo el fin ES la fecha del commit, no la de hoy.
     const db = require('./db-adapter.cjs').openWrite(path.join(root, '.agentic', 'memoria.db'), { busyTimeout: 5000 });
-    try { db.run('UPDATE ciclos SET fecha_fin = fecha_inicio WHERE ciclo_id = ?', id); } finally { db.close(); }
+    try { db.run('UPDATE ciclos SET fecha_fin = fecha_inicio, duracion_ms = NULL WHERE ciclo_id = ?', id); /* sin dato ≠ 0 ms */ } finally { db.close(); }
     try { grafo.registrarEpisodio({ ciclo_id: id, tipo: 'ciclo_aa', descripcion: commit.asunto || ('commit ' + commit.sha.slice(0, 7)), accion_tomada: 'registro retroactivo (el commit no se registró en su momento)', resultado: 'historico', archivos_tocados: files.slice(0, 80), area, modulo: area }); } catch { /* el episodio es un plus */ }
     return { ok: true, id, area, archivos: files.length };
   } catch (e) { return { ok: false, motivo: String(e && e.message || e).slice(0, 160) }; } finally { try { process.chdir(prevCwd); } catch { /* sin cwd */ } }

@@ -115,11 +115,16 @@ function marcaDeArranque(db, ciclo) {
   ).get(String(ciclo.ciclo_id), aTexto(fin)), null) : null;
   // Un ciclo de TEAMS (teams_…) sin marca propia queda «sin dato»: la «última marca» sería de otro flujo y daría una duración inventada.
   if (!propia && String(ciclo.ciclo_id || '').startsWith('teams_')) return null;
-  const fila = propia || safe(() => db.prepare(
-    `SELECT ts FROM gate_events
-      WHERE verdict = 'CICLO_INICIO' AND ts <= ?
-      ORDER BY ts DESC LIMIT 1`
-  ).get(aTexto(fin)), null);
+  // Sin marca propia, la «última marca» solo vale si NADIE más la pudo usar: ningún otro ciclo cerró entre esa marca y este cierre.
+  // Una marca que ya lleva el id de OTRO ciclo nunca se hereda (el ciclo de commit de las 10:23 tomaba la marca del ciclo TEAMS de las 10:10).
+  // Antes se tomaba siempre la más reciente: en medinet 9 ciclos distintos heredaron la misma marca (20:02:28) y salieron con
+  // duraciones de 3 min a 7,7 h inventadas.
+  const fila = propia || safe(() => {
+    const m = db.prepare(`SELECT ts FROM gate_events WHERE verdict = 'CICLO_INICIO' AND ts <= ? AND (cycle_id IS NULL OR cycle_id = '') ORDER BY ts DESC LIMIT 1`).get(aTexto(fin));
+    if (!m) return null;
+    const otros = db.prepare('SELECT COUNT(*) n FROM ciclos WHERE fecha_fin > ? AND fecha_fin <= ? AND ciclo_id IS NOT ?').get(m.ts, aTexto(fin), ciclo.ciclo_id || null);
+    return otros && otros.n > 0 ? null : m;
+  }, null);
   if (!fila) return null;
   const ini = aMs(fila.ts);
   if (ini == null || ini >= fin) return null;

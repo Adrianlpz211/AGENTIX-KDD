@@ -349,6 +349,12 @@ function guardarBrief(ciclo, brief) {
     const tmp = f + '.' + process.pid + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify({ schema: 'brief/1', cycle_id: ciclo.cycle_id, riesgo: brief.riesgo || null, mostrado }));
     fs.renameSync(tmp, f);
+    // Los sidecars de ciclos que nunca cerraron no se acumulan: fuera los de más de 14 días.
+    const dir = path.dirname(f);
+    for (const n of fs.readdirSync(dir)) {
+      if (!/^_brief_.*\.json$/.test(n)) continue;
+      try { if (Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > 14 * 86400000) fs.unlinkSync(path.join(dir, n)); } catch { /* otro proceso lo borró */ }
+    }
   } catch { /* es un plus */ }
 }
 

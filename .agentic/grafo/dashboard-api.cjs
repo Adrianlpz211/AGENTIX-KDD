@@ -185,7 +185,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       return { status: r.data ? r.status : 'UNAVAILABLE', data: r.data, reason_code: r.reason_code, errors: r.faltan.map((t) => ({ code: 'TABLA_AUSENTE', source: t })) };
     } },
     tasks: { params: ['project_id', 'plan_id', 'from', 'to', 'cursor', 'limit', 'estado', 'origen'], fn: (q) => {
-      if ('origen' in q && !['aa', 'teams', 'todos'].includes(q.origen)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'origen: aa | teams | todos' }] };
+      if ('origen' in q && !['aa', 'teams', 'commit', 'todos'].includes(q.origen)) return { status: 'UNAVAILABLE', data: null, http: 400, reason_code: 'PARAMETRO_INVALIDO', errors: [{ code: 'PARAMETRO_INVALIDO', message: 'origen: aa | teams | commit | todos' }] };
       if ('plan_id' in q) return { status: 'UNAVAILABLE', data: [], reason_code: 'PLAN_SIN_FUENTE', errors: [{ code: 'PLAN_SIN_FUENTE', message: 'este proyecto no tiene planes registrados en la base' }] };
       const r = datos.filas(dbPath, { ciclos: { tabla: 'ciclos', sql: 'SELECT id, ciclo_id, tarea, modulo, tipo_tarea, estado, tests_generados, tests_pasando, stops_count, fecha_inicio, fecha_fin FROM ciclos' } }, Object.assign({ snapshot: true }, opts));
       if (r.status !== 'OK') return { status: 'UNAVAILABLE', data: null, reason_code: r.reason_code };
@@ -193,7 +193,7 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       let lista = r.value.ciclos.filter((c) => enVentana(q, c.fecha_inicio));
       if (q.estado) lista = lista.filter((c) => ec.clasificar(c.estado) === q.estado);
       // 3.20.1: el mismo backend de ciclos para `aa` y `teams`; el origen se distingue por el prefijo determinista del id (el cierre de TEAMS registra con ese prefijo).
-      const origenDe = (c) => (String(c.ciclo_id).startsWith('teams_') ? 'teams' : 'aa');
+      const origenDe = (c) => (String(c.ciclo_id).startsWith('teams_') ? 'teams' : String(c.ciclo_id).startsWith('commit-') ? 'commit' : 'aa');
       if (q.origen && q.origen !== 'todos') lista = lista.filter((c) => origenDe(c) === q.origen);
       lista.sort((a, b) => -fu.compararPorFecha(a, b, 'fecha_inicio'));
       const { pagina, coverage } = paginar(lista, q);

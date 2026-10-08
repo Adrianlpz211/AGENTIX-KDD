@@ -29,6 +29,7 @@ test('reconciliar: registra el commit sin ciclo como histórico, sin duración, 
     assert.strictEqual(c[0].post_cycle_ran, 'historico');
     assert.strictEqual(c[0].fecha_inicio, c[0].fecha_fin);
     assert.strictEqual(c[0].tipo_tarea, 'fix');
+    assert.strictEqual(db.get('SELECT duracion_ms d FROM ciclos').d, null, 'sin dato no es 0 ms');
   } finally { db.close(); }
   assert.match(sh('node', [rh]).stdout, /sin ciclo: 0/);
   fs.rmSync(t, { recursive: true, force: true });
