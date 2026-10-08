@@ -20,7 +20,8 @@ const bytes = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).dige
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function agregarCiclo(dir, id, estado) {
-  const db = new DatabaseSync(dbDe(dir));
+  // Con la base en uso por el tablero (que la sondea) y la suite en paralelo, sin espera la escritura recibía «database is locked» al instante.
+  const db = new DatabaseSync(dbDe(dir), { timeout: 15000 });
   db.prepare("INSERT INTO ciclos (ciclo_id, tarea, modulo, estado, tests_generados, tests_pasando, stops_count, fecha_inicio, fecha_fin) VALUES (?, ?, 'pagos', ?, 4, 4, 0, '2026-09-10T09:00:00Z', '2026-09-10T10:00:00Z')").run(id, 'Tarea ' + id, estado);
   db.close();
 }
