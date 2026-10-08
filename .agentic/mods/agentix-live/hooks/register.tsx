@@ -192,6 +192,12 @@ export const register: Register = on => {
   let usdAnterior: number | null = null
 
   on('session.start', async ($, e, next) => {
+    // Huella de vida: prueba en disco de que el módulo SÍ se ejecutó en esta sesión (y con qué host), sea cual sea lo que la interfaz dibuje.
+    try {
+      await $.fs.write('.agentic/_mod-vivo.json', JSON.stringify({ mod: 'agentix-live', evento: 'session.start', interactiva: !!e.isInteractive, en: await $.clock.now() }, null, 2))
+    } catch {
+      /* sin permiso de escritura: el panel sigue igual */
+    }
     await $.command.register({
       name: 'agentix',
       description: 'Abre el panel Agentix en vivo (consumo de la sesión y estado del ciclo)',
