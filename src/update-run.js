@@ -492,6 +492,17 @@ async function ejecutar(ctx) {
     }
   } catch (e) { R.hooks = { status: 'FALLO', message: e.message }; R.warnings.push('hooks de Git no instalados (' + e.message + '): se ve con akdd health'); }
 
+  // Hooks del HOST (Claude Code / Cursor): enriquecimiento sin aa:, guardia, avisos y registro del fin de turno. Solo los hosts que el
+  // proyecto usa, con merge, y sin tocar uno que el dueño rechazó. Opt-out: AKDD_NO_HOST_HOOKS=1.
+  R.host_hooks = { status: 'OMITIDO' };
+  try {
+    const hhJs = path.join(projectPath, '.agentic', 'grafo', 'host-hooks.cjs');
+    if (opts.installHostHooks !== false && fs.existsSync(hhJs)) {
+      nodo(hhJs, ['auto'], { cwd: projectPath, timeout: 15000 });
+      R.host_hooks = { status: 'OK' };
+    }
+  } catch (e) { R.host_hooks = { status: 'FALLO', message: e.message }; R.warnings.push('hooks del host no instalados (' + e.message + '): corre akdd host-hooks install'); }
+
   // Mods de Claude Code: se refresca SOLO lo que el dueño ya tenía encendido (akdd mod on).
   R.mods = { status: 'OMITIDO' };
   try {

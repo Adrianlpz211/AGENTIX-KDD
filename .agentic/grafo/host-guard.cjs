@@ -141,8 +141,10 @@ function evaluarEdicion(root, archivo) {
 
 const ENRIQ = { timeoutMs: 8000, maxBytes: 6000, memoria: 50 };
 
-function enriquecer(root, prompt) {
-  if (!/^\s*aa:/i.test(String(prompt || ''))) return { contexto: null, motivo: 'NO_ES_AA' };
+/** `opciones.implicito`: el mensaje NO trae `aa:` pero el clasificador lo ve como tarea en un proyecto configurado (ver prompt-tarea.cjs). */
+function enriquecer(root, prompt, opciones) {
+  const implicito = !!(opciones && opciones.implicito);
+  if (!implicito && !/^\s*aa:/i.test(String(prompt || ''))) return { contexto: null, motivo: 'NO_ES_AA' };
   // El enricher escribe en la base (marca de arranque, predicción): la llave se
   // guarda con la huella de DESPUÉS, así el mismo prompt sin cambios ajenos acierta.
   const huella = () => { try { return require('./kdd-memory.cjs').huellaGrafo(root); } catch { return '-'; } };
@@ -312,6 +314,11 @@ function capturarEnMemoria(root, host, evento, entrada, r) {
 }
 
 function procesar(host, evento, entrada, root) {
+  if (evento === 'stop') {
+    // Fin de turno: se anota qué quedó editado y sin commit (no escribe en la base, no bloquea, no imprime nada al host).
+    try { require('./cobertura.cjs').anotarSinCommit(root); } catch { /* es un plus */ }
+    return null;
+  }
   if (entrada === null || typeof entrada !== 'object' || Array.isArray(entrada)) {
     if (evento === 'prompt') {
       return salida(host, evento, null, null);
@@ -339,10 +346,23 @@ function procesar(host, evento, entrada, root) {
     const prompt = entrada.prompt || entrada.user_prompt || '';
     const ws = origenWhatsapp(root, prompt, host);
     if (ws) return salida(host, evento, null, ws);
+    // ¿Es una tarea? Con `aa:` sí por definición; SIN el prefijo, en un proyecto CONFIGURADO, lo decide prompt-tarea.cjs (reglas, ms, sin red).
+    // Así el prefijo deja de ser obligatorio: el brief llega igual y la marca de arranque / la predicción se registran.
+    let cls = { esTarea: false, explicito: false, p: 0, razones: [] };
+    let configurado = false;
+    try { const pt = require('./prompt-tarea.cjs'); cls = pt.clasificarPrompt(prompt); configurado = pt.proyectoConfigurado(root); } catch { /* sin clasificador: solo aa: explícito */ const ex = /^\s*aa:/i.test(String(prompt)); cls = { esTarea: ex, explicito: ex, p: ex ? 0.99 : 0, razones: [] }; }
+    const implicito = cls.esTarea && !cls.explicito && configurado;
     // Decisiones del dueño respondidas en el tablero y aún sin ejecutar (o pendientes): llegan al modelo en CADA turno, sin pegar nada.
     let dec = null; if (host === 'claude') { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } }
-    const enr = host === 'claude' ? enriquecer(root, prompt).contexto : null;
-    return salida(host, evento, null, [enr, dec].filter(Boolean).join('\n\n') || null);
+    let enr = null; let motivo = 'NO_APLICA';
+    if (host === 'claude' && (cls.explicito || implicito)) { const e = enriquecer(root, prompt, { implicito }); enr = e.contexto; motivo = e.motivo; }
+    // Aviso de trabajo sin commit (lo único que NO se registra solo) y, si no había aa:, una línea que le dice al modelo que lo trate como tal.
+    let sinCommit = null; if (host === 'claude') { try { sinCommit = require('./cobertura.cjs').avisoSinCommit(root); } catch { sinCommit = null; } }
+    const nota = implicito && host === 'claude'
+      ? '[agentix] Esto parece una tarea de desarrollo (' + (cls.razones[0] || 'señales de petición') + ', p=' + cls.p + ') y este proyecto está configurado: trátala como `aa:` (CLAUDE.md, «El prefijo aa: es opcional»). El brief de abajo ya llegó: no vuelvas a correr el enricher.'
+      : null;
+    try { require('./cobertura.cjs').registrarPrompt(root, { host, cls, enriquecido: !!enr, motivo, prompt }); } catch { /* medir es un plus */ }
+    return salida(host, evento, null, [nota, enr, dec, sinCommit].filter(Boolean).join('\n\n') || null);
   }
   return null;
 }

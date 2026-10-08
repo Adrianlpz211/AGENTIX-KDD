@@ -1,15 +1,15 @@
 ---
-description: Agentic Automata v2 — pipeline autónomo activado con aa:
+description: Agentic Automata v2 — pipeline autónomo (con aa:, o sin prefijo en un proyecto configurado)
 globs: ["**/*"]
 alwaysApply: true
 ---
 
 # Agentic Automata v2
 
-## Palabra de activación: aa:
+## Palabra de activación: aa: (opcional si el proyecto está configurado)
 
-Cuando el usuario escribe `aa:` seguido de cualquier instrucción,
-ejecutas el pipeline completo sin pausas, sin pedir confirmación,
+Cuando el usuario escribe `aa:` seguido de cualquier instrucción —o, en un proyecto con `CONFIGURADO: SI`,
+cuando pide un cambio de código o de configuración aunque NO escriba `aa:`— ejecutas el pipeline completo sin pausas, sin pedir confirmación,
 sin dejar el plan mocho, sin olvidar fases.
 
 ## Primera vez
@@ -37,8 +37,12 @@ O desde el panel: View → Browser → activar.
 
 El QA verifica en el browser ANTES de declarar la tarea completa.
 
-## Sin aa: → respuesta normal
-El pipeline solo se activa con `aa:`.
+## Preguntas y conversación → respuesta normal
+En un proyecto configurado el pipeline se activa con `aa:` O con cualquier petición de cambio (arregla, agrega, cambia, implementa,
+«quiero que…», «no funciona…»). Las preguntas, los acuses («ok», «sí») y la conversación se responden sin pipeline.
+En un proyecto SIN configurar (`CONFIGURADO: NO`) el pipeline solo se activa con `aa:`.
+Cursor no recibe el brief por hook: corre `node .agentic/grafo/context-enricher.cjs "<tarea>"` al empezar una tarea.
+El registro lo hace el commit: al terminar una tarea con cambios, haz commit (lo que quede sin commit no se registra).
 
 ## Departamento QA — audit:
 

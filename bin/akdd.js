@@ -152,6 +152,7 @@ const HELP = `
     akdd restore <list|create --label=L [--files=a,b]|show|preview|apply <id> --expected-current-hash=H>
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
+    akdd cobertura [--dias=7] [--json]   How much of the work lands in Agentix: commits vs cycles (exact), record quality, task-like messages (approx.)
     akdd decisiones [listar|responder|aplicada]   Owner decisions board (dashboard tab 🗳️ Decisiones): list, answer, close
     akdd mod <on|off|status|list> [--mod=name] [--global]   Claude Code mods shipped with Agentix (live panel); installed into .claude/skills/ (this project) or ~/.claude/skills/ (--global: every project)
     akdd teams <activar|estado|ronda|revisar|tarea|corregir|resolver|reportar|aceptar|cerrar|…>   Claude Code directs, Cursor builds (one MD channel)
@@ -250,6 +251,7 @@ switch (command) {
     break;
   }
   case 'decisiones': case 'decision': runModule('decisiones.cjs', ...args.slice(1)); break;
+  case 'cobertura': runModule('cobertura.cjs', ...args.slice(1)); break;
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
   case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
   case 'ntfy': runModule('ntfy-bridge.cjs', ...args.slice(1)); break;

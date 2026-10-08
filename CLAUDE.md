@@ -216,6 +216,8 @@ Consulta del grafo (en terminal):
 0.1 Correr: node .agentic/grafo/context-enricher.cjs "[tarea tal cual la escribió el usuario]"
    → leer el brief que imprime (riesgo estimado, avisos, contratos, alertas activas)
    → nunca bloquea: si falla, no encuentra nada, o da error — seguir igual, es un plus
+   → SI el hook del prompt YA inyectó el brief (empieza con «## Context Enricher» o con «[agentix] Esto parece
+     una tarea…»), NO lo vuelvas a correr: ya está en el contexto de este mensaje
 1. Leer .agentic/config.md
 2. Leer .agentic/memoria/trabajo.md
 3. Si CONFIGURADO: NO → Setup primero
@@ -394,6 +396,8 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd canario` | correr `node .agentic/grafo/canario-gate.cjs --commit` (¿el último cambio trae test?) |
 | `akdd hierro` | correr `node .agentic/grafo/hierro-papel.cjs` (qué del protocolo se ejecuta y qué solo se lee) |
 | `akdd hooks` | correr `node .agentic/grafo/install-hooks.cjs` |
+| `akdd cobertura [--dias=N] [--json]` | correr `node .agentic/grafo/cobertura.cjs` (cuánto de lo que se hace queda en Agentix: commits vs ciclos exacto, calidad del registro por origen, mensajes que parecían tarea aproximado) |
+| `akdd host-hooks status` / `install` / `uninstall` | correr `node .agentic/grafo/host-hooks.cjs status\|install\|uninstall` (hooks de Claude Code y Cursor; `init` y `update` los instalan solos en los hosts que el proyecto usa y respetan un `uninstall` del dueño) |
 | `akdd mod on` / `off` / `status` [`--global`] | correr `node .agentic/grafo/mods-manager.cjs on\|off\|status [--global]` (panel en vivo de Claude Code — ver sección MODS; `--global` = en todos los proyectos) |
 | `akdd reason status` | correr `node .agentic/grafo/reasoning-bank.cjs status` |
 | `akdd prediccion` | correr `node .agentic/grafo/prediccion-registro.cjs precision` (¿acierta la predicción de riesgo? el número que importa es el FALSO NEGATIVO: predijo BAJO y se rompió algo) |
@@ -492,7 +496,10 @@ ejecutar NADA, ni siquiera las elegibles.
 
 ## SIN aa: O audit:
 
-Responder normalmente usando el contexto del proyecto.
+**El prefijo `aa:` es OPCIONAL en un proyecto configurado** (`CONFIGURADO: SI` en `.agentic/config.md`): toda petición de
+cambiar código o configuración se trata como `aa:` (ver DETECCIÓN AUTOMÁTICA DE TAREAS). Solo las preguntas y la
+conversación se responden normalmente, usando el contexto del proyecto, sin pipeline. En un proyecto SIN configurar el
+prefijo sigue siendo obligatorio.
 
 ## ARCHIVOS CLAVE
 
@@ -938,10 +945,20 @@ NO preguntar en medio del ciclo. NO interrumpir. Actuar y reportar al final.
 
 ## DETECCIÓN AUTOMÁTICA DE TAREAS SIN aa:
 
-Esta regla actúa como red de seguridad para cuando el dev olvida escribir `aa:`.
+**Regla por defecto, no red de seguridad:** en un proyecto configurado el dev NO necesita escribir `aa:`.
 
 Si el mensaje NO tiene `aa:` pero cumple los criterios de abajo,
 trátalo exactamente como si tuviera `aa:` — ejecuta el pipeline completo.
+
+**Quién lo decide, en este orden:**
+1. El hook del prompt (`host-guard.cjs` + `prompt-tarea.cjs`, solo Claude Code): si clasifica el mensaje como tarea, inyecta
+   la línea «[agentix] Esto parece una tarea de desarrollo… trátala como `aa:`» y el brief del enricher. Con esa línea presente,
+   ya es `aa:`: no hace falta confirmarlo con la persona.
+2. Sin hook (Cursor, o hooks no instalados — `akdd host-hooks status`): los criterios de abajo, aplicados por ti.
+
+El REGISTRO de lo hecho no depende de nada de esto: lo dispara el commit (hook de git) y la aceptación de TEAMS.
+Lo único que no se registra solo es el trabajo SIN COMMIT: si el contexto trae «⚠️ N archivo(s) editados SIN COMMIT»,
+hacer commit al terminar la tarea es lo que la deja en la memoria, la línea de tiempo y el tablero.
 
 ### TRATAR COMO aa: si el mensaje:
 - Empieza con verbo de acción técnica:
@@ -965,11 +982,13 @@ trátalo exactamente como si tuviera `aa:` — ejecuta el pipeline completo.
 > TIEMPO DESDE EL CHAT.
 
 ### Comportamiento al detectar tarea sin aa:
-Antes de ejecutar, mostrar exactamente:
-```
-🔄 Detecté una tarea de desarrollo — ejecutando como aa:
-```
-Luego proceder con el pipeline completo como si el dev hubiera escrito `aa:`.
+No hace falta anunciarlo ni pedir confirmación: proceder con el pipeline completo como si el dev hubiera escrito `aa:`.
+Si hay una duda real de si era tarea o conversación, una sola línea: «Lo trato como tarea (`aa:`); dime si solo querías hablarlo».
+
+### Medir que esto funciona (números, no intención)
+`akdd cobertura` (`node .agentic/grafo/cobertura.cjs [--dias=7] [--json]`) informa tres cosas, de la más dura a la más blanda:
+commits de git vs ciclos en la base (exacto), calidad de lo registrado por origen (% de ciclos con duración, pruebas, AST,
+módulos, memoria) y mensajes que parecían tarea (aproximado: el clasificador es heurístico). Pruebas: `test/prompt-tarea.test.cjs`.
 
 
 ## MODO EXPLORE — aa: explore [objetivo]

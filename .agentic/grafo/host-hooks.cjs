@@ -46,7 +46,9 @@ const HOSTS = {
         preToolUse: [{ command: `${g} --event=edit`, matcher: 'Write|Edit|MultiEdit|StrReplace|Delete', timeout: 10, failClosed: false }],
         beforeMCPExecution: [{ command: `${g} --event=mcp`, timeout: 10, failClosed: false }],
         beforeSubmitPrompt: [{ command: `${g} --event=prompt`, timeout: 10 }],
-      }, goal ? { stop: [{ command: `node ${script(root, 'goal-check.cjs')} --hook=cursor`, timeout: 10, loop_limit: LOOP_LIMIT }] } : {});
+        // Fin de turno: anota el trabajo editado y sin commit (lo único que no se registra solo). No bloquea ni imprime.
+        stop: [{ command: `${g} --event=stop`, timeout: 10, failClosed: false }, ...(goal ? [{ command: `node ${script(root, 'goal-check.cjs')} --hook=cursor`, timeout: 10, loop_limit: LOOP_LIMIT }] : [])],
+      });
     },
     propia: (e) => esPropio(e.command),
     comandos: (e) => [e.command],
@@ -65,7 +67,9 @@ const HOSTS = {
           { matcher: 'mcp__.*', hooks: [{ type: 'command', command: cmd('mcp'), timeout: 10 }] },
         ],
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: cmd('prompt'), timeout: 15 }] }],
-      }, goal ? { Stop: [{ hooks: [{ type: 'command', command: `node ${script(root, 'goal-check.cjs')} --hook=claude`, timeout: 10 }] }] } : {});
+        // Fin de turno: anota el trabajo editado y sin commit (lo único que no se registra solo). No bloquea ni imprime.
+        Stop: [{ hooks: [{ type: 'command', command: cmd('stop'), timeout: 10 }] }, ...(goal ? [{ hooks: [{ type: 'command', command: `node ${script(root, 'goal-check.cjs')} --hook=claude`, timeout: 10 }] }] : [])],
+      });
     },
     propia: (e) => Array.isArray(e.hooks) && e.hooks.some((h) => esPropio(h.command)),
     comandos: (e) => (e.hooks || []).map((h) => h.command),
@@ -121,6 +125,7 @@ function instalar(root, host, { goal = false } = {}) {
   for (const [ev, lista] of Object.entries(nuevas)) cfg.hooks[ev] = [...(cfg.hooks[ev] || []), ...lista];
   escribirJSON(f, cfg);
   const r = registro(root);
+  if (r.rechazados) delete r.rechazados[host]; // instalar a mano revoca un rechazo anterior
   if (!r[host]) r[host] = { creado_por_agentix: !l.existe };
   r[host].instalado = new Date().toISOString();
   r[host].ruta = path.resolve(root).replace(/\\/g, '/');
@@ -139,6 +144,8 @@ function desinstalar(root, host) {
   const cfg = l.datos;
   const quitadas = quitarPropias(h, cfg);
   const r = registro(root);
+  // El dueño lo quitó a propósito: `akdd init/update` NO lo vuelven a instalar solos (hasta un `host-hooks install` explícito).
+  r.rechazados = Object.assign({}, r.rechazados, { [host]: new Date().toISOString() });
   const nuestro = r[host] && r[host].creado_por_agentix;
   const vacio = !Object.keys(cfg.hooks || {}).length && Object.keys(cfg).every((k) => k === 'hooks' || k === 'version');
   if (nuestro && vacio) fs.unlinkSync(f);
@@ -146,6 +153,24 @@ function desinstalar(root, host) {
   delete r[host];
   guardarRegistro(root, r);
   return { host, ok: true, quitadas, archivo_borrado: !!(nuestro && vacio) };
+}
+
+/**
+ * Instalación AUTOMÁTICA (init / update): solo en los hosts que el proyecto usa (existe .claude/ o .cursor/), con merge (no pisa hooks
+ * ajenos), idempotente, y sin tocar un host que el dueño rechazó con `uninstall`. Antes los hooks eran «opcionales» y en un proyecto
+ * real (medinet) NINGÚN host los tenía: sin enriquecimiento, sin guardia de la DENY LIST, sin aviso de decisiones ni de trabajo sin commit.
+ * Opt-out de entorno: AKDD_NO_HOST_HOOKS=1.
+ */
+function instalarAutomatico(root) {
+  if (process.env.AKDD_NO_HOST_HOOKS === '1') return { ok: true, omitido: 'AKDD_NO_HOST_HOOKS', hosts: [] };
+  const rch = registro(root).rechazados || {};
+  const out = [];
+  for (const host of Object.keys(HOSTS)) {
+    if (!fs.existsSync(path.join(root, '.' + host))) { out.push({ host, ok: true, omitido: 'EL_PROYECTO_NO_USA_ESTE_HOST' }); continue; }
+    if (rch[host]) { out.push({ host, ok: true, omitido: 'RECHAZADO_POR_EL_DUEÑO' }); continue; }
+    out.push(instalar(root, host));
+  }
+  return { ok: out.every((x) => x.ok !== false), hosts: out };
 }
 
 const cap = () => require('./capacidad-estado.cjs');
@@ -283,7 +308,7 @@ function cobertura(root) {
   return { enforcement: huecos.length ? 'DEGRADED' : 'COMPLETO', huecos, filas, hosts: st };
 }
 
-module.exports = { instalar, desinstalar, estado, smoke, cobertura, HOSTS, LOOP_LIMIT };
+module.exports = { instalar, instalarAutomatico, desinstalar, estado, smoke, cobertura, HOSTS, LOOP_LIMIT };
 
 if (require.main === module) {
   const [cmd = 'status', ...rest] = process.argv.slice(2);
@@ -305,6 +330,7 @@ if (require.main === module) {
   const root = process.cwd();
   let out;
   if (cmd === 'install') out = hosts.map((x) => instalar(root, x, { goal: rest.includes('--goal') }));
+  else if (cmd === 'auto') out = instalarAutomatico(root);
   else if (cmd === 'uninstall') out = hosts.map((x) => desinstalar(root, x));
   else if (cmd === 'smoke') out = hosts.map((x) => smoke(root, x));
   else if (cmd === 'coverage' || cmd === 'cobertura') out = cobertura(root);

@@ -298,6 +298,11 @@ async function init() {
       nodo(path.join(projectPath, '.agentic', 'grafo', 'install-hooks.cjs'), ['--quiet'], { cwd: projectPath });
     } catch (e) { /* el estado de los hooks se ve con akdd health */ }
 
+    // Hooks del HOST (Claude Code / Cursor): enriquecimiento sin aa:, guardia de la DENY LIST y avisos. Solo los que el proyecto usa.
+    try {
+      nodo(path.join(projectPath, '.agentic', 'grafo', 'host-hooks.cjs'), ['auto'], { cwd: projectPath });
+    } catch (e) { /* se ve con akdd host-hooks status */ }
+
     // Dependencias: nunca sin pedirlas. Sin better-sqlite3 el motor usa node:sqlite.
     if (banderas.deps) {
       try { herramienta('npm', ['install', 'better-sqlite3', '--save'], { cwd: projectPath }); console.log(chalk.green('  ✓ better-sqlite3')); }
