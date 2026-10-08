@@ -25,7 +25,7 @@ test('db-adapter: no hay ningún journal_mode = DELETE al abrir (la base vive en
   assert.ok(!/pragma\(\s*['"]journal_mode\s*=\s*DELETE['"]\s*\)/i.test(src), 'abrir no puede forzar DELETE: exige bloqueo exclusivo y falla con otro proceso conectado');
 });
 
-test('db-adapter + better-sqlite3: abrir para escribir con otra conexión abierta en WAL no falla ni cambia el modo', { skip: !hayBetterSqlite3() && 'better-sqlite3 no está instalado aquí (el caso real: medinet)' }, () => {
+test('db-adapter + better-sqlite3: abrir para escribir con otra conexión abierta en WAL no falla ni cambia el modo', { skip: !hayBetterSqlite3() && 'HOST_REAL_NO_EJECUTADO: better-sqlite3 no está instalado aquí (el caso real: medinet); la comprobación estática de arriba sí corre' }, () => {
   const { DatabaseSync } = require('node:sqlite');
   const dir = tmp('akdd-wal-');
   const f = path.join(dir, 'memoria.db');
