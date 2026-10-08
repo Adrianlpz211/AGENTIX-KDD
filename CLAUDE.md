@@ -394,7 +394,7 @@ El usuario NO necesita abrir terminal — funciona igual desde aquí.
 | `akdd canario` | correr `node .agentic/grafo/canario-gate.cjs --commit` (¿el último cambio trae test?) |
 | `akdd hierro` | correr `node .agentic/grafo/hierro-papel.cjs` (qué del protocolo se ejecuta y qué solo se lee) |
 | `akdd hooks` | correr `node .agentic/grafo/install-hooks.cjs` |
-| `akdd mod on` / `off` / `status` | correr `node .agentic/grafo/mods-manager.cjs on\|off\|status` (panel en vivo de Claude Code — ver sección MODS) |
+| `akdd mod on` / `off` / `status` [`--global`] | correr `node .agentic/grafo/mods-manager.cjs on\|off\|status [--global]` (panel en vivo de Claude Code — ver sección MODS; `--global` = en todos los proyectos) |
 | `akdd reason status` | correr `node .agentic/grafo/reasoning-bank.cjs status` |
 | `akdd prediccion` | correr `node .agentic/grafo/prediccion-registro.cjs precision` (¿acierta la predicción de riesgo? el número que importa es el FALSO NEGATIVO: predijo BAJO y se rompió algo) |
 | `akdd prediccion listar [n]` | correr `node .agentic/grafo/prediccion-registro.cjs listar [n]` (las últimas predicciones con su veredicto y la evidencia) |
@@ -1222,6 +1222,7 @@ Lo que no existe se muestra `n/d`, nunca 0.
 akdd mod on       instala la copia en .claude/skills/agentix-live/ (Claude Code la carga solo en la próxima sesión)
 akdd mod status   AL_DIA · DESACTUALIZADO · APAGADO · AJENO (carpeta del usuario con ese nombre: no se toca)
 akdd mod off      quita solo la copia propia
+akdd mod on --global      lo instala en ~/.claude/skills (TODOS tus proyectos, sin repetirlo en cada uno); también off/status --global
 /agentix          dentro de Claude Code: reabre el panel si se cerró
 ```
 

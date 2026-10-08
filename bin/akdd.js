@@ -153,7 +153,7 @@ const HELP = `
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
     akdd decisiones [listar|responder|aplicada]   Owner decisions board (dashboard tab 🗳️ Decisiones): list, answer, close
-    akdd mod <on|off|status|list> [--mod=name]   Claude Code mods shipped with Agentix (live panel); installed into .claude/skills/
+    akdd mod <on|off|status|list> [--mod=name] [--global]   Claude Code mods shipped with Agentix (live panel); installed into .claude/skills/ (this project) or ~/.claude/skills/ (--global: every project)
     akdd teams <activar|estado|ronda|revisar|tarea|corregir|resolver|reportar|aceptar|cerrar|…>   Claude Code directs, Cursor builds (one MD channel)
     akdd ws <activar|estado|desactivar>   Optional WhatsApp notices (needs a real browser session)
     akdd simple            Simplicity gate: duplicated code, deps with native equivalent
@@ -242,8 +242,11 @@ switch (command) {
     break;
   }
   case 'mod': case 'mods': {
-    if (['on', 'off', 'status', 'list', 'refresh'].includes(arg1 || 'status')) runModule('mods-manager.cjs', arg1 || 'status', ...args.slice(2));
-    else uso('akdd mod <on|off|status|list> [--mod=name]');
+    if (['on', 'off', 'status', 'list', 'refresh'].includes(arg1 || 'status')) {
+      // --global instala en ~/.claude/skills (todos los proyectos): no necesita que esta carpeta tenga Agentix, así que corre el gestor del propio paquete.
+      if (args.includes('--global')) ejecutar(path.join(__dirname, '..', '.agentic', 'grafo', 'mods-manager.cjs'), [arg1 || 'status', ...args.slice(2)]);
+      else runModule('mods-manager.cjs', arg1 || 'status', ...args.slice(2));
+    } else uso('akdd mod <on|off|status|list> [--mod=name] [--global]');
     break;
   }
   case 'decisiones': case 'decision': runModule('decisiones.cjs', ...args.slice(1)); break;

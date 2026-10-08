@@ -91,3 +91,84 @@ test('mods: el mod real agentix-live viaja en el repo con su manifiesto y su mó
   const files = require('../package.json').files;
   assert.ok(files.includes('.agentic/mods/'), 'package.json publica .agentic/mods/');
 });
+
+// ───────────────────────────── ámbito global (--global) ─────────────────────────────
+
+/** Entorno aislado: ni ~/.claude ni ~/.agentix reales se tocan. */
+function entornoGlobal() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-mods-global-'));
+  const prev = { c: process.env.CLAUDE_CONFIG_DIR, a: process.env.AKDD_HOME };
+  process.env.CLAUDE_CONFIG_DIR = path.join(base, 'claude'); process.env.AKDD_HOME = path.join(base, 'agentix');
+  return { base, cfg: process.env.CLAUDE_CONFIG_DIR, casa: process.env.AKDD_HOME, restaurar() { for (const [k, v] of [['CLAUDE_CONFIG_DIR', prev.c], ['AKDD_HOME', prev.a]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } } };
+}
+
+test('mods --global: instala en la carpeta de usuario de Claude Code, con su marca y su registro, sin tocar el proyecto', () => {
+  const env = entornoGlobal();
+  try {
+    const { root } = raizConMod();
+    const r = mm.encender(root, 'panel-demo', { global: true });
+    assert.strictEqual(r.ok, true); assert.strictEqual(r.ambito, 'global');
+    const dest = path.join(env.cfg, 'skills', 'panel-demo');
+    assert.ok(fs.existsSync(path.join(dest, '.claude-plugin', 'plugin.json')));
+    assert.ok(fs.existsSync(path.join(dest, mm.MARCA)));
+    assert.ok(!fs.existsSync(path.join(root, mm.DESTINO, 'panel-demo')), 'el proyecto no recibe copia local');
+    assert.ok(!fs.existsSync(path.join(root, mm.REGISTRO)), 'el registro del proyecto no cambia');
+    const reg = JSON.parse(fs.readFileSync(path.join(env.casa, '_mods-host.json'), 'utf8'));
+    assert.strictEqual(reg['panel-demo'].hash, r.hash);
+    assert.strictEqual(mm.estado(root, { global: true })[0].situacion, 'AL_DIA');
+    assert.strictEqual(mm.estado(root)[0].situacion, 'APAGADO', 'lo global no enciende el ámbito del proyecto');
+  } finally { env.restaurar(); }
+});
+
+test('mods --global: sin fuente en el proyecto usa la del paquete (funciona desde cualquier carpeta)', () => {
+  const env = entornoGlobal();
+  try {
+    const vacio = fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-sin-agentix-'));
+    assert.deepStrictEqual(mm.disponibles(vacio, { global: true }), ['agentix-live'], 'viene del .agentic/mods del paquete');
+    const r = mm.encender(vacio, 'agentix-live', { global: true });
+    assert.strictEqual(r.ok, true);
+    assert.ok(fs.existsSync(path.join(env.cfg, 'skills', 'agentix-live', 'hooks', 'register.tsx')));
+  } finally { env.restaurar(); }
+});
+
+test('mods --global: una carpeta ajena no se pisa ni se borra; off quita solo lo propio y el registro global', () => {
+  const env = entornoGlobal();
+  try {
+    const { root } = raizConMod();
+    const ajena = path.join(env.cfg, 'skills', 'panel-demo'); fs.mkdirSync(ajena, { recursive: true }); fs.writeFileSync(path.join(ajena, 'mio.txt'), 'x');
+    const r = mm.encender(root, 'panel-demo', { global: true });
+    assert.strictEqual(r.ok, false); assert.strictEqual(r.reason_code, 'AJENO');
+    assert.strictEqual(mm.apagar(root, 'panel-demo', { global: true }).reason_code, 'AJENO');
+    assert.ok(fs.existsSync(path.join(ajena, 'mio.txt')));
+    fs.rmSync(ajena, { recursive: true, force: true });
+    mm.encender(root, 'panel-demo', { global: true });
+    const o = mm.apagar(root, 'panel-demo', { global: true });
+    assert.strictEqual(o.ok, true); assert.strictEqual(o.quitado, true);
+    assert.ok(!fs.existsSync(path.join(env.cfg, 'skills', 'panel-demo')));
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(env.casa, '_mods-host.json'), 'utf8')), {});
+  } finally { env.restaurar(); }
+});
+
+test('mods --global: si el proyecto ya tiene su copia local avisa del doble cargado', () => {
+  const env = entornoGlobal();
+  try {
+    const { root } = raizConMod();
+    mm.encender(root, 'panel-demo');
+    const r = mm.encender(root, 'panel-demo', { global: true });
+    assert.strictEqual(r.ok, true); assert.match(r.aviso, /dos veces/);
+    assert.match(mm.estado(root, { global: true })[0].aviso, /dos veces/);
+  } finally { env.restaurar(); }
+});
+
+test('mods --global: refresh solo toca lo que se había encendido en global', () => {
+  const env = entornoGlobal();
+  try {
+    const { root, src } = raizConMod();
+    assert.deepStrictEqual(mm.refrescar(root, { global: true }), [], 'nada encendido → nada se enciende solo');
+    mm.encender(root, 'panel-demo', { global: true });
+    fs.writeFileSync(path.join(src, 'hooks', 'register.ts'), 'export const register = () => { /* v2 */ }\n');
+    assert.strictEqual(mm.estado(root, { global: true })[0].situacion, 'DESACTUALIZADO');
+    assert.strictEqual(mm.refrescar(root, { global: true })[0].ok, true);
+    assert.strictEqual(mm.estado(root, { global: true })[0].situacion, 'AL_DIA');
+  } finally { env.restaurar(); }
+});
