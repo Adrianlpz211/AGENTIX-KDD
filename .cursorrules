@@ -93,6 +93,20 @@ RONDA_COMPLETA; el Director corre `revisar`, `auditar T-00X` (3 sub-agentes en p
 negocio, más los extra), `aceptar T-00X`. Decisiones: si sabe, decide e implementa; si duda, INVESTIGA en internet
 con o sin links del dueño; solo escala lo que no está en internet o es bloqueante por seguridad.
 
+### Que no se duerma, que no se pierda y cuándo se para (mecánico)
+
+- **No se duerme:** los vigilantes solo terminan por `pausa`, `cerrar` o TODO VERDE; no por reloj (espera de 12 h). Si tu
+  vigilante murió o queda trabajo sin atender cuando vas a terminar el turno, el gancho de parada del host
+  (`teams-continuidad.cjs`, lo invoca `host-guard.cjs`) te pide seguir: relanza tu vigilante y corre `ronda`/`revisar`.
+  Tiene freno anti-bucle (3 intentos sin cambio y avisa al dueño) y `AKDD_NO_TEAMS_STOP=1` lo apaga.
+- **No se pierde:** cada escritura de Agentix deja una copia (`.agentic/_teams/canal-ultimo.md`); si otro editor pisa el
+  archivo y falta una tarea/corrección/decisión que esa copia tenía, `calcular` la repone y avisa al Director.
+- **Barra de 4 tramos** (TEAMS e individual): 🟩 terminadas · 🟦 en curso · 🟧 parciales / esperan al dueño · 🟥 faltan.
+- **Cuándo se para:** solo tras RECORRER todo. Una decisión del dueño o una parcial NO frenan el recorrido: se anotan y se
+  sigue con lo demás. Con todo verde y sin decisiones → `TERMINADO` (el Director corre `cerrar`). Si solo quedan
+  decisiones/parciales del dueño → `ESPERA_DUENO`: el Director se lo resume al dueño y para sin inventar trabajo; los
+  vigilantes siguen vivos (sin costo) y lo despiertan cuando el dueño responda.
+
 ---
 
 ## CUANDO VES aa: restore

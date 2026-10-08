@@ -135,8 +135,15 @@ function aceptacionesDetalle(c) {
 }
 
 function calcular(root, opts = {}) {
-  const c = canal.leer(root);
+  let c = canal.leer(root);
   if (!c) return null;
+  // Escritura pisada (medinet, 2 veces): una tarea quedó en el estado de TEAMS pero no en el archivo del canal porque el editor del
+  // constructor guardó una copia vieja encima. Si la última escritura de Agentix tenía un bloque que ahora falta, se repone.
+  let recuperados = [];
+  if (!opts.sinRecuperar && c.estado === 'ACTIVO') {
+    recuperados = canal.recuperarPerdidos(root);
+    if (recuperados.length) { registrarEvento(root, { rol: 'sistema', cmd: 'CANAL_RECUPERADO', objetivo: recuperados.join(',') }); c = canal.leer(root) || c; }
+  }
   const ahora = opts.ahora || Date.now();
   const rep = canal.reportes(c);
   const acept = canal.aceptadas(c);
@@ -198,8 +205,39 @@ function calcular(root, opts = {}) {
     correcciones, corrPend, tareas, tareasPend, hechasSinAceptar, devueltas, omisiones, decisiones,
     solicitudes: decisiones.filter((d) => d.solicitud && d.abierta), decisionesDueno: decisiones.filter((d) => d.dueno && d.abierta), decididasDueno: decisiones.filter((d) => d.dueno && !d.abierta && !/Estado:\s*EJECUTADA/i.test(d.texto)),
     aceptadas: aceptadasN, total: vivas, avance: vivas ? Math.round((aceptadasN / vivas) * 100) : null,
-    constructorSinTrabajo, listo, ocioso,
+    constructorSinTrabajo, listo, ocioso, recuperados,
+    ...segmentosYFin({ tareas, corrPend, omisiones, decisiones, hechasSinAceptar, tareasPend, devueltas, ahora, root, parcialMs: opts.parcialMs || PARCIAL_MS }),
   };
+}
+
+/**
+ * La barra de avance en 4 tramos (vale igual con TEAMS que en modo individual: son las mismas tareas del canal):
+ *   verde    terminadas y aceptadas
+ *   azul     en curso (el constructor las está haciendo, o entregadas esperando la aceptación)
+ *   naranja  parciales: les faltan cosas y quedan pendientes (devueltas, estancadas, bloqueadas por una decisión del dueño)
+ *   rojo     lo que falta: todavía sin empezar
+ * Y el estado de FIN. Solo se declara fin tras RECORRER todo: ninguna tarea sin hacer, nada por revisar, ninguna corrección ni omisión.
+ * Que haya una decisión del dueño sin responder o una parcial NO frena el recorrido de las demás (no se para en la primera):
+ * se anotan y se sigue; solo cuando ya no queda nada accionable se declara el fin.
+ *   TERMINADO     todo verde y sin decisiones abiertas
+ *   ESPERA_DUENO  solo quedan parciales / decisiones que dependen del dueño
+ */
+function segmentosYFin({ tareas, corrPend, omisiones, decisiones, hechasSinAceptar, tareasPend, devueltas, ahora, root, parcialMs }) {
+  const vivas = tareas.filter((t) => t.estado !== 'CANCELADA' && t.estado !== 'HEREDADA');
+  const verde = vivas.filter((t) => t.estado === 'ACEPTADA').length;
+  const naranja = vivas.filter((t) => t.estado === 'DEVUELTA').length;
+  // Una pendiente con reporte PARCIAL reciente, o con casillas ya marcadas, la está haciendo el constructor ahora mismo: azul.
+  const enCurso = (t) => t.estado === 'HECHA_SIN_ACEPTAR' || (t.estado === 'PENDIENTE' && ((t.reporte && t.reporte.estado === 'PARCIAL') || (t.casillas && t.casillas.hechas > 0)));
+  const azul = vivas.filter(enCurso).length;
+  const rojo = vivas.filter((t) => t.estado === 'PENDIENTE' && !enCurso(t)).length;
+  const total = vivas.length;
+  const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
+  const decAbiertas = decisiones.filter((d) => d.dueno && d.abierta).length;
+  const recorrido = total > 0 && !tareasPend.length && !hechasSinAceptar.length && !corrPend.length && !omisiones.length;
+  let fin = null;
+  if (recorrido && !naranja && !decAbiertas) fin = 'TERMINADO';
+  else if (recorrido && (naranja || decAbiertas)) fin = 'ESPERA_DUENO';
+  return { segmentos: { verde, azul, naranja, rojo, total, pct: { verde: pct(verde), azul: pct(azul), naranja: pct(naranja), rojo: pct(rojo) } }, fin };
 }
 
 /** Qué le toca a cada rol, y su huella: si la huella no cambió desde la última ronda que el rol hizo, no hay despertar. */
@@ -213,6 +251,10 @@ function accionable(e, rol) {
     for (const t of e.tareasPend) { razones.push(`TAREA ${t.id}: ${corto(t.titulo, 110)}`); claves.push('T:' + t.id + ':' + canal.sha(t.texto).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
   } else {
+    // Fin del recorrido: el Director se entera UNA vez (la huella no cambia mientras el estado sea el mismo) y no inventa trabajo.
+    if (e.fin === 'TERMINADO') { razones.push('TODO VERDE: las ' + e.segmentos.total + ' tareas están aceptadas y no queda ninguna decisión abierta — corre `cerrar` (reporte final al dueño); los vigilantes terminan solos'); claves.push('F:TERMINADO'); }
+    else if (e.fin === 'ESPERA_DUENO') { razones.push('RECORRIDO COMPLETO: ya se hizo todo lo que no depende del dueño (' + e.segmentos.verde + ' verdes de ' + e.segmentos.total + '). Quedan ' + e.decisionesDueno.length + ' decisión(es) del dueño y ' + e.segmentos.naranja + ' parcial(es) — resúmeselo al dueño y detente: NO inventes trabajo; cuando responda, el vigilante te despierta'); claves.push('F:ESPERA:' + e.decisionesDueno.map((d) => d.id).join(',') + ':' + e.devueltas.map((t) => t.id).join(',')); }
+    if (e.recuperados && e.recuperados.length) { razones.push(`CANAL PISADO: el archivo del canal perdió ${e.recuperados.join(', ')} (otro editor guardó una copia vieja encima); Agentix ya lo repuso — avísale al constructor que no guarde copias viejas del canal`); claves.push('P:' + e.recuperados.join(',')); }
     for (const t of e.hechasSinAceptar) {
       razones.push(`ENTREGA ${t.id} por revisar: ${corto(t.titulo, 90)}`); claves.push('E:' + t.id + ':' + canal.sha((t.reporte ? t.reporte.detalle + t.reporte.estado : '') + t.casillas.hechas).slice(0, 8));
       // Recordatorio: una entrega sin aceptar ni corregir NO se queda dormida. Cada REVISION_MS que pasa sin revisarla, el aviso se repite (huella nueva).
@@ -484,7 +526,7 @@ function activar(root, opt) {
     }
   }
   const fecha = new Date().toISOString().slice(0, 10);
-  if (!existente) {
+  if (!existente) { canal.olvidarInstantanea(root);
     fs.writeFileSync(canal.rutaCanal(root), P.canalPlantilla({ mecanica: 'POR DEFINIR', constructor: nombreOpt(opt, 'constructor', 'Cursor'), director: nombreOpt(opt, 'director', 'Claude Code'), fecha }));
     out.push('✔ canal creado: .legion/AUDITORIA-CURSOR.md (estado PREPARADO, modo por definir)');
   } else {
@@ -643,12 +685,13 @@ function ejecutarCmd(argv, root) {
   if (cmd === 'estado') {
     const e = necesitaCanal(); if (!e) return salida(1);
     if (opt.json) {
-      say(JSON.stringify({ canal: e.canal, mecanica: e.mecanica, avance: e.avance, aceptadas: e.aceptadas, total: e.total, correcciones_pendientes: e.corrPend.map((k) => k.id), tareas_pendientes: e.tareasPend.map((t) => t.id), por_aceptar: e.hechasSinAceptar.map((t) => t.id), devueltas: e.devueltas.map((t) => t.id), omisiones: e.omisiones.map((o) => o.codigo + ':' + o.id), decisiones_dueno_abiertas: e.decisionesDueno.map((d) => d.id), listo_para_cerrar: e.listo, constructor_ocioso: e.ocioso, registro: reg.resumen(root) }, null, 2));
+      say(JSON.stringify({ canal: e.canal, mecanica: e.mecanica, segmentos: e.segmentos, fin: e.fin, avance: e.avance, aceptadas: e.aceptadas, total: e.total, correcciones_pendientes: e.corrPend.map((k) => k.id), tareas_pendientes: e.tareasPend.map((t) => t.id), por_aceptar: e.hechasSinAceptar.map((t) => t.id), devueltas: e.devueltas.map((t) => t.id), omisiones: e.omisiones.map((o) => o.codigo + ':' + o.id), decisiones_dueno_abiertas: e.decisionesDueno.map((d) => d.id), listo_para_cerrar: e.listo, constructor_ocioso: e.ocioso, registro: reg.resumen(root) }, null, 2));
       return salida();
     }
     const est0 = leerEstado(root);
     say(`Canal ${e.canal} · modo ${est0.modo ? est0.modo.toUpperCase() : 'POR DEFINIR'}${(est0.extras || []).length ? ' (+' + est0.extras.length + ' auditor extra)' : ''} · plan ${est0.plan ? 'guardado' : 'sin plan'}${est0.modo === 'completo' ? ' · constructor ' + (est0.builder ? 'conectado' : 'NO conectado') : ''}`);
     say(`Mecánica ${e.mecanica || 'n/d'} · avance ${e.avance === null ? 'n/d' : e.avance + ' %'} (${e.aceptadas}/${e.total} aceptadas)`);
+    if (e.segmentos && e.segmentos.total) { const g = e.segmentos; say(`Barra: 🟩 ${g.verde} terminadas (${g.pct.verde}%) · 🟦 ${g.azul} en curso (${g.pct.azul}%) · 🟧 ${g.naranja} parciales (${g.pct.naranja}%) · 🟥 ${g.rojo} faltan (${g.pct.rojo}%)${e.fin ? ' · FIN: ' + (e.fin === 'TERMINADO' ? 'todo verde' : 'solo queda lo que depende del dueño') : ''}`); }
     say(`Correcciones pendientes: ${e.corrPend.length} · Tareas en cola: ${e.tareasPend.length} · Por aceptar: ${e.hechasSinAceptar.length} · Devueltas: ${e.devueltas.length} · Omisiones: ${e.omisiones.length}`);
     say(`Decisiones del dueño abiertas: ${e.decisionesDueno.length} · Listo para cerrar: ${e.listo ? 'SÍ' : 'no'}${e.ocioso ? ' · CONSTRUCTOR OCIOSO' : ''}`);
     const r = reg.resumen(root); say(`Registro en Agentix: ${r.registradas} ciclo(s) · pendientes ${r.pendientes}${r.abandonadas ? ' · abandonados ' + r.abandonadas : ''} · memoria KDD ${r.memoria}`);
@@ -1066,7 +1109,7 @@ function ejecutarCmd(argv, root) {
 function esperar(root, opt) {
   const rol = opt.rol === 'director' ? 'director' : 'builder';
   const sondeoMs = Math.max(200, Number(process.env.AKDD_TEAMS_SONDEO_MS) || (Number(opt.sondeo) || 10) * 1000);
-  const maxMs = Number(process.env.AKDD_TEAMS_MAX_MS) || (Number(opt.max) || 105) * 60000;
+  const maxMs = Number(process.env.AKDD_TEAMS_MAX_MS) || (Number(opt.max) || 720) * 60000;
   const ociosoMs = Number(process.env.AKDD_TEAMS_OCIOSO_MS) || OCIOSO_MS;
   const dir = path.join(canal.dirEstado(root), 'vigilantes'); fs.mkdirSync(dir, { recursive: true });
   const archivoV = path.join(dir, rol + '.json');
@@ -1189,6 +1232,7 @@ function salud(root, opts = {}) {
     alertas, roles, quieto_min: quieto, actividad_seg: actividadSeg, plan: !!est.plan, builder_conectado: !!est.builder, extras: (est.extras || []).length, auditoria,
     eventos: evs.slice(-14).map((ev) => ({ t: ev.t, cmd: ev.cmd, rol: ev.rol, arg: ev.arg || null })),
     tareas_todas: e.tareas.slice(-60).map((t) => ({ id: t.id, titulo: corto(t.titulo, 70), estado: t.estado, reporte: t.reporte ? t.reporte.estado : null })),
+    segmentos: e.segmentos, fin: e.fin,
     correcciones_todas: e.correcciones.slice(-30).map((k) => ({ id: k.id, resuelta: !!k.resuelto, sev: k.sev, titulo: corto(k.titulo, 70) })), avance: e.avance, aceptadas: e.aceptadas, total: e.total,
     cola: { tareas: e.tareasPend.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), por_aceptar: e.hechasSinAceptar.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90) })), devueltas: e.devueltas.map((t) => ({ id: t.id, titulo: corto(t.titulo, 90), estancada: !!t.estancada })), correcciones: e.corrPend.map((k) => ({ id: k.id, sev: k.sev, titulo: corto(k.titulo, 90) })), decisiones_dueno: e.decisionesDueno.map(detalleDecision) },
     registro: Object.assign(reg.resumen(root), { base: reg.estadoBase(root) }), avisos: (est.wakes || []).slice(-8).map((w) => ({ rol: w.rol, at: w.at, atendido: !!w.visto_at })),
@@ -1198,7 +1242,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { salud, reencolaCancelada, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { leerVigilante, registrarEvento, salud, reencolaCancelada, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

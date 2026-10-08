@@ -18,8 +18,8 @@ const PLANTILLA = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agentix — Oficina</title>
 <style>
-  :root { --bg:#0A0E14; --panel:#111823; --line:#1f2a3a; --txt:#d6dde8; --dim:#8A97A6; --ok:#3FE2E8; --warn:#D9A33C; --bad:#ff6b6b; }
-  @media (prefers-color-scheme: light) { :root { --bg:#f6f8fb; --panel:#fff; --line:#d9e0ea; --txt:#17202e; --dim:#5c6b7e; --ok:#0a8f96; --warn:#9a6a00; --bad:#c0392b; } }
+  :root { --bg:#0A0E14; --panel:#111823; --line:#1f2a3a; --txt:#d6dde8; --dim:#8A97A6; --ok:#3FE2E8; --warn:#D9A33C; --bad:#ff6b6b; --verde:#3ecf6e; --azul:#4aa3ff; --naranja:#f0932b; --rojo:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f8fb; --panel:#fff; --line:#d9e0ea; --txt:#17202e; --dim:#5c6b7e; --ok:#0a8f96; --warn:#9a6a00; --bad:#c0392b; --verde:#1f9d4d; --azul:#1e6fd0; --naranja:#c46a00; --rojo:#c0392b; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { padding:20px 24px 8px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
@@ -34,7 +34,7 @@ const PLANTILLA = `<!doctype html>
   .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .dim { color:var(--dim); }
   .wide { grid-column:1 / -1; } ul { margin:6px 0 0; padding-left:18px; } li { margin:3px 0; overflow-wrap:anywhere; }
   .sem { border-width:2px; } .sem.VERDE { border-color:var(--ok); } .sem.AMARILLO { border-color:var(--warn); } .sem.ROJO { border-color:var(--bad); }
-  .bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:6px 0 10px; } .bar > i { display:block; height:100%; background:var(--ok); }
+  .bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:6px 0 10px; } .bar > i { display:block; height:100%; background:var(--ok); } .bar.seg { display:flex; } .bar.seg > i { flex:none; } .bar .verde { background:var(--verde); } .bar .azul { background:var(--azul); } .bar .naranja { background:var(--naranja); } .bar .rojo { background:var(--rojo); } .lg { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--dim); } .lg b { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
   button { background:transparent; color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:5px 12px; cursor:pointer; font:inherit; }
   .dueno { max-height:340px; overflow-y:auto; }
   .dueno .it { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; cursor:pointer; }
@@ -152,7 +152,8 @@ const PLANTILLA = `<!doctype html>
     sem.appendChild(el('div', 'big ' + cls, d.semaforo === 'VERDE' ? 'Todo fluye' : (d.semaforo === 'AMARILLO' ? 'Atención' : (d.semaforo === 'ROJO' ? 'Alguien está parado' : 'Canal ' + d.canal))));
     if (d.alertas.length) lista(sem, d.alertas, '', function (a) { return (a.nivel === 'ROJO' ? '🔴 ' : '🟡 ') + a.msg; });
     else sem.appendChild(el('div', 'dim', d.canal === 'ACTIVO' ? 'Los dos roles con vigilante y loop, sin avisos sin atender.' : 'El semáforo solo se evalúa con el canal ACTIVO.'));
-    if (d.avance !== null && d.avance !== undefined) { var b = el('div', 'bar'); var i = el('i'); i.style.width = d.avance + '%'; b.appendChild(i); sem.appendChild(b); sem.appendChild(el('div', 'dim', 'Avance medido: ' + d.avance + ' % (' + d.aceptadas + ' de ' + d.total + ' tareas aceptadas por el Director)')); }
+    if (d.segmentos && d.segmentos.total) { var sg = d.segmentos; var bs = el('div', 'bar seg'); [['verde', sg.verde], ['azul', sg.azul], ['naranja', sg.naranja], ['rojo', sg.rojo]].forEach(function (p) { if (p[1]) { var seg = el('i', p[0]); seg.style.width = (p[1] / sg.total * 100) + '%'; seg.title = p[0] + ': ' + p[1]; bs.appendChild(seg); } }); sem.appendChild(bs); var lg = el('div', 'lg'); [['verde', 'terminadas', sg.verde], ['azul', 'en curso', sg.azul], ['naranja', 'parciales / esperan al dueño', sg.naranja], ['rojo', 'falta', sg.rojo]].forEach(function (p) { var it = el('span'); var sw = el('b'); sw.style.background = 'var(--' + p[0] + ')'; it.appendChild(sw); it.appendChild(document.createTextNode(p[2] + ' ' + p[1])); lg.appendChild(it); }); sem.appendChild(lg); if (d.fin) sem.appendChild(el('div', d.fin === 'TERMINADO' ? 'ok' : 'warn', d.fin === 'TERMINADO' ? 'Todo en verde: nada más que hacer.' : 'Recorrido completo: solo queda lo que depende del dueño.')); }
+    else if (d.avance !== null && d.avance !== undefined) { var b = el('div', 'bar'); var i = el('i'); i.style.width = d.avance + '%'; b.appendChild(i); sem.appendChild(b); sem.appendChild(el('div', 'dim', 'Avance medido: ' + d.avance + ' % (' + d.aceptadas + ' de ' + d.total + ' tareas aceptadas por el Director)')); }
 
     ['director', 'builder'].forEach(function (rol) {
       var r = d.roles[rol]; var c = card(r.nombre);

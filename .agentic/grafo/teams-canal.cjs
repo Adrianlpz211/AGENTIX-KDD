@@ -221,8 +221,49 @@ function mutar(root, fn) {
     const f = rutaCanal(root); const tmp = f + '.' + process.pid + '.tmp';
     fs.writeFileSync(tmp, salida);
     renombrarConReintento(tmp, f);
+    guardarInstantanea(root, salida);
     return true;
   });
+}
+
+// ───────────────── instantánea: lo último que ESCRIBIÓ Agentix, para detectar escrituras pisadas ─────────────────
+// Caso real (medinet, 2 veces): la tarea T-034 quedó en el estado de TEAMS pero NO en el archivo del canal — el editor del
+// constructor guardó una copia vieja encima de nuestra escritura. El bloqueo de canal.lock solo protege entre procesos de Agentix.
+// Cada escritura nuestra deja una copia; si después falta un bloque (tarea/corrección/decisión) que esa copia tenía, se repone.
+const instantaneaPath = (root) => path.join(dirEstado(root), 'canal-ultimo.md');
+function guardarInstantanea(root, texto) {
+  try { fs.mkdirSync(dirEstado(root), { recursive: true }); fs.writeFileSync(instantaneaPath(root), texto); } catch { /* es una red de seguridad: sin ella todo sigue igual */ }
+}
+/** Un canal nuevo (activar) no hereda bloques del anterior. */
+function olvidarInstantanea(root) { try { fs.rmSync(instantaneaPath(root), { force: true }); } catch { /* ya no está */ } }
+
+/** Repone en el canal los bloques de tareas/correcciones/decisiones que la última escritura de Agentix tenía y ahora faltan. Devuelve los ids repuestos. */
+function recuperarPerdidos(root) {
+  const repuestos = [];
+  try {
+    if (!fs.existsSync(instantaneaPath(root))) return repuestos;
+    const previo = analizar(fs.readFileSync(instantaneaPath(root), 'utf8').split(/\r?\n/).join('\n'));
+    mutar(root, (lineas, c) => {
+      const faltan = [];
+      for (const clave of ['tareas', 'correcciones', 'decisiones']) {
+        if (!previo.secciones[clave]) continue;
+        const ids = new Set(elementos(c, clave).map((x) => x.id));
+        for (const el of elementos(previo, clave)) if (!el.generado && !ids.has(el.id)) faltan.push({ clave, el });
+      }
+      if (!faltan.length) return null;
+      const titulos = { tareas: 'Tareas para el constructor', correcciones: 'Correcciones pendientes', decisiones: 'Decisiones' };
+      let L = lineas.slice();
+      for (const { clave, el } of faltan) {
+        L = asegurarSeccion(L, clave, titulos[clave]);
+        L = quitarPlaceholder(L, clave);
+        const { fin } = finDeSeccion(L, clave);
+        L.splice(fin, 0, '', ...String(el.crudo).split(/\r?\n/));
+        repuestos.push(el.id);
+      }
+      return L;
+    });
+  } catch { /* la recuperación nunca rompe un comando */ }
+  return repuestos;
 }
 
 /** Garantiza que exista la sección (la añade al final si el canal es de una plantilla anterior). */
@@ -326,7 +367,7 @@ function lintTexto(texto) {
 
 module.exports = {
   DIR, ARCHIVO, rutaCanal, dirEstado, norm, sha, sello, leer, analizar, elementos, severidad, detalleResuelto, reportes, aceptadas,
-  mutar, conLock, renombrarConReintento, anadirAlFinal, anadirArriba, anadirLineaAlElemento, siguienteId, fijarEstado, lintTexto,
+  mutar, conLock, recuperarPerdidos, olvidarInstantanea, guardarInstantanea, renombrarConReintento, anadirAlFinal, anadirArriba, anadirLineaAlElemento, siguienteId, fijarEstado, lintTexto,
   RESUELTO, HECHO, ACEPTADA, CANCELADA, esPlaceholder,
   __asegurar: asegurarSeccion, __quitarPlaceholder: quitarPlaceholder, __finSeccion: (l, k) => finDeSeccion(l, k).fin, __inicioSeccion: (l, k) => inicioDeSeccion(l, k).pos,
 };
