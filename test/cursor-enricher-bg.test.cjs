@@ -20,9 +20,11 @@ test('cursor: una tarea lanza el enricher desacoplado (efectos reales), una preg
     const r = guard.enriquecerEnSegundoPlano(t, 'aa: arregla el login en src/auth.ts');
     assert.strictEqual(r.lanzado, true);
     const marca = path.join(t, 'marca.txt');
-    for (let i = 0; i < 60 && !fs.existsSync(marca); i++) await new Promise((x) => setTimeout(x, 100));
+    const lee = () => { try { return fs.readFileSync(marca, 'utf8'); } catch { return ''; } };
+    // el hijo crea el archivo y luego escribe: se espera al CONTENIDO, no a que exista (bajo carga se veía vacío)
+    for (let i = 0; i < 150 && !lee(); i++) await new Promise((x) => setTimeout(x, 100));
     assert.ok(fs.existsSync(marca), 'el enricher corrió en segundo plano');
-    assert.strictEqual(fs.readFileSync(marca, 'utf8'), 'arregla el login en src/auth.ts', 'sin el prefijo aa:');
+    assert.strictEqual(lee(), 'arregla el login en src/auth.ts', 'sin el prefijo aa:');
     process.env.AKDD_NO_ENRICHER_BG = '1';
     assert.strictEqual(guard.enriquecerEnSegundoPlano(t, 'x').lanzado, false, 'apagable');
   } finally {
