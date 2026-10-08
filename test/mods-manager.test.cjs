@@ -160,3 +160,11 @@ test('mods + CLI real de Claude Code: se instala como plugin del marketplace loc
     assert.doesNotMatch(spawnSync('claude', ['plugin', 'list'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 60000, env: process.env }).stdout, /agentix-live@agentix-mods/);
   } finally { e.restaurar(); }
 });
+
+test('mod agentix-live: las referencias de $.state son literales o consts del archivo, nunca miembros (R.usage hacía que el módulo NO cargara en la app 2.1.289)', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', '.agentic', 'mods', 'agentix-live', 'hooks', 'register.tsx'), 'utf8');
+  const llamadas = [...src.matchAll(/\$\.state\.(?:get|set)\(\s*([^,)]+)/g)].map((m) => m[1].trim());
+  assert.ok(llamadas.length > 5, 'se encontraron las llamadas');
+  for (const ref of llamadas) assert.match(ref, /^[A-Za-z_][A-Za-z0-9_]*$/, 'referencia por identificador, no miembro: ' + ref);
+  for (const ref of new Set(llamadas)) assert.match(src, new RegExp('const ' + ref + " = \{ plugin: '[^']+', key: '[^']+' \}"), ref + ' es una const con plugin y key literales');
+});

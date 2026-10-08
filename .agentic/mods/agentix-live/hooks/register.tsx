@@ -11,13 +11,14 @@ const PANE = 'agentix-live'
 const PLUGIN = 'agentix-live'
 
 // Referencias literales a los valores de $.state (declarados en types/index.d.ts).
-const R = {
-  usage: { plugin: PLUGIN, key: 'usage' } as const,
-  lastTurn: { plugin: PLUGIN, key: 'lastTurn' } as const,
-  tools: { plugin: PLUGIN, key: 'tools' } as const,
-  cycle: { plugin: PLUGIN, key: 'cycle' } as const,
-  agentix: { plugin: PLUGIN, key: 'agentix' } as const,
-}
+// El motor exige que cada referencia de $.state sea un objeto con `plugin` y `key` como cadenas LITERALES, escrito en la llamada o en una
+// const de este archivo (no un miembro como R.usage): así se pueden listar los valores que el módulo lee y escribe. Antes un
+// `R.usage` hacía que el módulo NO cargara y ni /agentix ni el panel aparecían.
+const R_USAGE = { plugin: 'agentix-live', key: 'usage' }
+const R_LASTTURN = { plugin: 'agentix-live', key: 'lastTurn' }
+const R_TOOLS = { plugin: 'agentix-live', key: 'tools' }
+const R_CYCLE = { plugin: 'agentix-live', key: 'cycle' }
+const R_AGENTIX = { plugin: 'agentix-live', key: 'agentix' }
 
 // Archivos de estado que Agentix escribe solo (ninguno se inventa aquí).
 const F = {
@@ -153,15 +154,15 @@ async function leerAgentix($: EngineInterface, desdeMs: number): Promise<Agentix
 /** Relee host y disco; el acumulado del ciclo sigue al ciclo, no a la sesión. */
 async function refrescar($: EngineInterface) {
   const u = await leerUsage($)
-  if (u) await $.state.set(R.usage, u)
+  if (u) await $.state.set(R_USAGE, u)
   const a = await leerAgentix($, u?.startedAt ?? 0)
-  await $.state.set(R.agentix, a)
+  await $.state.set(R_AGENTIX, a)
   const abierto = await cicloAbierto($)
-  const prev = (await $.state.get(R.cycle)).value ?? null
+  const prev = (await $.state.get(R_CYCLE)).value ?? null
   if (!abierto) {
-    if (prev) await $.state.set(R.cycle, null)
+    if (prev) await $.state.set(R_CYCLE, null)
   } else if (!prev || prev.cycleId !== abierto.cycleId) {
-    await $.state.set(R.cycle, cicloVacio(abierto))
+    await $.state.set(R_CYCLE, cicloVacio(abierto))
   }
 }
 
@@ -214,14 +215,14 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     toolsEsteTurno += 1
     const nombre = String(e.tool)
-    const t = (await $.state.get(R.tools)).value ?? {}
-    await $.state.set(R.tools, { ...t, [nombre]: (t[nombre] ?? 0) + 1 })
+    const t = (await $.state.get(R_TOOLS)).value ?? {}
+    await $.state.set(R_TOOLS, { ...t, [nombre]: (t[nombre] ?? 0) + 1 })
     return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
-    const prev = (await $.state.get(R.usage)).value ?? null
-    await $.state.set(R.usage, {
+    const prev = (await $.state.get(R_USAGE)).value ?? null
+    await $.state.set(R_USAGE, {
       startedAt: prev?.startedAt ?? 0,
       usd: e.cost?.usd ?? prev?.usd ?? null,
       percent: e.context.percent ?? prev?.percent ?? null,
@@ -249,10 +250,10 @@ export const register: Register = on => {
       cacheWrite: n(u.cache_creation_input_tokens),
       tools: herramientas,
     }
-    await $.state.set(R.lastTurn, t)
+    await $.state.set(R_LASTTURN, t)
 
     const su = await leerUsage($)
-    if (su) await $.state.set(R.usage, su)
+    if (su) await $.state.set(R_USAGE, su)
     const usdAhora = su?.usd ?? null
     const usdTurno = usdAhora !== null && usdAnterior !== null ? Math.max(0, usdAhora - usdAnterior) : 0
     if (usdAhora !== null) usdAnterior = usdAhora
@@ -260,7 +261,7 @@ export const register: Register = on => {
     const abierto = await cicloAbierto($)
     let acumulado: AgentixLiveCycle | null = null
     if (abierto) {
-      const prev = (await $.state.get(R.cycle)).value ?? null
+      const prev = (await $.state.get(R_CYCLE)).value ?? null
       const base = prev && prev.cycleId === abierto.cycleId ? prev : cicloVacio(abierto)
       acumulado = {
         ...base,
@@ -271,7 +272,7 @@ export const register: Register = on => {
         cacheRead: base.cacheRead + t.cacheRead,
         usd: base.usd + usdTurno,
       }
-      await $.state.set(R.cycle, acumulado)
+      await $.state.set(R_CYCLE, acumulado)
       // Compactar a mitad de un ciclo pierde el hilo del ciclo: se avisa una vez.
       const pct = su?.percent ?? 0
       if (pct >= 80 && !avisoContexto) {
@@ -279,7 +280,7 @@ export const register: Register = on => {
         $.ui.toast(`Contexto al ${pct}% con un ciclo aa: abierto — conviene cerrarlo antes de que compacte`, { timeoutMs: 8000 })
       }
     } else {
-      await $.state.set(R.cycle, null)
+      await $.state.set(R_CYCLE, null)
     }
     if ((su?.percent ?? 0) < 70) avisoContexto = false
 
@@ -290,11 +291,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const ancho = Math.max(24, e.props.bodyColumns - 2)
-    const u = (await $.state.get(R.usage)).value ?? null
-    const t = (await $.state.get(R.lastTurn)).value ?? null
-    const herr = (await $.state.get(R.tools)).value ?? {}
-    const c = (await $.state.get(R.cycle)).value ?? null
-    const a = (await $.state.get(R.agentix)).value ?? null
+    const u = (await $.state.get(R_USAGE)).value ?? null
+    const t = (await $.state.get(R_LASTTURN)).value ?? null
+    const herr = (await $.state.get(R_TOOLS)).value ?? {}
+    const c = (await $.state.get(R_CYCLE)).value ?? null
+    const a = (await $.state.get(R_AGENTIX)).value ?? null
     const now = a?.readAt ?? 0
     const barraAncho = Math.max(8, Math.min(30, ancho - 18))
     const top = Object.entries(herr).sort((x, y) => y[1] - x[1]).slice(0, 5)
