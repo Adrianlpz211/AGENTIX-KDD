@@ -147,3 +147,49 @@ test('AST: no indexa carpetas generadas (brag-output*, out, tmp…) ni las que e
   const rel = ast.getAllSourceFiles(root, root).map((f) => path.relative(root, f).replace(/\\/g, '/')).sort();
   assert.deepEqual(rel, ['src/real.ts']);
 });
+
+test('memory_trace honesto: «consultada» (lo que el enricher mostró) y «relevante» (derivada por archivos/área), nunca llamadas «aplicadas»', { timeout: 600000 }, (t) => {
+  const p = montar(t); if (!p) return;
+  const db = p.abrirW();
+  try {
+    db.run("INSERT INTO nodos (tipo, titulo, contenido, area, confianza, estado, archivos_aplica) VALUES ('error', 'Error que toca modulo-demo', 'x', 'lib', 'ALTA', 'ACTIVO', ?)", JSON.stringify(['lib/modulo-demo.ts']));
+    db.run("INSERT INTO nodos (tipo, titulo, contenido, area, confianza, estado, archivos_aplica) VALUES ('patron', 'Patrón de otra zona', 'x', 'auth', 'ALTA', 'ACTIVO', ?)", JSON.stringify(['app/auth/login.ts']));
+    db.run("INSERT INTO nodos (tipo, titulo, contenido, area, confianza, estado, archivos_aplica) VALUES ('decision', 'Decisión ALTA del área lib', 'x', 'lib', 'ALTA', 'ACTIVO', '[]')");
+  } finally { db.close(); }
+  // El enricher dejó su sidecar con lo que MOSTRÓ en este ciclo.
+  fs.writeFileSync(path.join(p.root, '.agentic', '_brief_teams_prueba_0010.json'), JSON.stringify({ schema: 'brief/1', cycle_id: 'teams_prueba_0010', mostrado: [{ id: 7, tipo: 'patron', titulo: 'Lo que vio el modelo', area: 'lib', confianza: 'ALTA', rol: 'contexto' }, { id: null, tipo: 'cura', titulo: 'Una cura', rol: 'cura' }] }));
+  const r = postCycle(p, { cicloId: 'teams_prueba_0010', actor: 'teams-v4', env: { AKDD_TEAMS_FILES: JSON.stringify(['lib/modulo-demo.ts']) } });
+  assert.equal(r.status, 0, r.stderr);
+  const [c] = leer(p, "SELECT memory_trace, patrones_aplicados, errores_evitados FROM ciclos WHERE ciclo_id = 'teams_prueba_0010'");
+  const tr = JSON.parse(c.memory_trace);
+  assert.equal(tr.schema, 'memtrace/2');
+  assert.deepEqual(tr.consultada.map((x) => x.titulo), ['Lo que vio el modelo', 'Una cura'], 'consultada = lo que el enricher mostró');
+  assert.ok(tr.consultada.every((x) => x.origen === 'enricher'));
+  const rel = tr.relevante.map((x) => x.titulo);
+  assert.ok(rel.includes('Error que toca modulo-demo'), 'relevante por archivo: ' + rel);
+  assert.ok(rel.includes('Decisión ALTA del área lib'), 'relevante por área ALTA');
+  assert.ok(!rel.includes('Patrón de otra zona'), 'lo de otra zona no entra');
+  assert.ok(tr.relevante.every((x) => x.origen === 'derivado' && ['por_archivo', 'por_area'].includes(x.rol)), 'rotulada como derivada');
+  assert.equal(c.patrones_aplicados, '[]', 'NADA se declara «aplicado» sin que el agente lo diga'); assert.equal(c.errores_evitados, '[]');
+  assert.ok(!fs.existsSync(path.join(p.root, '.agentic', '_brief_teams_prueba_0010.json')), 'el sidecar se consume');
+
+  // Sin sidecar (hook de commit, TEAMS): solo la derivada, y la consultada queda vacía (no se inventa).
+  postCycle(p, { cicloId: 'teams_prueba_0011', actor: 'teams-v4', env: { AKDD_TEAMS_FILES: JSON.stringify(['lib/modulo-demo.ts']) } });
+  const t2 = JSON.parse(leer(p, "SELECT memory_trace FROM ciclos WHERE ciclo_id = 'teams_prueba_0011'")[0].memory_trace);
+  assert.deepEqual(t2.consultada, []); assert.ok(t2.relevante.length >= 1);
+});
+
+test('métricas: el uso de memoria cuenta lo declarado y lo CONSULTADO; la «relevante» derivada no infla el puntaje', (t) => {
+  if (!disponible()) return t.skip('HOST_REAL_NO_EJECUTADO: ' + motivoSinDriver());
+  const metrics = require(path.join(REPO, '.agentic', 'grafo', 'metrics.cjs'));
+  const p = proyecto('metr-mem'); const db = p.abrirW();
+  try {
+    const trazaConsultada = JSON.stringify({ schema: 'memtrace/2', consultada: [{ titulo: 'a' }, { titulo: 'b' }, { titulo: 'c' }], relevante: [] });
+    const trazaSoloRelevante = JSON.stringify({ schema: 'memtrace/2', consultada: [], relevante: Array.from({ length: 12 }, (_, i) => ({ titulo: 'r' + i })) });
+    db.run("INSERT INTO ciclos (ciclo_id, tarea, estado, memory_trace, fecha_inicio) VALUES ('c1', 't', 'COMPLETADO', ?, datetime('now'))", trazaConsultada);
+    db.run("INSERT INTO ciclos (ciclo_id, tarea, estado, memory_trace, fecha_inicio) VALUES ('c2', 't', 'COMPLETADO', ?, datetime('now'))", trazaSoloRelevante);
+  } finally { db.close(); }
+  const rd = p.abrirR();
+  let m; try { m = metrics.computeCycleMetrics(rd); } finally { rd.close(); }
+  assert.equal(m.memoria_consultada, 3, 'solo cuenta lo que el enricher mostró; las 12 derivadas no suman');
+});

@@ -18,7 +18,7 @@ function limpiar(raw) {
 }
 
 function sinDuracion(nombre) {
-  return nombre.replace(/\s+\(\d+(?:\.\d+)?\s*m?s\)\s*$/, '').trim();
+  return nombre.replace(/\s+\(\d+(?:\.\d+)?\s*m?s\)\s*$/, '').replace(/\s+\d+(?:\.\d+)?\s*m?s\s*$/, '').trim();
 }
 
 function extractTestResults(rawOutput, opts = {}) {
@@ -50,6 +50,10 @@ function extractTestResults(rawOutput, opts = {}) {
       agregar(m[2], m[1] === 'ok' ? 'pass' : 'fail', archivo);
       continue;
     }
+    // Vitest/Jest sin TTY: una línea por ARCHIVO, «✓ lib/x.test.ts (12 tests) 34ms». El archivo ya está en la línea: se usa como test_file
+    // y el nombre queda estable (sin «(12 tests)» ni la duración, que cambian en cada corrida y rompían la identidad del contrato).
+    if ((m = linea.match(/^\s*(?:✔|✓|√)\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+\(\d+\s+tests?(?:\s*\|\s*\d+\s+\w+)*\)(?:\s+\d+(?:\.\d+)?\s*m?s)?\s*$/i))) { agregar(m[1], 'pass', m[1]); continue; }
+    if ((m = linea.match(/^\s*(?:✖|✕|✗|×)\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+\(\d+\s+tests?(?:\s*\|\s*\d+\s+\w+)*\)(?:\s+\d+(?:\.\d+)?\s*m?s)?\s*$/i))) { agregar(m[1], 'fail', m[1]); continue; }
     if ((m = linea.match(/^\s*(?:✔|✓|√)\s+(.+)$/))) { agregar(m[1], 'pass'); continue; }
     if ((m = linea.match(/^\s*(?:✖|✕|✗|×)\s+(.+)$/))) {
       if (/^failing tests:?$/i.test(m[1].trim())) continue;

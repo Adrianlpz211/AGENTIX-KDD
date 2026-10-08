@@ -118,7 +118,7 @@ function informe(root, { dias = 7 } = {}) {
   // 2. calidad del registro por origen (exacto)
   const origen = (c) => (/^teams_/.test(String(c.ciclo_id)) ? 'teams' : (/^commit-/.test(String(c.ciclo_id)) || /^auto post-commit/.test(String(c.tarea || '')) ? 'commit' : 'aa/manual'));
   const lleno = (v) => v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0' && v !== '[]' && v !== '{}' && v !== false && v !== 'false';
-  const campos = { 'post-cycle completo': (c) => lleno(c.post_cycle_ran), 'duración medida': (c) => Number(c.duracion_ms) > 0, 'con pruebas': (c) => Number(c.tests_pasando) > 0, 'AST indexado': (c) => lleno(c.ast_indexed), 'módulos': (c) => lleno(c.modules_touched), 'stack': (c) => lleno(c.stack_detected), 'memoria consultada': (c) => lleno(c.memory_trace), 'área concreta': (c) => c.area && c.area !== 'general' && c.area !== 'global' };
+  const campos = { 'post-cycle completo': (c) => lleno(c.post_cycle_ran) && c.post_cycle_ran !== 'historico', 'duración medida': (c) => Number(c.duracion_ms) > 0, 'con pruebas': (c) => Number(c.tests_pasando) > 0, 'AST indexado': (c) => lleno(c.ast_indexed), 'módulos': (c) => lleno(c.modules_touched), 'stack': (c) => lleno(c.stack_detected), 'memoria consultada': (c) => lleno(c.memory_trace), 'área concreta': (c) => c.area && c.area !== 'general' && c.area !== 'global' };
   out.calidad = {};
   for (const o of ['commit', 'teams', 'aa/manual']) {
     const g = ciclos.filter((c) => origen(c) === o);
@@ -152,6 +152,7 @@ function texto(r) {
   L.push('1) COMMITS (exacto, no depende de ningún clasificador)');
   L.push(c.en_git == null ? '   sin git: no se puede medir' : `   ${c.con_ciclo} de ${c.en_git} commits tienen ciclo en la base → ${c.pct == null ? 'n/d' : c.pct + ' %'}` + (c.abandonados_por_el_hook ? `  · ${c.abandonados_por_el_hook} abandonado(s) por el hook tras agotar reintentos` : ''));
   if (c.sin_ciclo && c.sin_ciclo.length) L.push('   sin ciclo: ' + c.sin_ciclo.join(' ') + (c.en_git - c.con_ciclo > c.sin_ciclo.length ? ' …' : ''));
+  if (c.en_git != null && c.en_git > c.con_ciclo) L.push('   → para registrarlos retroactivamente (sin pruebas ni AST, duración sin dato): akdd reconciliar --aplicar');
   L.push('');
   L.push('2) CALIDAD de lo registrado (% de ciclos con el campo lleno)');
   const cols = ['post-cycle completo', 'duración medida', 'con pruebas', 'AST indexado', 'módulos', 'stack', 'memoria consultada', 'área concreta'];

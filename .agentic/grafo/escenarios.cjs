@@ -96,7 +96,8 @@ function validarArtefacto(root, executionId, esperado = {}) {
   });
   if (faltan.length) return { ok: false, reason_code: 'COBERTURA_PARCIAL', faltan };
   if (!expected.length && !art.expected.length && art.provenance === 'mecanica' && !(art.tests_total > 0)) return { ok: false, reason_code: 'CERO_TESTS' };
-  if (art.source_manifest_hash && require('./source-evidence.cjs').capture(root).hash !== art.source_manifest_hash) return { ok: false, reason_code: 'SUJETO_CAMBIO' };
+  // Acotado al sujeto: el hash global del árbol ya no aplica (lo ajeno puede cambiar); los archivos del sujeto se verifican uno a uno abajo.
+  if (art.source_manifest_hash && art.source_scope !== 'subject' && require('./source-evidence.cjs').capture(root).hash !== art.source_manifest_hash) return { ok: false, reason_code: 'SUJETO_CAMBIO' };
   if (art.source_files) {
     const files = Object.entries(art.source_files);
     if (!files.length) return { ok: false, reason_code: 'SIN_ARCHIVOS_SUJETO' };
@@ -223,6 +224,8 @@ function evidenciaDeCorrida(root, resultado, pedidos, opts = {}) {
     run_scope: resultado && resultado.run_scope || null,
     source_files: resultado && resultado.source_evidence && Object.keys(resultado.source_evidence.files).length ? resultado.source_evidence.files : undefined,
     source_manifest_hash: resultado && resultado.source_evidence ? resultado.source_evidence.hash : undefined,
+    // 'subject': la huella cubre solo lo que las pruebas ejercitan (ver tdd-gate alcanceDelSujeto); 'tree': todo el árbol.
+    source_scope: resultado && resultado.source_evidence ? (resultado.source_evidence.scope || 'tree') : undefined,
     provenance: opts.provenance || 'mecanica',
     gate: opts.gate || 'preservation',
     cycle_id: opts.cycle_id || null,

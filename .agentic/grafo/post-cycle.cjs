@@ -320,6 +320,49 @@ function cerrarCicloConGates(db, results) {
 }
 
 
+/** Archivos de ESTE ciclo, temprano (antes de los escaneos): los declarados (TEAMS) o los del commit. */
+function archivosDelCicloTemprano() {
+  if (FILES_DECLARADOS) return FILES_DECLARADOS.slice();
+  try {
+    return execSync('git diff-tree --no-commit-id --name-only -r --root ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
+      .toString().split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch { return []; }
+}
+
+/**
+ * memory_trace honesto (antes vacío en el 100% de los ciclos). Dos cosas, rotuladas por su ORIGEN y sin llamarlas «aplicadas»:
+ *   · consultada: la memoria que el enricher MOSTRÓ al modelo en este ciclo (sidecar _brief_<ciclo>.json). Solo ciclos con enricher.
+ *   · relevante:  nodos activos cuyo `archivos_aplica` toca los archivos del ciclo (o, sin eso, errores/patrones/decisiones ALTA de su área).
+ *                 Se deriva de los datos, así que existe también para el hook de commit y TEAMS. Es correlación, no prueba de uso.
+ * «Aplicada» solo la declara el agente de memoria (patrones_aplicados / errores_evitados / decisiones_usadas, vía _ciclo_tmp.json).
+ */
+function construirMemoryTrace(db, cicloId) {
+  const traza = { schema: 'memtrace/2', consultada: [], relevante: [] };
+  try {
+    const f = path.join(AGENTIC_DIR, '_brief_' + String(cicloId || '').replace(/[^\w.-]/g, '_') + '.json');
+    if (cicloId && fs.existsSync(f)) {
+      const b = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (b && Array.isArray(b.mostrado)) traza.consultada = b.mostrado.slice(0, 20).map((m) => Object.assign({ origen: 'enricher' }, m));
+      try { fs.unlinkSync(f); } catch { /* ya no está */ }
+    }
+  } catch { /* sin sidecar: solo derivada */ }
+  try {
+    const archivos = archivosDelCicloTemprano().map((f) => String(f).replace(/\\/g, '/'));
+    const nodos = db.all("SELECT id, tipo, titulo, area, confianza, archivos_aplica FROM nodos WHERE estado = 'ACTIVO' AND tipo IN ('error','patron','decision')");
+    const porArchivo = []; const porArea = [];
+    for (const n of nodos) {
+      let aplica = []; try { aplica = JSON.parse(n.archivos_aplica || '[]'); } catch { aplica = []; }
+      aplica = (Array.isArray(aplica) ? aplica : []).map((x) => String(x).replace(/\\/g, '/'));
+      const toca = aplica.some((a) => archivos.some((f) => f === a || f.startsWith(a.replace(/\/$/, '') + '/')));
+      const base = { id: n.id, tipo: n.tipo, titulo: String(n.titulo || '').slice(0, 90), area: n.area || null, confianza: n.confianza || null, origen: 'derivado' };
+      if (toca) porArchivo.push(Object.assign(base, { rol: 'por_archivo' }));
+      else if (area && n.area === area && /^ALTA/i.test(String(n.confianza || ''))) porArea.push(Object.assign(base, { rol: 'por_area' }));
+    }
+    traza.relevante = [...porArchivo.slice(0, 12), ...porArea.slice(0, 6)];
+  } catch (e) { anotarFallo('memory_trace(relevante)', e); }
+  return traza;
+}
+
 /** Stack del proyecto para `ciclos.stack_detected` (columna que nadie escribía): {front, back} del perfil autodetectado. */
 function stackActual() {
   try {
@@ -364,7 +407,8 @@ function registrarCiclo(db, cycleData) {
       patrones_aplicados: datos.patrones_aplicados || [],
       errores_evitados:   datos.errores_evitados || [],
       decisiones_usadas:  datos.decisiones_usadas || [],
-      memory_trace:       datos.memory_trace || [],
+      // Lo que declaró el agente de memoria manda; sin declaración, la traza mecánica (consultada + relevante), rotulada por origen.
+      memory_trace:       (Array.isArray(datos.memory_trace) && datos.memory_trace.length) ? datos.memory_trace : construirMemoryTrace(db, enCurso && enCurso.cycle_id),
       tests_generados:    datos.tests_generados || testsTotal,
       tests_pasando:      datos.tests_pasando || testsPassing,
       review_blockers:    0,

@@ -977,9 +977,27 @@ function registerPassingTests(db, params) {
   const pasados = tests.filter((t) => t.status === 'pass');
   if (!pasados.length) return Object.assign(salida, { reason_code: 'NO_INDIVIDUAL_TESTS' });
   if (!esquemaPorTestListo(db)) return Object.assign(salida, { status: 'UPGRADE_REQUIRED', reason_code: 'CONTRACT_SCHEMA_V2' });
+  // Una base creada con un esquema viejo puede no tener `source_files`: se añade (idempotente) antes de escribir.
+  try { db.exec("ALTER TABLE verified_contracts ADD COLUMN source_files TEXT DEFAULT '[]'"); } catch { /* ya existe */ }
 
   const { testId } = require('./test-results.cjs');
   const runnerId = p.runner_id || p.command || null;
+  /* Código que ejercita el archivo de prueba del contrato (sus imports, con alias): sin esto `source_files` quedaba siempre vacío y el
+     radio de impacto (blast-radius: test_file + source_files) casi nunca relacionaba un cambio con un contrato → Preservation: NO_EXECUTABLE_MAPPING. */
+  const fuentesPorArchivo = new Map();
+  const fuentesDe = (archivo) => {
+    if (!p.root || !archivo) return '[]';
+    if (!fuentesPorArchivo.has(archivo)) {
+      let r = '[]';
+      try {
+        const norm = String(archivo).replace(/\\/g, '/');
+        const c = require('./import-closure.cjs').cierreDeImports(p.root, [norm]);
+        r = JSON.stringify([...c.archivos].filter((f) => f !== norm).slice(0, 80));
+      } catch { /* sin cierre: queda vacío como antes */ }
+      fuentesPorArchivo.set(archivo, r);
+    }
+    return fuentesPorArchivo.get(archivo);
+  };
   const registrar = () => {
     for (const t of pasados) {
       const tid = testId(runnerId, t);
@@ -998,19 +1016,21 @@ function registerPassingTests(db, params) {
           UPDATE verified_contracts SET
             verification_count = ?, consecutive_passes = ?,
             test_id = ?, runner_id = ?, runner_command = ?, mapping_status = 'RESOLVED',
+            test_file = COALESCE(test_file, ?),
+            source_files = CASE WHEN source_files IS NULL OR source_files = '[]' THEN ? ELSE source_files END,
             last_execution_id = ?, last_verified = datetime('now'), updated_at = datetime('now')
           WHERE id = ?
-        `).run(total, consec, tid, runnerId, p.command || null, p.execution_id, id);
+        `).run(total, consec, tid, runnerId, p.command || null, t.test_file || null, fuentesDe(t.test_file), p.execution_id, id);
         autoPromote(db, id, consec, total, existing.failure_count || 0);
         salida.updated++;
       } else {
         db.prepare(`
           INSERT INTO verified_contracts
-            (id, module, name, description, test_file, test_name, test_id, runner_id, runner_command,
+            (id, module, name, description, test_file, test_name, test_id, runner_id, runner_command, source_files,
              mapping_status, last_execution_id, verification_count, consecutive_passes, status, last_verified)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED', ?, 1, 1, 'candidate', datetime('now'))
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESOLVED', ?, 1, 1, 'candidate', datetime('now'))
         `).run(id, area, t.test_name, 'Test individual: ' + t.test_name, t.test_file || null, t.test_name,
-          tid, runnerId, p.command || null, p.execution_id);
+          tid, runnerId, p.command || null, fuentesDe(t.test_file), p.execution_id);
         salida.created++;
       }
     }

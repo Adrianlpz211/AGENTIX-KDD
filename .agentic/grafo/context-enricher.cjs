@@ -320,7 +320,7 @@ function marcarArranque(task) {
     ciclo = require(path.join(__dirname, 'ciclo-actual.cjs')).iniciar(process.cwd(), { tarea: task });
   } catch { /* sin id de ciclo los eventos quedan sin atribuir, no se inventa */ }
   try {
-    if (!fs.existsSync(DB_PATH)) return;
+    if (!fs.existsSync(DB_PATH)) return ciclo;
     const gt = require(path.join(__dirname, 'gate-telemetry.cjs'));
     let db = null;
     try { db = new (require('better-sqlite3'))(DB_PATH); }
@@ -332,6 +332,24 @@ function marcarArranque(task) {
     });
     try { db.close(); } catch {}
   } catch { /* la medicion es un plus; el trabajo no se detiene por ella */ }
+  return ciclo;
+}
+
+/**
+ * Deja en `.agentic/_brief_<ciclo>.json` QUÉ memoria mostró este brief. post-cycle lo lee y lo guarda en `ciclos.memory_trace`
+ * como «consultada»: es lo único que se sabe mecánicamente (el modelo la tuvo delante); NO es «aplicada». Fail-soft.
+ */
+function guardarBrief(ciclo, brief) {
+  try {
+    if (!ciclo || !ciclo.cycle_id || !brief) return;
+    const mostrado = [];
+    for (const c of (brief.contexto || [])) mostrado.push({ id: c.id !== undefined ? c.id : null, tipo: c.tipo, titulo: String(c.titulo || '').slice(0, 90), area: c.area || null, confianza: c.confianza || null, rol: 'contexto' });
+    for (const c of (brief.curas || [])) mostrado.push({ id: null, tipo: 'cura', titulo: String(c.titulo || '').slice(0, 90), area: c.area || null, confianza: c.confianza || null, rol: 'cura' });
+    const f = path.join(path.dirname(DB_PATH), '_brief_' + String(ciclo.cycle_id).replace(/[^\w.-]/g, '_') + '.json');
+    const tmp = f + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ schema: 'brief/1', cycle_id: ciclo.cycle_id, riesgo: brief.riesgo || null, mostrado }));
+    fs.renameSync(tmp, f);
+  } catch { /* es un plus */ }
 }
 
 
@@ -386,9 +404,9 @@ function printBrief(brief) {
 
 if (require.main === module) {
   const task = process.argv.slice(2).join(' ');
-  marcarArranque(task);
+  const cicloArranque = marcarArranque(task);
   enrich(task)
-    .then(printBrief)
+    .then((brief) => { guardarBrief(cicloArranque, brief); printBrief(brief); })
     .catch(() => {
       // Última red de seguridad: pase lo que pase, nunca bloquear el pipeline.
       console.log('## Context Enricher\n\n(Sin contexto disponible ahora mismo — continuar normalmente con la tarea)');

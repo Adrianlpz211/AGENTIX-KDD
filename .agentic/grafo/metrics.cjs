@@ -32,7 +32,7 @@ function computeCycleMetrics(db) {
     ciclos = db.prepare(`
       SELECT ciclo_id, estado, stops_count, tests_pasando, tests_generados,
              review_blockers, fases_completadas, fases_total, duracion_ms,
-             patrones_aplicados, errores_evitados, sync_grafo, fecha_inicio
+             patrones_aplicados, errores_evitados, sync_grafo, fecha_inicio, memory_trace
       FROM ciclos ORDER BY fecha_inicio DESC LIMIT 100
     `).all();
   } catch { return null; }
@@ -62,8 +62,10 @@ function computeCycleMetrics(db) {
   const faseRate   = totalFases > 0 ? Math.round((compFases / totalFases) * 100) : 0;
 
   // Memoria aplicada
-  let patronesAplicados = 0, erroresEvitados = 0;
+  let patronesAplicados = 0, erroresEvitados = 0, memoriaConsultada = 0;
   ciclos.forEach(c => {
+    // «Consultada» = lo que el enricher mostró al modelo (memory_trace.consultada). No es «aplicada», y la «relevante» derivada NO se cuenta.
+    try { const t = JSON.parse(c.memory_trace || 'null'); if (t && Array.isArray(t.consultada)) memoriaConsultada += t.consultada.length; } catch {}
     try { const v = JSON.parse(c.patrones_aplicados || '[]'); patronesAplicados += Array.isArray(v) ? v.length : (typeof v === 'number' ? v : 0); } catch {}
     try { const v = JSON.parse(c.errores_evitados   || '[]'); erroresEvitados   += Array.isArray(v) ? v.length : (typeof v === 'number' ? v : 0); } catch {}
   });
@@ -88,6 +90,7 @@ function computeCycleMetrics(db) {
     fase_completion_rate: faseRate,
     patrones_aplicados: patronesAplicados,
     errores_evitados: erroresEvitados,
+    memoria_consultada: memoriaConsultada,
     review_blockers_total: totalBlockers,
     avg_duracion_ms: avgDuracion,
     ciclos_con_sync: ciclos.filter(c => c.sync_grafo).length,
@@ -189,9 +192,10 @@ function computeAutonomyScore(db) {
   scores.test_coverage = Math.min(cycles.test_pass_rate || 0, 100);
   scores.test_weight = 0.2;
 
-  // 3. Uso de memoria (20%): patrones aplicados / ciclos
+  // 3. Uso de memoria (20%): (patrones aplicados DECLARADOS + memoria CONSULTADA por el enricher) / ciclos. Antes solo contaba los
+  //    declarados, que ningún ciclo mecánico (hook, TEAMS) llena: el puntaje quedaba en 0 de forma estructural.
   const memUsage = cycles.ciclos_total > 0
-    ? Math.min(Math.round(((cycles.patrones_aplicados || 0) / cycles.ciclos_total) * 20), 100)
+    ? Math.min(Math.round((((cycles.patrones_aplicados || 0) + (cycles.memoria_consultada || 0)) / cycles.ciclos_total) * 20), 100)
     : 0;
   scores.memory_usage = memUsage;
   scores.memory_weight = 0.2;

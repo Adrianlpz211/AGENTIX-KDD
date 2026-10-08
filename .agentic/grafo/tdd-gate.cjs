@@ -218,6 +218,28 @@ function huellaContenido(projectRoot) {
  * shell del sistema: es el adaptador de runner. Un archivo de test no se
  * interpola en esa línea si trae caracteres de shell.
  */
+/**
+ * ¿Qué archivos pueden cambiar el resultado de ESTAS pruebas? El conjunto de lo que ejercitan: las pruebas (las que corrieron, o todas
+ * las del árbol si fue la suite), todo lo que importan (con alias `@/`, ver import-closure.cjs), la configuración de la raíz y los
+ * directorios de fixtures/mocks. Solo se puede afirmar para pruebas JS/TS: con otro lenguaje no es acotable y se devuelve
+ * `aplicable:false` (comportamiento estricto de siempre: cualquier cambio invalida).
+ */
+function alcanceDelSujeto(projectRoot, antes, archivosCorridos) {
+  const rels = Object.keys(antes.files);
+  const esPrueba = (f) => /\.(test|spec)\.[cm]?[jt]sx?$/i.test(f);
+  const esFixture = (f) => /(^|\/)(__tests__|__mocks__|__fixtures__|__snapshots__|fixtures?|tests?)\//i.test(f);
+  const esConfigRaiz = (f) => !f.includes('/') && /^(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig.*\.json|jsconfig\.json|\.env(\..+)?|(vitest|vite|jest|playwright|babel|next)\.config\.[cm]?[jt]s|\.babelrc.*)$/i.test(f);
+  const norm = (f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '');
+  const pruebas = archivosCorridos.length ? archivosCorridos.map(norm) : rels.filter((f) => esPrueba(f) || (esFixture(f) && /\.[cm]?[jt]sx?$/i.test(f)));
+  if (!pruebas.length) return { aplicable: false, motivo: 'no se encontraron archivos de prueba JS/TS' };
+  const noJs = pruebas.filter((f) => !/\.[cm]?[jt]sx?$/i.test(f));
+  if (noJs.length) return { aplicable: false, motivo: 'pruebas que no son JS/TS (' + noJs[0] + '): no se puede acotar por imports' };
+  const config = rels.filter(esConfigRaiz);
+  const cierre = require('./import-closure.cjs').cierreDeImports(projectRoot, [...pruebas, ...config]);
+  const archivos = new Set([...cierre.archivos, ...config, ...rels.filter(esFixture)]);
+  return { aplicable: true, completo: cierre.completo, archivos, sinResolver: cierre.sinResolver, truncado: cierre.truncado, esPrueba };
+}
+
 function runTests(command, projectRoot, testFile = null, meta = {}) {
   const archivos = testFile == null ? [] : (Array.isArray(testFile) ? testFile : [testFile]);
   if (archivos.some((f) => !ARG_SEGURO.test(String(f)))) {
@@ -267,13 +289,38 @@ function runTests(command, projectRoot, testFile = null, meta = {}) {
     execution_id: meta.execution_id,
     testFile: archivos.length === 1 ? archivos[0] : null,
   });
-  const sourceAfter = require('./source-evidence.cjs').capture(projectRoot);
-  if (!sourceBefore.complete || sourceBefore.hash !== sourceAfter.hash) {
-    parsed.status='UNVERIFIED'; parsed.allPassed=false; parsed.reason_code='SOURCE_CHANGED_OR_INCOMPLETE';
-    parsed.gate.status='UNVERIFIED'; parsed.gate.reason_code=parsed.reason_code;
+  const se = require('./source-evidence.cjs');
+  const sourceAfter = se.capture(projectRoot);
+  const invalidar = (detalle) => {
+    parsed.status = 'UNVERIFIED'; parsed.allPassed = false; parsed.reason_code = 'SOURCE_CHANGED_OR_INCOMPLETE';
+    parsed.gate.status = 'UNVERIFIED'; parsed.gate.reason_code = parsed.reason_code;
+    parsed.source_check = Object.assign({ alcance: 'arbol' }, detalle);
+  };
+  // Qué evidencia de código respalda este resultado: el árbol completo (como siempre) o, si cambió algo AJENO a lo que las pruebas
+  // ejercitan mientras corrían, solo el conjunto que sí las afecta. Antes CUALQUIER cambio en cualquier archivo invalidaba la corrida
+  // (con un constructor editando sin parar, casi siempre): medinet quedó con 12 contratos en 1.600 pruebas.
+  let evidencia = sourceBefore;
+  if (!sourceBefore.complete || !sourceAfter.complete) {
+    invalidar({ motivo: 'huella incompleta (más de ' + 20000 + ' archivos, más de 100 MB o un directorio ilegible)' });
+  } else {
+    const cambios = se.diff(sourceBefore, sourceAfter);
+    if (cambios.length) {
+      const alcance = alcanceDelSujeto(projectRoot, sourceBefore, archivos);
+      if (!alcance.aplicable) invalidar({ motivo: alcance.motivo, cambios: cambios.length, muestra: cambios.slice(0, 10) });
+      else if (!alcance.completo) invalidar({ motivo: 'cierre de imports incompleto' + (alcance.truncado ? ' (tope de archivos)' : ''), sin_resolver: alcance.sinResolver, cambios: cambios.length, muestra: cambios.slice(0, 10) });
+      else {
+        // Un archivo AÑADIDO durante la corrida que es una prueba también cuenta (pudo ejecutarse).
+        const tocan = cambios.filter((c) => alcance.archivos.has(c) || (sourceBefore.files[c] === undefined && alcance.esPrueba(c)));
+        if (tocan.length) invalidar({ motivo: 'cambió código que estas pruebas ejercitan', en_el_sujeto: tocan.slice(0, 10), cambios: cambios.length });
+        else {
+          evidencia = se.acotar(sourceBefore, [...alcance.archivos]);
+          parsed.source_check = { alcance: 'sujeto', archivos_del_sujeto: Object.keys(evidencia.files).length, cambios_fuera_del_sujeto: cambios.length, muestra: cambios.slice(0, 20) };
+        }
+      }
+    }
   }
   parsed.run_scope = archivos.length ? 'targeted' : 'suite';
-  Object.defineProperty(parsed,'source_evidence',{value:sourceBefore});
+  Object.defineProperty(parsed,'source_evidence',{value:evidencia});
   require('./escenarios.cjs').evidenciaDeCorrida(projectRoot,parsed,archivos.length?archivos:findTestFiles(projectRoot),{gate:parsed.gate.gate,cycle_id:meta.cycle_id,explicito:archivos.length>0});
   return parsed;
 }
@@ -774,6 +821,7 @@ function registrarContratosDelResultado(projectRoot, area, command, scope, testF
         tests: result.tests || [],
         passed: result.passed,
         total: result.total,
+        root: projectRoot || process.cwd(),
       });
       const c = salida.contracts || {};
       console.log(`[TDD-GATE] 📋 Contracts: ${c.status || '—'} · ${c.updated || 0} actualizados · ${c.created || 0} nuevos`);
