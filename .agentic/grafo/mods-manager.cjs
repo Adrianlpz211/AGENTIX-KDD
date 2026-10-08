@@ -2,33 +2,24 @@
 /**
  * Agentic KDD — Mods de Claude Code (órgano "mods")
  *
- * Un mod es un plugin de function hooks de Claude Code: dibuja paneles al lado
- * del chat y observa los eventos del host (tokens, costo, herramientas). Es lo
- * único que un hook clásico de settings.json NO puede dar: interfaz en vivo y
- * el uso que reporta el propio host.
+ * Un mod es un plugin de Claude Code con código que corre DENTRO del host: dibuja paneles al lado del chat y observa los eventos
+ * (tokens, costo, herramientas). Es lo único que un hook clásico de settings.json NO puede dar: interfaz en vivo y el uso real.
  *
- * Dónde vive cada cosa, y por qué:
- *   .agentic/mods/<nombre>/      fuente de verdad: viaja en el paquete npm y
- *                                 llega a cada cliente con `akdd update`.
- *   .claude/skills/<nombre>/     copia instalada: Claude Code carga solo los
- *                                 plugins de esa carpeta del proyecto, sin
- *                                 flags ni variables de entorno. Es un
- *                                 artefacto de instalación (como
- *                                 .claude/settings.json), no se commitea.
- *   .agentic/_mods-host.json     registro: qué se instaló, cuándo y con qué
- *                                 hash, para que `status` distinga "al día" de
- *                                 "desactualizado" y `akdd update` lo refresque
- *                                 solo si el dueño lo había encendido.
+ * CÓMO SE INSTALA (documentación oficial, code.claude.com/docs/en/plugins/mods/overview): un mod se instala COMO PLUGIN, desde un
+ * marketplace — `claude plugin install <plugin>@<marketplace>`. Una carpeta suelta en ~/.claude/skills solo carga el SKILL.md (el
+ * comando /<carpeta>), NUNCA el módulo: por eso el panel y /agentix no aparecían (3.24.0/3.24.1 antes de este arreglo).
  *
- * Solo toca lo propio: una carpeta ajena en .claude/skills/ con el mismo nombre
- * no se pisa (reason_code AJENO). Cursor no tiene mods: se informa, no se finge.
+ *   .agentic/mods/<nombre>/         fuente de verdad: viaja en el paquete npm y llega con `akdd update`.
+ *   ~/.agentix/mods-marketplace/    marketplace local «agentix-mods» (.claude-plugin/marketplace.json + plugins/<nombre>/): la
+ *                                   copia que Claude Code instala. Una sola, compartida por proyecto y global.
+ *   .agentic/_mods-host.json        registro del PROYECTO (qué se encendió, cuándo y con qué hash). El global: ~/.agentix/_mods-host.json
  *
- * Ámbito GLOBAL (--global): la misma copia en la carpeta de usuario de Claude Code
- * (~/.claude/skills/<nombre>, o $CLAUDE_CONFIG_DIR/skills), para tenerlo en TODOS los
- * proyectos sin correr `akdd mod on` en cada uno. El registro va en
- * ~/.agentix/_mods-host.json ($AKDD_HOME lo cambia). La fuente es la del proyecto
- * actual si la trae, o la del propio paquete de Agentix. Si un proyecto tiene además
- * su copia local, Claude Code vería el mod dos veces: status y on lo avisan.
+ * Ámbitos: proyecto → `--scope local` (solo este proyecto, no se commitea); --global → `--scope user` (todos tus proyectos).
+ * Requisitos del host (documentados): Claude Code CLI ≥ 2.1.287 o app de escritorio ≥ 2.1.286 (`/status` en la pestaña Code);
+ * no cargan en sesiones WSL de la app. Comprobar que cargó: `/plugin` muestra «1 mod active · agentix-live».
+ *
+ * Solo toca lo propio. Cursor no tiene mods: se informa, no se finge.
+ * AKDD_MODS_SIN_CLAUDE=1: no invoca el CLI `claude` (pruebas, o quien lo hace a mano): deja la copia lista y dice los comandos.
  *
  * CLI: node mods-manager.cjs on|off|status|list|refresh [--mod=<nombre>] [--global] [--quiet]
  */
@@ -37,21 +28,29 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+const { spawnSync } = require('child_process');
 
 const FUENTE = path.join('.agentic', 'mods');
-const DESTINO = path.join('.claude', 'skills');
+const DESTINO = path.join('.claude', 'skills'); // LEGADO: donde 3.24.0/3.24.1 copiaban el mod (no cargaba el módulo); se limpia
 const REGISTRO = path.join('.agentic', '_mods-host.json');
-const MARCA = '.agentix-mod.json'; // dentro de la copia instalada: dice "esto lo puso Agentix"
+const MARCA = '.agentix-mod.json'; // dentro de la copia: dice «esto lo puso Agentix»
+const MERCADO = 'agentix-mods';
 
-/** Dónde está la fuente, dónde se instala y dónde se anota, según sea el ámbito del proyecto o el global. */
+const casa = () => process.env.AKDD_HOME || path.join(os.homedir(), '.agentix');
+const mercadoDir = () => path.join(casa(), 'mods-marketplace');
+
+/** Dónde está la fuente, dónde está la copia que se instala y dónde se anota, según sea el ámbito del proyecto o el global. */
 function ambito(root, global) {
-  if (!global) return { global: false, fuente: path.join(root, FUENTE), destino: path.join(root, DESTINO), regFile: path.join(root, REGISTRO), etiqueta: DESTINO.replace(/\\/g, '/') };
   const cfg = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  const casa = process.env.AKDD_HOME || path.join(os.homedir(), '.agentix');
   const propia = path.join(root, FUENTE);
   const fuente = fs.existsSync(propia) ? propia : path.join(__dirname, '..', 'mods');
-  const destino = path.join(cfg, 'skills');
-  return { global: true, fuente, destino, regFile: path.join(casa, '_mods-host.json'), etiqueta: destino.replace(/\\/g, '/') };
+  const destino = path.join(mercadoDir(), 'plugins');
+  return {
+    global: !!global, fuente, destino, scope: global ? 'user' : 'local',
+    regFile: global ? path.join(casa(), '_mods-host.json') : path.join(root, REGISTRO),
+    etiqueta: destino.replace(/\\/g, '/'),
+    legado: global ? path.join(cfg, 'skills') : path.join(root, DESTINO),
+  };
 }
 
 function listarArchivos(dir, base = dir) {
@@ -93,11 +92,47 @@ function manifiesto(root, nombre, opts = {}) {
   try { return JSON.parse(fs.readFileSync(path.join(ambito(root, opts.global).fuente, nombre, '.claude-plugin', 'plugin.json'), 'utf8')); } catch { return {}; }
 }
 
-/** ¿La carpeta destino es nuestra? Vacía o inexistente también cuenta como libre. */
-function esPropia(dest) {
-  if (!fs.existsSync(dest)) return true;
-  if (fs.existsSync(path.join(dest, MARCA))) return true;
-  return fs.readdirSync(dest).length === 0;
+// ── el CLI de Claude Code ────────────────────────────────────────────────────────────────────────────────────────────
+
+const sinClaude = () => process.env.AKDD_MODS_SIN_CLAUDE === '1';
+const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+/** Corre `claude plugin …`. → { ok, salida, nodisponible }. Nunca lanza. */
+function claude(args, cwd) {
+  if (sinClaude()) return { ok: false, nodisponible: true, salida: 'AKDD_MODS_SIN_CLAUDE=1' };
+  try {
+    const r = spawnSync(process.env.AKDD_CLAUDE_BIN || 'claude', args.map((a) => (process.platform === 'win32' ? q(a) : a)), { cwd: cwd || process.cwd(), encoding: 'utf8', timeout: 60000, windowsHide: true, shell: process.platform === 'win32' });
+    if (r.error) return { ok: false, nodisponible: /ENOENT/.test(String(r.error.code || r.error.message)), salida: String(r.error.message || r.error) };
+    return { ok: r.status === 0, salida: String((r.stdout || '') + (r.stderr || '')).trim().slice(0, 600) };
+  } catch (e) { return { ok: false, salida: String(e && e.message || e).slice(0, 300) }; }
+}
+const idPlugin = (nombre) => nombre + '@' + MERCADO;
+function instaladoEnClaude(nombre, root, scope) {
+  const r = claude(['plugin', 'list', '--json'], root);
+  if (!r.ok) return null; // no se pudo saber
+  return r.salida.includes(idPlugin(nombre));
+}
+const comandosManuales = (nombre, a) => [
+  `claude plugin marketplace add "${mercadoDir()}"`,
+  `claude plugin install ${idPlugin(nombre)} --scope ${a.scope}`,
+];
+
+/** Escribe .claude-plugin/marketplace.json con los plugins que haya en plugins/. */
+function escribirMercado() {
+  const dir = mercadoDir();
+  const plugins = path.join(dir, 'plugins');
+  const lista = fs.existsSync(plugins) ? fs.readdirSync(plugins, { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(plugins, e.name, '.claude-plugin', 'plugin.json'))).map((e) => {
+    let m = {}; try { m = JSON.parse(fs.readFileSync(path.join(plugins, e.name, '.claude-plugin', 'plugin.json'), 'utf8')); } catch { /* sin manifiesto legible */ }
+    return { name: e.name, source: './plugins/' + e.name, description: m.description || ('Mod ' + e.name + ' de Agentix'), version: m.version || undefined };
+  }) : [];
+  fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: MERCADO, owner: { name: 'Agentix' }, description: 'Mods de Agentix (paneles de Claude Code)', plugins: lista }, null, 2) + '\n');
+}
+
+/** Limpia la copia LEGADA (3.24.0/3.24.1: skills/<nombre>), solo si la puso Agentix: ahí solo cargaba el SKILL.md y duplicaba el comando. */
+function limpiarLegado(a, nombre) {
+  const dest = path.join(a.legado, nombre);
+  if (fs.existsSync(path.join(dest, MARCA))) { fs.rmSync(dest, { recursive: true, force: true }); return true; }
+  return false;
 }
 
 function encender(root, nombre, opts = {}) {
@@ -105,36 +140,59 @@ function encender(root, nombre, opts = {}) {
   const src = path.join(a.fuente, nombre);
   if (!fs.existsSync(path.join(src, '.claude-plugin', 'plugin.json'))) return { mod: nombre, ok: false, reason_code: 'MOD_DESCONOCIDO' };
   const dest = path.join(a.destino, nombre);
-  if (!esPropia(dest)) return { mod: nombre, ok: false, reason_code: 'AJENO', detalle: `${a.etiqueta}/${nombre} ya existe y no lo puso Agentix — no se toca` };
   const hash = hashCarpeta(src);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   for (const rel of listarArchivos(src)) {
-    const a = path.join(dest, rel);
-    fs.mkdirSync(path.dirname(a), { recursive: true });
-    fs.copyFileSync(path.join(src, rel), a);
+    const t = path.join(dest, rel);
+    fs.mkdirSync(path.dirname(t), { recursive: true });
+    fs.copyFileSync(path.join(src, rel), t);
   }
   fs.writeFileSync(path.join(dest, MARCA), JSON.stringify({ agentix: true, mod: nombre, hash, instalado: new Date().toISOString() }, null, 2) + '\n');
+  escribirMercado();
+  const limpio = limpiarLegado(a, nombre);
+
+  // Claude Code: registrar el marketplace local e instalar el plugin (o actualizarlo si ya estaba).
+  const pasos = [];
+  let carga = null;
+  const yaEstaba = instaladoEnClaude(nombre, root, a.scope);
+  if (yaEstaba === null && sinClaude()) carga = 'PENDIENTE_CLAUDE_CLI';
+  else {
+    const add = claude(['plugin', 'marketplace', 'add', mercadoDir()], root);
+    if (add.nodisponible) carga = 'PENDIENTE_CLAUDE_CLI';
+    else {
+      if (!add.ok) claude(['plugin', 'marketplace', 'update', MERCADO], root); // ya estaba añadido: se refresca
+      const inst = yaEstaba ? claude(['plugin', 'update', idPlugin(nombre), '--scope', a.scope], root) : claude(['plugin', 'install', idPlugin(nombre), '--scope', a.scope], root);
+      pasos.push(inst.salida);
+      carga = inst.ok ? 'INSTALADO' : 'FALLO_INSTALAR';
+      if (!inst.ok && yaEstaba) { const re = claude(['plugin', 'install', idPlugin(nombre), '--scope', a.scope], root); pasos.push(re.salida); carga = re.ok ? 'INSTALADO' : 'FALLO_INSTALAR'; }
+    }
+  }
   const r = registro(root, opts.global);
-  r[nombre] = { instalado: new Date().toISOString(), hash, destino: `${a.etiqueta}/${nombre}`.replace(/\\/g, '/') };
+  r[nombre] = { instalado: new Date().toISOString(), hash, destino: `${a.etiqueta}/${nombre}`.replace(/\\/g, '/'), scope: a.scope, carga };
   guardarRegistro(root, r, opts.global);
-  const res = { mod: nombre, ok: true, ambito: a.global ? 'global' : 'proyecto', destino: r[nombre].destino, hash, carga: a.global ? 'Claude Code lo carga en TODOS tus proyectos desde la próxima sesión (en las que ya están abiertas: reabrirlas)' : 'Claude Code lo carga solo en la próxima sesión de este proyecto (en la actual: reabrir la sesión)', host: 'claude' };
-  if (a.global && fs.existsSync(path.join(root, DESTINO, nombre, MARCA))) res.aviso = `este proyecto también tiene su copia local (${DESTINO}/${nombre}): Claude Code vería el mod dos veces. Quítala con: akdd mod off`;
+  const res = { mod: nombre, ok: carga !== 'FALLO_INSTALAR', ambito: a.global ? 'global' : 'proyecto', scope: a.scope, destino: r[nombre].destino, hash, carga };
+  if (limpio) res.legado_quitado = true;
+  if (carga === 'INSTALADO') res.siguiente = 'Escribe /reload-plugins en la sesión abierta (o abre una nueva) y comprueba con /plugin: debe decir «1 mod active · ' + nombre + '». Después, /agentix abre el panel.';
+  if (carga === 'PENDIENTE_CLAUDE_CLI') res.siguiente = 'No encontré el comando `claude`. Haz esto a mano en una terminal:\n  ' + comandosManuales(nombre, a).join('\n  ');
+  if (carga === 'FALLO_INSTALAR') { res.reason_code = 'FALLO_INSTALAR'; res.detalle = pasos.filter(Boolean).join(' | ').slice(0, 500); res.siguiente = 'Prueba a mano:\n  ' + comandosManuales(nombre, a).join('\n  '); }
+  res.requisitos = 'Claude Code CLI ≥ 2.1.287 o app de escritorio ≥ 2.1.286 (comprueba con /status en la pestaña Code). No carga en sesiones WSL de la app.';
   return res;
 }
 
 function apagar(root, nombre, opts = {}) {
   const a = ambito(root, opts.global);
-  const dest = path.join(a.destino, nombre);
   const r = registro(root, opts.global);
-  if (fs.existsSync(dest) && !fs.existsSync(path.join(dest, MARCA))) {
-    return { mod: nombre, ok: false, reason_code: 'AJENO', detalle: `${a.etiqueta}/${nombre} no lo puso Agentix — no se borra` };
-  }
-  const habia = fs.existsSync(dest);
-  fs.rmSync(dest, { recursive: true, force: true });
+  const legado = limpiarLegado(a, nombre);
+  let desinstalado = null;
+  if (!sinClaude()) { const u = claude(['plugin', 'uninstall', idPlugin(nombre), '--scope', a.scope], root); desinstalado = u.ok; }
+  const habia = !!r[nombre];
   delete r[nombre];
   guardarRegistro(root, r, opts.global);
-  return { mod: nombre, ok: true, ambito: a.global ? 'global' : 'proyecto', quitado: habia };
+  // La copia del marketplace es compartida (proyecto y global): solo se borra si nadie más la tiene encendida.
+  const otro = registro(root, !opts.global);
+  if (!otro[nombre]) { fs.rmSync(path.join(a.destino, nombre), { recursive: true, force: true }); try { escribirMercado(); } catch { /* sin mercado */ } }
+  return { mod: nombre, ok: true, ambito: a.global ? 'global' : 'proyecto', quitado: habia || legado, desinstalado_en_claude: desinstalado };
 }
 
 function estado(root, opts = {}) {
@@ -144,19 +202,21 @@ function estado(root, opts = {}) {
     const m = manifiesto(root, nombre, opts);
     const dest = path.join(a.destino, nombre);
     const reg = r[nombre] || null;
-    const instalado = fs.existsSync(path.join(dest, MARCA));
+    const copiado = fs.existsSync(path.join(dest, MARCA));
     const hashFuente = hashCarpeta(path.join(a.fuente, nombre));
-    const hashInstalado = instalado ? hashCarpeta(dest) : null;
+    const hashInstalado = copiado ? hashCarpeta(dest) : null;
+    const enClaude = reg ? instaladoEnClaude(nombre, root, a.scope) : null; // true / false / null = no se pudo comprobar
     let situacion = 'APAGADO';
-    if (instalado && hashInstalado === hashFuente) situacion = 'AL_DIA';
-    else if (instalado) situacion = 'DESACTUALIZADO';
-    else if (fs.existsSync(dest) && fs.readdirSync(dest).length) situacion = 'AJENO';
+    if (reg && copiado && hashInstalado === hashFuente) situacion = enClaude === false ? 'NO_INSTALADO_EN_CLAUDE' : 'AL_DIA';
+    else if (reg && copiado) situacion = 'DESACTUALIZADO';
+    const legado = fs.existsSync(path.join(a.legado, nombre, MARCA));
     return {
-      mod: nombre, ambito: a.global ? 'global' : 'proyecto', version: m.version || null, descripcion: m.description || null,
-      situacion, instalado, destino: `${a.etiqueta}/${nombre}`.replace(/\\/g, '/'),
+      mod: nombre, ambito: a.global ? 'global' : 'proyecto', scope: a.scope, version: m.version || null, descripcion: m.description || null,
+      situacion, instalado: !!reg && copiado, en_claude: enClaude, destino: `${a.etiqueta}/${nombre}`.replace(/\\/g, '/'),
       hash_fuente: hashFuente, hash_instalado: hashInstalado, instalado_en: reg ? reg.instalado : null,
       host: 'claude', nota_cursor: 'Cursor no tiene mods de este tipo: este órgano solo aplica a Claude Code',
-      ...(a.global && fs.existsSync(path.join(root, DESTINO, nombre, MARCA)) ? { aviso: 'este proyecto también tiene su copia local: Claude Code vería el mod dos veces (akdd mod off la quita)' } : {}),
+      ...(situacion === 'NO_INSTALADO_EN_CLAUDE' ? { aviso: 'la copia está pero Claude Code no lo tiene instalado: corre `akdd mod on' + (a.global ? ' --global' : '') + '`' } : {}),
+      ...(legado ? { aviso: 'queda una copia LEGADA en ' + a.legado.replace(/\\/g, '/') + '/' + nombre + ' (solo cargaba el skill): `akdd mod on` la quita' } : {}),
     };
   });
 }
@@ -167,7 +227,7 @@ function refrescar(root, opts = {}) {
   return Object.keys(r).filter((n) => disponibles(root, opts).includes(n)).map((n) => encender(root, n, opts));
 }
 
-module.exports = { disponibles, encender, apagar, estado, refrescar, hashCarpeta, ambito, FUENTE, DESTINO, REGISTRO, MARCA };
+module.exports = { disponibles, encender, apagar, estado, refrescar, hashCarpeta, ambito, FUENTE, DESTINO, REGISTRO, MARCA, MERCADO };
 
 if (require.main === module) {
   const [cmd = 'status', ...rest] = process.argv.slice(2);

@@ -1252,17 +1252,23 @@ del ciclo abierto — el hueco `host_reported` que la telemetría tenía vacío.
 Lo que no existe se muestra `n/d`, nunca 0.
 
 ```
-akdd mod on       instala la copia en .claude/skills/agentix-live/ (Claude Code la carga solo en la próxima sesión)
-akdd mod status   AL_DIA · DESACTUALIZADO · APAGADO · AJENO (carpeta del usuario con ese nombre: no se toca)
-akdd mod off      quita solo la copia propia
-akdd mod on --global      lo instala en ~/.claude/skills (TODOS tus proyectos, sin repetirlo en cada uno); también off/status --global
-/agentix          dentro de Claude Code: reabre el panel si se cerró
+akdd mod on              lo INSTALA COMO PLUGIN (marketplace local «agentix-mods», scope local = este proyecto)
+akdd mod on --global     igual con scope user: TODOS tus proyectos (también off/status --global)
+akdd mod status          AL_DIA · DESACTUALIZADO · APAGADO · NO_INSTALADO_EN_CLAUDE (la copia está pero Claude Code no lo tiene)
+akdd mod off             lo desinstala de Claude Code y quita la copia si nadie más la usa
+/reload-plugins          en la sesión abierta, después de `mod on` (o abre una sesión nueva)
+/plugin                  debe decir «1 mod active · agentix-live»; entonces /agentix abre el panel
 ```
 
-`akdd update` refresca la copia SOLO si el dueño la tenía encendida. Cursor no
-tiene mods de este tipo: `status` lo dice, no lo finge. Mecánico:
-`mods-manager.cjs` lo corre `bin/akdd.js`, `src/update-run.js` y
-`test/mods-manager.test.cjs`.
+**Cómo carga de verdad (documentación oficial de mods):** un mod se instala como PLUGIN desde un marketplace; una carpeta
+suelta en `~/.claude/skills` solo carga el `SKILL.md` (el comando `/agentix-live`), nunca el módulo — por eso en 3.24.0/3.24.1
+`/agentix` y el panel no aparecían. `mod on` ahora corre `claude plugin marketplace add` + `claude plugin install` y limpia la
+copia legada. Requisitos del host: Claude Code CLI ≥ 2.1.287 o app de escritorio ≥ 2.1.286 (`/status` en la pestaña Code); no
+carga en sesiones WSL de la app. Sin el comando `claude` en el PATH deja los dos comandos para correr a mano.
+
+`akdd update` refresca el mod SOLO si el dueño lo tenía encendido. Cursor no tiene mods de este tipo: `status` lo dice, no lo
+finge. Mecánico: `mods-manager.cjs` lo corre `bin/akdd.js`, `src/update-run.js` y `test/mods-manager.test.cjs` (incluye una
+prueba contra el CLI real de Claude Code).
 
 ## HIERRO O PAPEL — ninguna sección puede prometer un script que nadie corre
 
