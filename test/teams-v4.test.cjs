@@ -711,7 +711,8 @@ test('GLOWLY-5 — la duración de un ciclo de TEAMS se sella en la libreta (de 
       const m = reloj.marcaDeArranque(db, { ciclo_id: f[0].cycle_id, fecha_fin: fin });
       assert.ok(m && (m.fin - m.ini) >= 39 * 60000 && (m.fin - m.ini) <= 42 * 60000, 'duración ≈ 40 min, no la de la marca ajena: ' + (m && (m.fin - m.ini)));
       const sinPropia = reloj.marcaDeArranque(db, { ciclo_id: 'sin-marca-propia', fecha_fin: fin });
-      assert.ok(sinPropia, 'un ciclo de aa: sin marca propia sigue funcionando como antes (la última)');
+      assert.equal(sinPropia, null, 'una marca que lleva el id de OTRO ciclo no se hereda (3.24.1: 9 ciclos de medinet compartían una marca ajena)');
+      // (el caso «marca genérica sin reclamar sí sirve» lo cubre test/reloj-marca-propia.test.cjs)
       assert.equal(reloj.marcaDeArranque(db, { ciclo_id: 'teams_sin_marca_propia', fecha_fin: fin }), null, 'un ciclo de TEAMS sin marca propia queda sin dato: no toma la marca de otro flujo');
     } finally { db.close(); }
   } finally { restaurar(); }
