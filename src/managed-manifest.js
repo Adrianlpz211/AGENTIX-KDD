@@ -18,7 +18,6 @@ const path = require('path');
 const MANAGED = [
   { rel: '.agentic/agentes', tipo: 'dir' },
   { rel: '.agentic/grafo', tipo: 'dir' },
-  { rel: '.agentic/mods', tipo: 'dir' }, // mods de Claude Code (agentix-live): sin esto el update no los entrega y `akdd mod on` no tiene fuente
   { rel: '.agentic/nucleo-reglas.md', tipo: 'file' },
   { rel: '.audit', tipo: 'dir' },
   { rel: '.cursor/rules', tipo: 'dir' },

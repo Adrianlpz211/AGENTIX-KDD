@@ -503,15 +503,17 @@ async function ejecutar(ctx) {
     }
   } catch (e) { R.host_hooks = { status: 'FALLO', message: e.message }; R.warnings.push('hooks del host no instalados (' + e.message + '): corre akdd host-hooks install'); }
 
-  // Mods de Claude Code: se refresca SOLO lo que el dueño ya tenía encendido (akdd mod on).
-  R.mods = { status: 'OMITIDO' };
+  // El mod de Claude Code (agentix-live) se eliminó en 3.24.1: se retira la copia que pusieron versiones anteriores, SOLO si lleva la marca de Agentix.
   try {
-    const modsJs = path.join(projectPath, '.agentic', 'grafo', 'mods-manager.cjs');
-    if (fs.existsSync(modsJs)) {
-      nodo(modsJs, ['refresh', '--quiet'], { cwd: projectPath, timeout: 15000 });
-      R.mods = { status: 'OK' };
-    }
-  } catch (e) { R.mods = { status: 'FALLO', message: e.message }; R.warnings.push('mods de Claude Code no refrescados (' + e.message + '): corre akdd mod on'); }
+    const legado = path.join(projectPath, '.claude', 'skills', 'agentix-live');
+    if (fs.existsSync(path.join(legado, '.agentix-mod.json'))) fs.rmSync(legado, { recursive: true, force: true });
+    fs.rmSync(path.join(projectPath, '.agentic', '_mods-host.json'), { force: true });
+    // la fuente que entregaban versiones anteriores (.agentic/mods/agentix-live), solo si es la nuestra
+    const fuente = path.join(projectPath, '.agentic', 'mods', 'agentix-live');
+    let nuestro = false; try { nuestro = JSON.parse(fs.readFileSync(path.join(fuente, '.claude-plugin', 'plugin.json'), 'utf8')).name === 'agentix-live'; } catch { /* no existe */ }
+    if (nuestro) fs.rmSync(fuente, { recursive: true, force: true });
+    try { fs.rmdirSync(path.join(projectPath, '.agentic', 'mods')); } catch { /* no está vacía o no existe: no se toca */ }
+  } catch { /* limpieza opcional: no frena el update */ }
 
   const pasos = [];
   if (opts.deps) {
