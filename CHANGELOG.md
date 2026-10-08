@@ -12,6 +12,10 @@
 - **Cola del hook fiable:** deduplica por árbol, verifica que el ciclo exista, reintenta con espera creciente y archiva como ABANDONADA tras 5 intentos; `hook-runner.cjs estado`.
 - **Sin el prefijo `aa:`:** el hook clasifica el mensaje (`prompt-tarea.cjs`) y enriquece solo; hooks del host instalados por `init`/`update` (respetando el rechazo del dueño); aviso de trabajo sin commit; `akdd cobertura` mide lo real.
 - **Memoria y evidencia:** `memory_trace` (consultada por el enricher / relevante derivada, nunca «aplicada»); evidencia TDD acotada al sujeto por cierre de imports (si no es completo, sigue siendo estricta); `source_files` en contratos.
+- **Reloj sin marcas ajenas:** `reloj-derivado` ya no hereda la «última marca» de otro ciclo (en medinet 9 ciclos compartían una marca y salían con duraciones de 3 min a 7,7 h inventadas); una marca con el id de otro ciclo nunca se toma.
+- **Cursor:** el hook de prompt lanza el enricher desacoplado para que queden marca de arranque, predicción y `_brief_<ciclo>.json` (el brief en sí NO llega al modelo de Cursor: su hook no puede inyectar contexto). `AKDD_NO_ENRICHER_BG=1` lo apaga.
+- **Tablero:** los ciclos de commit se etiquetan `commit` (antes `aa`); filtro `origen=commit`.
+- **Limitaciones conocidas:** el trabajo sin commit solo se avisa, no se registra; un commit aceptado por TEAMS puede contarse dos veces (ciclo `teams` + ciclo `commit`); el cierre de imports no sigue `require` dinámicos ni paquetes de workspace (en ese caso la evidencia vuelve a ser estricta); un test que importa un módulo que aún no existe deja la evidencia sin acotar.
 - **`akdd reconciliar [--dias=N] [--aplicar]`:** registra retroactivamente los commits sin ciclo como `historico` (sin pruebas, sin AST, duración sin dato); no cuenta como post-cycle completo.
 - Pruebas: `test/reparaciones-medinet.test.cjs` (7; una más se omite si no hay `better-sqlite3`), con mutantes comprobados sobre los tres arreglos.
 
