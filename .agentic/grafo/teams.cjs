@@ -1255,7 +1255,13 @@ function salud(root, opts = {}) {
     if (e.canal !== 'ACTIVO' || individual) continue;
     if (sinNov && sinNov.n >= sinNov.umbral) sube(sinNov.n >= sinNov.umbral * 2 ? 2 : 1, NOMBRE[rol] + ': ' + sinNov.n + ' rondas sin trabajo (~' + sinNov.min + ' min)' + (sinNov.pedido ? '; ya pidió tareas al Director (' + sinNov.pedido + ')' : '') + (sinNov.veredicto === 'PARADO' ? '. Evidencia: ' + sinNov.evidencia + '. Probablemente terminó su turno y espera que le escribas: pégale en su chat «' + (sinNov.empujon || 'Continúa con la cola y no te detengas a resumir.') + '»' : ''));
     const empujonDir = rol === 'director' && a.razones.length ? ' Si su chat está quieto, pégale en él: «' + (e.hechasSinAceptar.length ? 'Revisa ' + e.hechasSinAceptar.map((t) => t.id).join(', ') + ': audita y acepta o corrige' : 'Atiende lo que tienes pendiente') + ', atiende lo que pida el constructor y sigue con el siguiente lote. No te detengas a resumir.»' : '';
-    if (!v.vivo) sube(a.razones.length ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : '') + empujonDir);
+    if (!v.vivo) {
+      // El vigilante de Cursor termina al emitir cada aviso y el modelo lo relanza al cerrar la ronda: mientras el constructor SIGUE TOCANDO CÓDIGO,
+      // un vigilante apagado es el relevo normal y no un constructor parado (medinet, 10/10/2026: ROJO y avisos al teléfono con 25 archivos tocados en 10 min).
+      // Con trabajo en marcha baja a AMARILLO; sin señales de trabajo (o sin git) sigue ROJO como siempre.
+      const enMarchaB = rol === 'builder' && a.razones.length && evidenciaConstructor(root, e).veredicto === 'TRABAJANDO';
+      sube(a.razones.length && !enMarchaB ? 2 : 1, NOMBRE[rol] + ': su vigilante NO está vivo' + (a.razones.length ? ' y tiene trabajo esperando' : '') + (enMarchaB ? ' (está trabajando: debe relanzarlo al cerrar la ronda)' : '') + empujonDir);
+    }
     if (avisoMin !== null && avisoMin >= 10) sube(2, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min (en un turno largo, o dormido: solo tú puedes despertarlo escribiéndole en su chat)');
     else if (avisoMin !== null && avisoMin >= 3) sube(1, NOMBRE[rol] + ': aviso sin atender hace ' + avisoMin + ' min');
     if (ultMin === null || ultMin > 6) sube(1, NOMBRE[rol] + ': su loop de respaldo no figura (' + (ultMin === null ? 'sin rondas registradas' : 'última ronda hace ' + ultMin + ' min') + ')');

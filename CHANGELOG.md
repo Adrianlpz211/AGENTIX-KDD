@@ -1,5 +1,13 @@
 # Changelog — Agentic KDD
 
+## [3.25.4] — 2026-10-10
+
+**El semáforo ya no se pone ROJO ni manda avisos al teléfono porque el vigilante del constructor aparece apagado mientras el constructor está trabajando.**
+- **Qué pasaba (medinet):** el vigilante de fondo de Cursor termina al emitir cada aviso y el modelo lo relanza al cerrar su ronda. Durante ese relevo, con trabajo pendiente, el semáforo decía «ROJO: su vigilante NO está vivo y tiene trabajo esperando» aunque el constructor llevara 25 archivos tocados en 10 minutos. Se repetía en cada ronda y generaba avisos por Telegram sin motivo.
+- **Arreglo:** si el constructor SIGUE TOCANDO CÓDIGO (la misma evidencia que ya usa el diagnóstico), un vigilante apagado baja a AMARILLO con el texto «(está trabajando: debe relanzarlo al cerrar la ronda)». Sin señales de trabajo, o sin git, sigue ROJO como siempre; el Director no cambia.
+- `.agentic/_hooks-roles.jsonl` (rastro de 3.25.3) entra al `.gitignore`.
+- Pruebas: `test/teams-v4.test.cjs` H-009 (amarillo con trabajo, rojo sin él).
+
 ## [3.25.3] — 2026-10-10
 
 **A un chat de Cursor (el constructor) ya no le encolan mensajes con voz de Director.**

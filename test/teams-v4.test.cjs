@@ -1203,3 +1203,26 @@ test('H-008 — un archivo de herramientas (.claude/scheduled_tasks.lock) NO es 
   fs.mkdirSync(path.join(root, 'src'), { recursive: true }); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'export const a = 1;');
   assert.equal(ev().veredicto, 'TRABAJANDO'); assert.match(ev().texto, /src\/a\.ts/);
 });
+
+test('H-009 — el vigilante del constructor apagado es el relevo normal mientras sigue tocando código: AMARILLO, no ROJO; sin señales de trabajo sigue ROJO', () => {
+  const root = proyecto(); arrancado(root);
+  vigilanteFalso(root, 'director'); rondaReciente(root, 'director', 1); rondaReciente(root, 'builder', 1);   // el del constructor NO está vivo
+  salida(root, 'tarea', 'Tarea en curso', '--criterio=a', '--sin-contexto');
+  const t0 = Date.now();
+  const msgConstructor = (s) => s.alertas.filter((a) => /Constructor/.test(a.msg) && /vigilante NO está vivo/.test(a.msg));
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(t0 - 60000);                 // tocó código hace 1 min
+  try {
+    const s = T.salud(root, { ahora: t0 });
+    const m = msgConstructor(s);
+    assert.equal(m.length, 1, JSON.stringify(s.alertas));
+    assert.equal(m[0].nivel, 'AMARILLO', 'trabajando: no es ROJO');
+    assert.match(m[0].msg, /está trabajando: debe relanzarlo/);
+  } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+  process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(t0 - 3 * 3600000);           // sin cambios desde hace horas: sin evidencia de trabajo
+  try {
+    const m = msgConstructor(T.salud(root, { ahora: t0 }));
+    assert.equal(m.length, 1);
+    assert.equal(m[0].nivel, 'ROJO', 'sin señales de trabajo sigue siendo ROJO');
+    assert.doesNotMatch(m[0].msg, /está trabajando/);
+  } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
+});

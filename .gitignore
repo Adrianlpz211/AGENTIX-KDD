@@ -120,3 +120,5 @@ _output/*-baseline/
 .agentic/_hooks-eventos.jsonl*
 .agentic/specs/src.md
 _output/revision/
+.agentic/_hooks-roles.jsonl*
+**/.agentic/_hooks-roles.jsonl*
