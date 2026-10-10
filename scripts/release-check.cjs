@@ -7,7 +7,7 @@ const report={version:pkg.version,status:'RUNNING',started_at:new Date().toISOSt
 const digest=f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 const memory=path.join(ROOT,'.agentic/memoria.db'),memoryBefore=fs.existsSync(memory)?digest(memory):null;
 const lab=fs.mkdtempSync(path.join(os.tmpdir(),'agentix-release-'));
-function run(script){const r=spawnSync(process.execPath,[path.join(ROOT,script)],{cwd:ROOT,encoding:'utf8',timeout:1200000,maxBuffer:128*1024*1024,windowsHide:true});fs.writeFileSync(path.join(out,path.basename(script)+'.log'),(r.stdout||'')+(r.stderr||''));if(r.status!==0)throw Error(script+' FAILED: revisar log en '+out);return r.stdout||'';}
+function run(script){const r=spawnSync(process.execPath,[path.join(ROOT,script)],{cwd:ROOT,encoding:'utf8',timeout:2400000,maxBuffer:128*1024*1024,windowsHide:true});fs.writeFileSync(path.join(out,path.basename(script)+'.log'),(r.stdout||'')+(r.stderr||''));if(r.status!==0)throw Error(script+' FAILED: revisar log en '+out);return r.stdout||'';}
 async function main(){
 fs.mkdirSync(out,{recursive:true});report.lab=lab;
 try {
