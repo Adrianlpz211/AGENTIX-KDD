@@ -1,5 +1,15 @@
 # Changelog — Agentic KDD
 
+## [3.25.5] — 2026-10-10
+
+**Retomar tras una pausa o un `reabrir`: cada chat sabe dónde quedó, qué cambió mientras no estaba y qué hacer primero, y el dueño recibe el mensaje listo para pegar en Cursor.**
+- **Qué pasaba (medinet, protocolo_reserva):** tras `continuar`, el constructor hacía su primera ronda en segundos, pero `pausa` solo guardaba una hora: no anotaba qué tarea iba en curso ni su último reporte, y `continuar` solo decía «corre ronda» (que lista TODO lo pendiente). Un chat de Cursor dormido o compactado no sabía por dónde seguir ni qué había encolado el Director entre tanto. Y nada puede escribir en un chat dormido.
+- **1) Punto de retoma:** `pausa` guarda una instantánea (lo que iba PARCIAL, la cola, las correcciones, lo por aceptar, el último reporte y las rondas).
+- **2) Bloque RETOMA:** `continuar` imprime, para el constructor y para el Director, **dónde quedaste**, **qué cambió mientras estuvo pausado** (tareas y correcciones nuevas, estados que cambiaron, decisiones que respondió el dueño) y la **PRIMERA ACCIÓN** exacta (lo parcial va antes que las correcciones y éstas antes que la cola). Una pausa anterior a esta versión (sin instantánea) no rompe: solo dice dónde estás.
+- **3) Mensaje para Cursor:** `continuar` (Director) y `reabrir` imprimen «PEGA ESTO en el chat de Cursor…» con el mensaje listo y lo mandan también por ntfy/Telegram si hay puente activo (apagado con `AKDD_TEAMS_NO_AVISO=1`; sin puente no hace nada).
+- Nuevo `teams-retoma.cjs` (puro). Pruebas: `test/teams-retoma.test.cjs` (7).
+- **Límite honesto:** ningún sistema despierta un chat que no está abierto; el mensaje lo tiene que pegar el dueño. Lo que sí cambia es que, al pegarlo, el constructor ya no tiene que adivinar por dónde seguir.
+
 ## [3.25.4] — 2026-10-10
 
 **El semáforo ya no se pone ROJO ni manda avisos al teléfono porque el vigilante del constructor aparece apagado mientras el constructor está trabajando.**

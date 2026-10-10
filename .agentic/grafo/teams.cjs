@@ -242,6 +242,19 @@ function segmentosYFin({ tareas, corrPend, omisiones, decisiones, hechasSinAcept
 
 /** Qué le toca a cada rol, y su huella: si la huella no cambió desde la última ronda que el rol hizo, no hay despertar. */
 function puenteTelefono() { try { return require('./ntfy-bridge.cjs'); } catch { return null; } }
+
+/** Manda por el teléfono (ntfy / Telegram, si hay) el mensaje para pegar en Cursor. Nunca frena ni falla; apagado con AKDD_TEAMS_NO_AVISO=1 y sin puente activo no hace nada. */
+function avisarRetoma(root, mensaje) {
+  try {
+    if (process.env.AKDD_TEAMS_NO_AVISO === '1') return false;
+    const nb = puenteTelefono(); if (!nb) return false;
+    const cfg = nb.leerConfig(root);
+    if (!((cfg && cfg.activo) || nb.telegramActivo(root))) return false;
+    const script = path.join(root, '.agentic', 'grafo', 'ntfy-bridge.cjs'); if (!fs.existsSync(script)) return false;
+    const h = require('child_process').spawn(process.execPath, [script, 'enviar', 'Para que Cursor retome, pega en su chat: ' + mensaje], { cwd: root, detached: true, stdio: 'ignore', windowsHide: true });
+    h.unref(); return true;
+  } catch { return false; }
+}
 function buzonDelDueno() { try { return require('./buzon.cjs'); } catch { return null; } }
 /** El tablero de decisiones (cola por modelo, tareas del tablero → cola de Teams). Fail-soft: es una capa por encima del canal. */
 function tableroDelDueno() { try { return require('./tablero.cjs'); } catch { return null; } }
@@ -923,7 +936,9 @@ function ejecutarCmd(argv, root) {
     const e = necesitaCanal(); if (!e) return salida(1);
     if (e.canal === 'CERRADO') { say('El canal está CERRADO: no hay nada que pausar.'); return salida(2); }
     canal.fijarEstado(root, 'PAUSADO', canal.sello());
-    const est = leerEstado(root); est.pausado_at = iso(); guardarEstado(root, est);
+    const est = leerEstado(root); est.pausado_at = iso();
+    try { est.retoma = require('./teams-retoma.cjs').instantanea(e); } catch { /* sin punto de retoma: la pausa vale igual */ }
+    guardarEstado(root, est);
     say('✔ Canal PAUSADO. Los vigilantes de los dos roles terminan solos (AGENT_LOOP_PAUSE) y el constructor recibe la orden de parar en su próxima lectura; nadie gasta tokens consultando mientras no haya instrucciones.',
       '  El constructor también debe CANCELAR su loop de respaldo (se lo dice `ronda`). Para volver: `teams: continuar` en tu chat y, sobre todo, en el de Cursor.');
     return salida();
@@ -938,6 +953,12 @@ function ejecutarCmd(argv, root) {
     const est = leerEstado(root); est.seen = est.seen || {}; est.seen[rol] = ''; guardarEstado(root, est);
     say(`CONTINÚAS como ${rol === 'builder' ? 'CONSTRUCTOR' : 'DIRECTOR'}: 1) relanza tu vigilante \`esperar --rol=${rol} --despertar\` como tarea en segundo plano; 2) reactiva tu loop de respaldo de ~3 min; 3) ejecuta \`${rol === 'builder' ? 'ronda --rol=builder' : 'revisar'}\` y retoma donde ibas.`);
     if (rol === 'director') say('  Recuerda: el constructor (Cursor) también necesita que el dueño escriba `teams: continuar` en SU chat para relanzar sus vigilantes.');
+    // Punto de retoma: dónde quedó este rol, qué cambió durante la pausa y la primera acción (teams-retoma.cjs). Es una ayuda: nunca frena continuar.
+    try {
+      const R = require('./teams-retoma.cjs'); const e2 = calcular(root) || e; const est2 = leerEstado(root);
+      for (const l of R.bloque(e2, rol, est2.retoma || null)) say(l);
+      if (rol === 'director') { const m = R.mensajeParaCursor('node .agentic/grafo/teams.cjs'); say('', 'PEGA ESTO en el chat de Cursor (nada puede escribir en un chat dormido):', '  ' + m); avisarRetoma(root, m); }
+    } catch { /* sin bloque de retoma */ }
     return salida();
   }
 
@@ -1113,7 +1134,9 @@ function ejecutarCmd(argv, root) {
 
   if (cmd === 'reabrir') {
     if (!necesitaCanal()) return salida(1);
-    canal.fijarEstado(root, 'ACTIVO'); say('✔ Canal ACTIVO otra vez. Relanza los vigilantes (`teams: vigilar`).'); return salida();
+    canal.fijarEstado(root, 'ACTIVO'); say('✔ Canal ACTIVO otra vez. Relanza los vigilantes (`teams: vigilar`).');
+    try { const m = require('./teams-retoma.cjs').mensajeParaCursor('node .agentic/grafo/teams.cjs'); say('', 'PEGA ESTO en el chat de Cursor para que retome (las tareas nuevas no lo despiertan solas):', '  ' + m); avisarRetoma(root, m); } catch { /* sin mensaje */ }
+    return salida();
   }
 
   if (cmd === 'salud') {
