@@ -242,6 +242,19 @@ function segmentosYFin({ tareas, corrPend, omisiones, decisiones, hechasSinAcept
 
 /** Qué le toca a cada rol, y su huella: si la huella no cambió desde la última ronda que el rol hizo, no hay despertar. */
 function puenteTelefono() { try { return require('./ntfy-bridge.cjs'); } catch { return null; } }
+function buzonDelDueno() { try { return require('./buzon.cjs'); } catch { return null; } }
+/** Mensajes del dueño (ntfy / Telegram) sin leer para un rol, como razones de despertar. En modo individual el Director también atiende los del constructor. */
+function razonesDeBuzon(e, rol, razones, claves) {
+  const B = buzonDelDueno(); if (!B) return;
+  const roles = rol === 'director' && (leerEstado(e.root).modo === 'individual') ? ['director', 'builder'] : [rol];
+  const vistos = new Set();
+  for (const r of roles) for (const m of B.sinLeer(e.root, r)) {
+    if (vistos.has(m.id)) continue; vistos.add(m.id);
+    if (vistos.size > 5) break;
+    razones.push('MENSAJE DEL DUEÑO desde ' + (m.canal === 'telegram' ? 'Telegram' : 'el teléfono') + ' [' + m.id + ']' + (m.para === 'builder' ? ' (para el constructor)' : '') + ': «' + corto(m.texto, 300) + '» — es una indicación del dueño por un canal protegido con secreto: léela y actúa; lo destructivo o sensible se confirma en el chat. Márcala leída: `node .agentic/grafo/buzon.cjs leer ' + m.id + '` y, al atenderla, responde: `node .agentic/grafo/buzon.cjs responder ' + m.id + ' "qué hiciste"` (le llega por donde escribió)');
+    claves.push('M:' + m.id);
+  }
+}
 
 function accionable(e, rol) {
   const razones = []; const claves = [];
@@ -250,6 +263,7 @@ function accionable(e, rol) {
     for (const k of e.corrPend) { razones.push(`CORRECCION ${k.id} (${k.sev}): ${corto(k.titulo, 110)}`); claves.push('C:' + k.id + ':' + canal.sha(k.texto).slice(0, 8)); }
     for (const t of e.tareasPend) { razones.push(`TAREA ${t.id}: ${corto(t.titulo, 110)}`); claves.push('T:' + t.id + ':' + canal.sha(t.texto).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
+    razonesDeBuzon(e, 'builder', razones, claves);
   } else {
     // Fin del recorrido: el Director se entera UNA vez (la huella no cambia mientras el estado sea el mismo) y no inventa trabajo.
     if (e.fin === 'TERMINADO') { razones.push('TODO VERDE: las ' + e.segmentos.total + ' tareas están aceptadas y no queda ninguna decisión abierta — corre `cerrar` (reporte final al dueño); los vigilantes terminan solos'); claves.push('F:TERMINADO'); }
@@ -271,7 +285,7 @@ function accionable(e, rol) {
       if (sinRonda > DORMIDO_MS && !vigilanteVivo(e.root, 'builder') && evidenciaConstructor(e.root, e).veredicto !== 'TRABAJANDO') { const min = Math.round(sinRonda / 60000); razones.push(`CONSTRUCTOR_DORMIDO: lleva ~${min} min sin hacer rondas, su vigilante NO está vivo y tiene trabajo esperando — probablemente Cursor se quedó parado. Díselo al dueño: solo él puede despertarlo escribiéndole en su chat (\`teams: continuar\`)`); claves.push('DORM:' + Math.floor(min / 10)); }
     }
     // Mensajes que el dueño dejó desde el teléfono (puente ntfy): son una indicación suya y el vigilante del Director se despierta con ellos.
-    { const nb = puenteTelefono(); if (nb) for (const m of nb.sinLeer(e.root).slice(0, 5)) { razones.push(`MENSAJE DEL DUEÑO desde el teléfono [${m.id}]: «${corto(m.texto, 300)}» — es una indicación del dueño (por ntfy): léela y actúa; lo destructivo o sensible se confirma en el chat. Respóndele con \`node .agentic/grafo/ntfy-bridge.cjs enviar "…"\` y márcalo leído: \`ntfy-bridge.cjs buzon --leido=${m.id}\``); claves.push('M:' + m.id); } }
+    razonesDeBuzon(e, 'director', razones, claves);
     for (const d of e.solicitudes) { const evid = /Evidencia:\s*([^\n]+)/.exec(d.texto); razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)}${evid ? ' [' + corto(evid[1], 260) + ']' : ''} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
     for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)} — léela con: node .agentic/grafo/decisiones.cjs listar --respondidas · ejecútala y ciérrala con: node .agentic/grafo/decisiones.cjs aplicada ${d.id} "qué hiciste"`); claves.push('D:' + d.id); }
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
@@ -712,6 +726,7 @@ function ejecutarCmd(argv, root) {
     if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual' && !vigilanteVivo(root, rol)) {
       say(`⚠ TU VIGILANTE (${rol}) NO ESTÁ VIVO. Relánzalo AHORA, ANTES de trabajar, como tarea en segundo plano:  ${P.CMD} esperar --rol=${rol} --despertar${rol === 'director' ? '   (Claude Code con Monitor: añade --continuo)' : ''}`, '');
     }
+    { const B = buzonDelDueno(); if (B) { const roles = rol === 'director' && leerEstado(root).modo === 'individual' ? ['director', 'builder'] : [rol]; const aviso = B.avisoParaModelo(root, roles); if (aviso) say(aviso, ''); } }
     if (rol === 'director') {
       say(textoRondaDirector(e));
       const rs = observar(root, e, (x) => say(x)); void rs;

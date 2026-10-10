@@ -63,7 +63,6 @@
     ".agentic/grafo/",
     "!.agentic/grafo/*.log",
     ".agentic/agentes/",
-    ".agentic/mods/",
     ".agentic/nucleo-reglas.md",
     ".audit/",
     ".cursor/rules/",

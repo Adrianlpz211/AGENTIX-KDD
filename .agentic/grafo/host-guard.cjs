@@ -373,6 +373,8 @@ function procesar(host, evento, entrada, root) {
     const implicito = cls.esTarea && !cls.explicito && configurado;
     // Decisiones del dueño respondidas en el tablero y aún sin ejecutar (o pendientes): llegan al modelo en CADA turno, sin pegar nada.
     let dec = null; if (host === 'claude') { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } }
+    // Mensajes del dueño que llegaron por Telegram/ntfy (buzón común): al modelo de Claude Code se le muestran aquí y se marcan «entregados».
+    let bz = null; if (host === 'claude') { try { const roles = ['director']; try { if (JSON.parse(fs.readFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), 'utf8')).modo === 'individual') roles.push('builder'); } catch { /* sin TEAMS */ } bz = require('./buzon.cjs').avisoParaModelo(root, roles); } catch { bz = null; } }
     let enr = null; let motivo = 'NO_APLICA';
     if (host === 'claude' && (cls.explicito || implicito)) { const e = enriquecer(root, prompt, { implicito }); enr = e.contexto; motivo = e.motivo; }
     else if (host === 'cursor' && (cls.explicito || implicito)) { motivo = enriquecerEnSegundoPlano(root, prompt).motivo; }
@@ -382,7 +384,7 @@ function procesar(host, evento, entrada, root) {
       ? '[agentix] Esto parece una tarea de desarrollo (' + (cls.razones[0] || 'señales de petición') + ', p=' + cls.p + ') y este proyecto está configurado: trátala como `aa:` (CLAUDE.md, «El prefijo aa: es opcional»). El brief de abajo ya llegó: no vuelvas a correr el enricher.'
       : null;
     try { require('./cobertura.cjs').registrarPrompt(root, { host, cls, enriquecido: !!enr, motivo, prompt }); } catch { /* medir es un plus */ }
-    return salida(host, evento, null, [nota, enr, dec, sinCommit].filter(Boolean).join('\n\n') || null);
+    return salida(host, evento, null, [nota, enr, dec, bz, sinCommit].filter(Boolean).join('\n\n') || null);
   }
   return null;
 }

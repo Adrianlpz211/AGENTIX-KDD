@@ -43,6 +43,7 @@ Agentes: .agentic/agentes/ (10 roles + harness)
 
 ## Módulos
 ### Implementados
+- **src** — 0 tests ✅
 - **general** — 0 tests ✅
 - bin/akdd.js — CLI principal (471 líneas)
 - src/init.js — Inicialización interactiva

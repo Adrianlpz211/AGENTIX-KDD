@@ -155,7 +155,8 @@ const HELP = `
     akdd reconciliar [--dias=30] [--aplicar]   Register retroactively the commits that never got a cycle (no tests/AST, duration without data)
     akdd cobertura [--dias=7] [--json]   How much of the work lands in Agentix: commits vs cycles (exact), record quality, task-like messages (approx.)
     akdd decisiones [listar|responder|aplicada]   Owner decisions board (dashboard tab 🗳️ Decisiones): list, answer, close
-    akdd mod <on|off|status|list> [--mod=name] [--global]   Claude Code mods shipped with Agentix (live panel); installed into .claude/skills/ (this project) or ~/.claude/skills/ (--global: every project)
+    akdd telegram <activar|estado|servir|pin|enviar|desactivar>   Optional Telegram chat with Agentix from anywhere (no tunnel: the PC polls Telegram); pairs to ONE user with a PIN
+    akdd buzon [leer <id>|responder <id> "text"|estado]   Owner messages from ntfy/Telegram (received → delivered → read → answered)
     akdd teams <activar|estado|ronda|revisar|tarea|corregir|resolver|reportar|aceptar|cerrar|…>   Claude Code directs, Cursor builds (one MD channel)
     akdd ws <activar|estado|desactivar>   Optional WhatsApp notices (needs a real browser session)
     akdd simple            Simplicity gate: duplicated code, deps with native equivalent
@@ -243,20 +244,14 @@ switch (command) {
     else uso('akdd host-hooks <install|uninstall|status> [--host=cursor|claude|all]');
     break;
   }
-  case 'mod': case 'mods': {
-    if (['on', 'off', 'status', 'list', 'refresh'].includes(arg1 || 'status')) {
-      // --global instala en ~/.claude/skills (todos los proyectos): no necesita que esta carpeta tenga Agentix, así que corre el gestor del propio paquete.
-      if (args.includes('--global')) ejecutar(path.join(__dirname, '..', '.agentic', 'grafo', 'mods-manager.cjs'), [arg1 || 'status', ...args.slice(2)]);
-      else runModule('mods-manager.cjs', arg1 || 'status', ...args.slice(2));
-    } else uso('akdd mod <on|off|status|list> [--mod=name] [--global]');
-    break;
-  }
   case 'decisiones': case 'decision': runModule('decisiones.cjs', ...args.slice(1)); break;
   case 'cobertura': runModule('cobertura.cjs', ...args.slice(1)); break;
   case 'reconciliar': runModule('registro-historico.cjs', ...args.slice(1)); break;
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
   case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
   case 'ntfy': runModule('ntfy-bridge.cjs', ...args.slice(1)); break;
+  case 'telegram': runModule('telegram-bridge.cjs', ...args.slice(1)); break;
+  case 'buzon': runModule('buzon.cjs', ...args.slice(1)); break;
   case 'ws': {
     const sub = arg1 || 'estado';
     if (['activar', 'contacto', 'elegir', 'reintentar', 'desactivar', 'estado', 'politica', 'procesar'].includes(sub)) runModule('whatsapp-manager.cjs', sub, ...args.slice(2));

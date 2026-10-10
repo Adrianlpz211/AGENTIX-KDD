@@ -109,6 +109,5 @@ _output/*-baseline/
 .agentic/_evidence/
 .agentic/memoria.db.bak-*
 
-# Copia instalada del mod de Claude Code (la fuente vive en .agentic/mods/) — la pone `akdd mod on`
-.claude/skills/agentix-live/
-.agentic/_mods-host.json
+.agentic/_telegram/
+.agentic/_buzon/

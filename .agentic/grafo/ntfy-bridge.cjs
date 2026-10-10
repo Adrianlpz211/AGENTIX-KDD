@@ -54,20 +54,44 @@ const hoy = () => new Date().toISOString().slice(0, 10);
 
 // ───────────────────────────── red ─────────────────────────────
 function cabeceras(cfg) { const h = { 'Content-Type': 'application/json' }; if (cfg.token) h.Authorization = 'Bearer ' + cfg.token; return h; }
-async function publicar(root, cfg, { titulo, texto, prioridad, tags }) {
+/** Botones de ntfy para una decisión: tocar uno PUBLICA «D-001 opción» en el mismo tema, y el servicio la responde (sin exponer tu PC). */
+function accionesDeDecision(cfg, decision) {
+  if (!decision || !decision.id || !decision.opciones || cfg.token) return undefined; // con token propio no se mete en la notificación
+  const ops = String(decision.opciones).split(/\s*[|;]\s*|\s*,\s*(?![^()]*\))/).map((x) => x.trim()).filter(Boolean).slice(0, 3);
+  if (!ops.length) return undefined;
+  return ops.map((o) => ({ action: 'http', label: corto(o, 28), url: cfg.servidor.replace(/\/$/, '') + '/' + cfg.tema, method: 'POST', body: (cfg.pin || '') + decision.id + ' ' + o, clear: true }));
+}
+async function publicar(root, cfg, { titulo, texto, prioridad, tags, decision }) {
   const est = leerEstado(root);
   if (est.dia !== hoy()) { est.dia = hoy(); est.enviados = 0; }
   if (est.enviados >= (cfg.max_dia || 120)) return { ok: false, causa: 'TOPE_DIARIO' };
   try {
     const r = await fetch(cfg.servidor.replace(/\/$/, '') + '/', {
       method: 'POST', headers: cabeceras(cfg), signal: AbortSignal.timeout(10000),
-      body: JSON.stringify({ topic: cfg.tema, title: corto(titulo || 'Agentix', 80), message: String(texto).slice(0, 3500), priority: prioridad || 3, tags: ['agentix'].concat(tags || []) }),
+      body: JSON.stringify(Object.assign({ topic: cfg.tema, title: corto(titulo || 'Agentix', 80), message: String(texto).slice(0, 3500), priority: prioridad || 3, tags: ['agentix'].concat(tags || []) }, accionesDeDecision(cfg, decision) ? { actions: accionesDeDecision(cfg, decision) } : {})),
     });
     if (!r.ok) return { ok: false, causa: 'HTTP_' + r.status };
     const j = await r.json().catch(() => ({}));
     est.enviados++; est.dia = hoy(); guardarEstado(root, est);
     return { ok: true, id: j.id || null };
   } catch (e) { return { ok: false, causa: 'RED: ' + corto(e.message || e, 80) }; }
+}
+const telegramMod = () => { try { return require('./telegram-bridge.cjs'); } catch { return null; } };
+const telegramActivo = (root) => { try { const t = telegramMod(); const c = t && t.leerConfig(root); return !!(c && c.activo && c.chat_id); } catch { return false; } };
+/**
+ * Sale por TODOS los canales activos (ntfy y Telegram), cada uno con su tope diario. `canalOrigen`: si se indica y ese canal está activo, solo
+ * por él (un acuse a un mensaje de Telegram no tiene por qué sonar también en ntfy). → [{ canal, ok, causa }]
+ */
+async function difundir(root, { titulo, texto, prioridad, tags, decision, canalOrigen }) {
+  const cfg = leerConfig(root); const out = [];
+  const ntfyOn = !!(cfg && cfg.activo); const tgOn = telegramActivo(root);
+  const soloOrigen = (canalOrigen === 'ntfy' && ntfyOn) || (canalOrigen === 'telegram' && tgOn) ? canalOrigen : null;
+  if (ntfyOn && (!soloOrigen || soloOrigen === 'ntfy')) { const r = await publicar(root, cfg, { titulo, texto, prioridad, tags, decision }); out.push({ canal: 'ntfy', ok: r.ok, causa: r.causa }); }
+  if (tgOn && (!soloOrigen || soloOrigen === 'telegram')) {
+    try { const r = await telegramMod().difundir(root, { titulo, texto, prioridad, decision }); out.push({ canal: 'telegram', ok: r.ok, causa: r.causa }); } catch (e) { out.push({ canal: 'telegram', ok: false, causa: corto(e.message, 80) }); }
+  }
+  if (!out.length) out.push({ canal: null, ok: false, causa: 'SIN_CANAL_ACTIVO' });
+  return out;
 }
 async function traerEntrada(cfg, since) {
   const url = cfg.servidor.replace(/\/$/, '') + '/' + cfg.tema + '/json?poll=1&since=' + encodeURIComponent(since || 'latest');
@@ -109,10 +133,35 @@ function resumenTexto(root, d) {
 }
 
 // ───────────────────────────── salida: qué se avisa y cuándo ─────────────────────────────
+/** Un solo vigilante de avisos a la vez, aunque haya dos servicios corriendo (ntfy y Telegram): si no, cada aviso saldría doble. */
+function tomarTick(root) {
+  const f = arch(root, 'tick.lock'); const ahora = Date.now();
+  try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); if (v && v.pid !== process.pid && ahora - v.t < 45000) { try { process.kill(v.pid, 0); return false; } catch { /* murió: se toma */ } } } catch { /* sin bloqueo previo */ }
+  try { fs.mkdirSync(dir(root), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ pid: process.pid, t: ahora })); } catch { return true; }
+  return true;
+}
+/** Acuses y escalado de los mensajes del dueño (entregado / leído / atendido / sin atender): una vez cada uno. */
+async function procesarAcuses(root, cfg) {
+  let n = 0;
+  let B; try { B = require('./buzon.cjs'); } catch { return 0; }
+  for (const a of B.acusesPendientes(root, { escalarMin: (cfg && cfg.escalar_min) || 10 })) {
+    const t = B.textoAcuse(a);
+    const r = await difundir(root, { titulo: t.titulo, texto: t.texto, prioridad: a.tipo === 'escalado' ? 4 : 2, tags: [a.tipo === 'escalado' ? 'alarm_clock' : 'speech_balloon'], canalOrigen: a.tipo === 'escalado' ? null : a.m.canal });
+    if (r.some((x) => x.ok)) { B.marcarAvisado(root, a.m.id, a.tipo); n++; }
+  }
+  return n;
+}
 async function tick(root, opts = {}) {
-  const cfg = leerConfig(root); if (!cfg || !cfg.activo) return { enviados: 0, motivo: 'APAGADO' };
+  const cfg = leerConfig(root) || {}; const tgOn = telegramActivo(root);
+  if (!cfg.activo && !tgOn) return { enviados: 0, motivo: 'APAGADO' };
+  if (!opts.sinCerrojo && !tomarTick(root)) return { enviados: 0, motivo: 'OTRO_SERVICIO_AVISA' };
   const est = leerEstado(root); const ahora = opts.ahora || Date.now(); const d = salud(root);
-  const out = []; const manda = async (titulo, texto, prioridad, tags) => { const r = await publicar(root, cfg, { titulo, texto, prioridad, tags }); out.push({ titulo, ok: r.ok, causa: r.causa }); return r; };
+  const out = []; const manda = async (titulo, texto, prioridad, tags, decision) => {
+    const rs = await difundir(root, { titulo, texto, prioridad, tags, decision });
+    const ok = rs.some((x) => x.ok); const topes = rs.length > 0 && rs.every((x) => x.causa === 'TOPE_DIARIO');
+    const r = { ok, causa: ok ? undefined : (topes ? 'TOPE_DIARIO' : (rs[0] && rs[0].causa)) };
+    out.push({ titulo, ok: r.ok, causa: r.causa }); return r;
+  };
   const fresco = leerEstado(root); Object.assign(est, { enviados: fresco.enviados, dia: fresco.dia });
 
   if (d) {
@@ -130,7 +179,7 @@ async function tick(root, opts = {}) {
       }
       // 3) decisiones que necesitan al dueño
       for (const x of decisiones.filter((y) => !est.decisiones.includes(y.id))) {
-        const r = await manda(`❓ Necesito tu decisión: ${x.id}`, `${x.titulo}\n${x.detalle ? corto(x.detalle, 500) + '\n' : ''}${x.opciones ? 'Opciones: ' + x.opciones + '\n' : ''}${x.recomendacion ? 'Recomiendo: ' + x.recomendacion + '\n' : ''}\nResponde aquí mismo: ${x.id} <tu decisión>`, 4, ['question']);
+        const r = await manda(`❓ Necesito tu decisión: ${x.id}`, `${x.titulo}\n${x.detalle ? corto(x.detalle, 500) + '\n' : ''}${x.opciones ? 'Opciones: ' + x.opciones + '\n' : ''}${x.recomendacion ? 'Recomiendo: ' + x.recomendacion + '\n' : ''}\nResponde aquí mismo: ${x.id} <tu decisión>`, 4, ['question'], { id: x.id, opciones: x.opciones });
         if (r.ok || r.causa === 'TOPE_DIARIO') est.decisiones.push(x.id);
       }
       est.decisiones = est.decisiones.filter((id) => decisiones.some((y) => y.id === id));   // resueltas: ya no cuentan
@@ -169,6 +218,7 @@ async function tick(root, opts = {}) {
   } catch { /* sin base: no hay ciclos que avisar */ }
   const post = leerEstado(root); est.enviados = post.enviados; est.dia = post.dia;
   guardarEstado(root, est);
+  try { await procesarAcuses(root, cfg); } catch { /* los acuses se reintentan en la vuelta siguiente */ }
   return { enviados: out.filter((x) => x.ok).length, detalle: out };
 }
 
@@ -192,23 +242,20 @@ async function entrada(root) {
       continue;
     }
     if (/^(estado|\?|avance|reporte)$/i.test(texto)) { await publicar(root, cfg, { titulo: '📊 Estado', texto: resumenTexto(root, salud(root)), prioridad: 3, tags: ['bar_chart'] }); continue; }
-    fs.mkdirSync(dir(root), { recursive: true });
-    fs.appendFileSync(arch(root, 'buzon.jsonl'), JSON.stringify({ id: m.id, t: new Date((m.time || 0) * 1000).toISOString(), texto: corto(texto, 1500), leido: false }) + '\n');
-    await publicar(root, cfg, { titulo: '📥 Recibido', texto: `Se lo pasé al Director: ${corto(texto, 160)}\nLo verá en su próxima ronda y te responde aquí.`, prioridad: 2, tags: ['inbox_tray'] });
+    const B = require('./buzon.cjs');
+    const r = B.agregar(root, { id: m.id, canal: 'ntfy', texto, t: new Date((m.time || 0) * 1000).toISOString() });
+    if (r.duplicado || !r.agregados.length) continue;
+    const quien = r.agregados.map((x) => (x.para === 'builder' ? 'el constructor (Cursor)' : 'el Director (Claude Code)')).join(' y ');
+    await publicar(root, cfg, { titulo: '📥 Recibido', texto: `Se lo pasé a ${quien}: ${corto(r.agregados[0].texto, 160)}\nTe aviso cuando lo vea, lo lea y lo atienda.`, prioridad: 2, tags: ['inbox_tray'] });
   }
   const fr = leerEstado(root); fr.since = est.since; guardarEstado(root, fr);
   return { recibidos };
 }
 
 // ───────────────────────────── buzón (lo lee el Director) ─────────────────────────────
-function leerBuzon(root) { try { return fs.readFileSync(arch(root, 'buzon.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } }
-function marcarLeidos(root, cual) {
-  const todos = leerBuzon(root); let n = 0;
-  for (const m of todos) if (!m.leido && (cual === 'todos' || m.id === cual)) { m.leido = true; n++; }
-  fs.writeFileSync(arch(root, 'buzon.jsonl'), todos.map((m) => JSON.stringify(m)).join('\n') + (todos.length ? '\n' : ''));
-  return n;
-}
-const sinLeer = (root) => leerBuzon(root).filter((m) => !m.leido);
+function leerBuzon(root) { return require('./buzon.cjs').listar(root); }
+function marcarLeidos(root, cual) { return require('./buzon.cjs').marcarLeido(root, cual); }
+const sinLeer = (root, rol) => require('./buzon.cjs').sinLeer(root, rol);
 
 // ───────────────────────────── servicio ─────────────────────────────
 function estadoServicio(root) {
@@ -218,7 +265,7 @@ function estadoServicio(root) {
   return { vivo: proceso && hace < 90, pid: v.pid, latido_hace_s: hace };
 }
 async function servir(root, opts = {}) {
-  const cfg0 = leerConfig(root); if (!cfg0 || !cfg0.activo) { console.log('ntfy está apagado: «activar» primero.'); return; }
+  const cfg0 = leerConfig(root); if ((!cfg0 || !cfg0.activo) && !telegramActivo(root)) { console.log('ntfy está apagado: «activar» primero.'); return; }
   console.log('ntfy: servicio en marcha (cada ' + SONDEO_MS / 1000 + ' s). Ctrl+C para detener.');
   let corriendo = true; const parar = () => { corriendo = false; try { fs.unlinkSync(arch(root, 'servicio.json')); } catch { /* ya */ } };
   process.on('SIGINT', () => { parar(); process.exit(0); }); process.on('SIGTERM', () => { parar(); process.exit(0); });
@@ -282,7 +329,7 @@ async function main(argv, root) {
   return 2;
 }
 
-module.exports = { activar: (root, a) => main(['activar', ...(a || [])], root), main, tick, entrada, publicar, leerConfig, leerBuzon, sinLeer, marcarLeidos, estadoServicio, resumenTexto, servir };
+module.exports = { difundir, procesarAcuses, tomarTick, telegramActivo, activar: (root, a) => main(['activar', ...(a || [])], root), main, tick, entrada, publicar, leerConfig, leerBuzon, sinLeer, marcarLeidos, estadoServicio, resumenTexto, servir };
 
 if (require.main === module) {
   let root = process.cwd(); const a = process.argv.slice(2); const i = a.findIndex((x) => x.startsWith('--root='));

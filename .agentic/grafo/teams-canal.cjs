@@ -243,6 +243,15 @@ function recuperarPerdidos(root) {
   try {
     if (!fs.existsSync(instantaneaPath(root))) return repuestos;
     const previo = analizar(fs.readFileSync(instantaneaPath(root), 'utf8').split(/\r?\n/).join('\n'));
+    // Comprobación SIN bloqueo: este camino corre en cada sondeo de los vigilantes y del tablero (cada pocos segundos); tomar el bloqueo
+    // del canal en cada uno lo ponía a competir con los comandos reales (y bloqueaba el servidor del tablero hasta 8 s). El bloqueo solo
+    // se toma cuando de verdad falta algo.
+    const textoActual = leerTexto(root);
+    if (textoActual == null) return repuestos;
+    const actual0 = analizar(textoActual);
+    const falta0 = ['tareas', 'correcciones', 'decisiones'].some((clave) => previo.secciones[clave]
+      && elementos(previo, clave).some((el) => !el.generado && !elementos(actual0, clave).some((x) => x.id === el.id)));
+    if (!falta0) return repuestos;
     mutar(root, (lineas, c) => {
       const faltan = [];
       for (const clave of ['tareas', 'correcciones', 'decisiones']) {

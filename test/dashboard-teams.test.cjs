@@ -8,10 +8,13 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { crearFixture, arrancarDashboard, REPO } = require('./fixtures/dashboard-fixture.cjs');
+// Cada petición de la prueba de /api/v1/teams abre su conexión: entre dos peticiones ejecuta comandos de TEAMS que tardan, y pasados 5 s el servidor ya
+// cerró la conexión reutilizada y fetch falla con ECONNRESET (carrera de la prueba, no del servidor).
+const fetchN = (u, i = {}) => fetch(u, Object.assign({}, i, { headers: Object.assign({}, i.headers || {}, { connection: 'close' }) }));
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), 'akdd-dashteams-' + p + '-'));
 const teams = (dir, ...args) => spawnSync(process.execPath, [path.join(dir, '.agentic', 'grafo', 'teams.cjs'), ...args], { cwd: dir, encoding: 'utf8', timeout: 60000 });
-async function json(url) { const r = await fetch(url); return { status: r.status, csp: r.headers.get('content-security-policy'), texto: await r.text() }; }
+async function json(url) { const r = await fetchN(url); return { status: r.status, csp: r.headers.get('content-security-policy'), texto: await r.text() }; }
 function conTeams(dir) { fs.cpSync(path.join(REPO, '.agentic', 'grafo'), path.join(dir, '.agentic', 'grafo'), { recursive: true }); }
 
 test('el tablero trae la pestaña Oficina (dentro del layout) y su página se sirve embebible solo por el mismo origen', async () => {
@@ -39,10 +42,10 @@ test('/api/v1/teams: el semáforo y los roles salen del canal real; sin canal y 
   const d = await arrancarDashboard(dir);
   try {
     const base = d.url.replace(/\/$/, '');
-    const vacio = (await (await fetch(base + '/api/v1/teams')).json());
+    const vacio = (await (await fetchN(base + '/api/v1/teams')).json());
     assert.equal(vacio.status, 'EMPTY'); assert.equal(vacio.reason_code, 'SIN_CANAL');
     for (const a of [['activar'], ['modo', 'completo'], ['iniciar'], ['tarea', 'Algo', '--criterio=a', '--sin-contexto']]) assert.equal(teams(dir, ...a).status, 0);
-    const j = await (await fetch(base + '/api/v1/teams')).json();
+    const j = await (await fetchN(base + '/api/v1/teams')).json();
     assert.equal(j.status, 'OK');
     assert.equal(j.data.canal, 'ACTIVO');
     assert.equal(j.data.modo, 'completo');
@@ -53,12 +56,12 @@ test('/api/v1/teams: el semáforo y los roles salen del canal real; sin canal y 
     assert.equal(typeof j.data.registro.registradas, 'number');
     // pausar cambia lo que se ve
     assert.equal(teams(dir, 'pausa').status, 0);
-    assert.equal((await (await fetch(base + '/api/v1/teams')).json()).data.semaforo, 'PAUSADO');
+    assert.equal((await (await fetchN(base + '/api/v1/teams')).json()).data.semaforo, 'PAUSADO');
   } finally { d.cerrar(); }
   const sin = tmp('sin'); crearFixture(sin);
   const d2 = await arrancarDashboard(sin);
   try {
-    const j = await (await fetch(d2.url.replace(/\/$/, '') + '/api/v1/teams')).json();
+    const j = await (await fetchN(d2.url.replace(/\/$/, '') + '/api/v1/teams')).json();
     assert.equal(j.status, 'UNAVAILABLE'); assert.equal(j.reason_code, 'TEAMS_NO_INSTALADO');
   } finally { d2.cerrar(); }
 });
@@ -84,7 +87,7 @@ test('la oficina 3D va dentro de /teams con three.js local, sin innerHTML ni rec
     assert.doesNotMatch(pag.texto, /\/\*__MUNDO__\*\//, 'la escena quedó inyectada');
     assert.doesNotMatch(pag.texto, /https?:\/\/(?!127\.0\.0\.1|localhost)[^"'\s)]*\.(js|css)/, 'sin scripts ni estilos externos');
     assert.doesNotMatch(pag.texto, /innerHTML|document\.write|eval\(/);
-    const three = await fetch(base + '/vendor/three.min.js');
+    const three = await fetchN(base + '/vendor/three.min.js');
     assert.equal(three.status, 200);
   } finally { d.cerrar(); }
 });
@@ -153,7 +156,7 @@ test('/api/v1/oficina: la oficina vive con un solo modelo — la actividad sale 
   const d = await arrancarDashboard(sin);
   try {
     const base = d.url.replace(/\/$/, '');
-    let j = await (await fetch(base + '/api/v1/oficina')).json();
+    let j = await (await fetchN(base + '/api/v1/oficina')).json();
     assert.equal(j.status, 'OK'); assert.equal(j.data.teams, null); assert.deepStrictEqual(j.data.actividad.actores, []);
     const marca = path.join(sin, '.agentic', '_tarea_en_curso.json'); const ahora = Date.now();
     const sesion = (min, fin) => [{ inicio: new Date(ahora - min * 60000).toISOString(), fin: fin ? new Date(ahora).toISOString() : null }];
@@ -162,7 +165,7 @@ test('/api/v1/oficina: la oficina vive con un solo modelo — la actividad sale 
       claude: { lote: [], abierta: { tarea: 'tarea pausada', sesiones: sesion(20, true) } },
       olvidada: { lote: [], abierta: { tarea: 'marca de ayer', sesiones: sesion(60 * 7) } },
     } }));
-    j = await (await fetch(base + '/api/v1/oficina')).json();
+    j = await (await fetchN(base + '/api/v1/oficina')).json();
     const por = Object.fromEntries(j.data.actividad.actores.map((a) => [a.actor, a]));
     assert.equal(por.cursor.activa, true); assert.equal(por.cursor.tarea, 'corregir el formulario de citas'); assert.ok(por.cursor.desde_seg >= 290);
     assert.equal(por.claude.activa, false, 'una sesión cerrada (pausa) no es trabajo en curso');
@@ -173,7 +176,7 @@ test('/api/v1/oficina: la oficina vive con un solo modelo — la actividad sale 
   try {
     const base = d2.url.replace(/\/$/, '');
     for (const a of [['activar'], ['modo', 'individual'], ['iniciar']]) assert.equal(teams(con, ...a).status, 0);
-    const j = await (await fetch(base + '/api/v1/oficina')).json();
+    const j = await (await fetchN(base + '/api/v1/oficina')).json();
     assert.equal(j.data.teams.modo, 'individual'); assert.equal(j.data.teams_instalado, true);
   } finally { d2.cerrar(); }
 });
