@@ -372,7 +372,7 @@ function procesar(host, evento, entrada, root) {
     try { const pt = require('./prompt-tarea.cjs'); cls = pt.clasificarPrompt(prompt); configurado = pt.proyectoConfigurado(root); } catch { /* sin clasificador: solo aa: explícito */ const ex = /^\s*aa:/i.test(String(prompt)); cls = { esTarea: ex, explicito: ex, p: ex ? 0.99 : 0, razones: [] }; }
     const implicito = cls.esTarea && !cls.explicito && configurado;
     // Decisiones del dueño respondidas en el tablero y aún sin ejecutar (o pendientes): llegan al modelo en CADA turno, sin pegar nada.
-    let dec = null; if (host === 'claude') { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } }
+    let dec = null; if (host === 'claude') { try { dec = require('./tablero.cjs').avisoParaHook(root, 'director'); } catch { try { dec = require('./decisiones.cjs').avisoParaModelo(root); } catch { dec = null; } } }
     // Mensajes del dueño que llegaron por Telegram/ntfy (buzón común): al modelo de Claude Code se le muestran aquí y se marcan «entregados».
     let bz = null; if (host === 'claude') { try { const roles = ['director']; try { if (JSON.parse(fs.readFileSync(path.join(root, '.agentic', '_teams', 'estado.json'), 'utf8')).modo === 'individual') roles.push('builder'); } catch { /* sin TEAMS */ } bz = require('./buzon.cjs').avisoParaModelo(root, roles); } catch { bz = null; } }
     let enr = null; let motivo = 'NO_APLICA';

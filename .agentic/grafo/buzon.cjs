@@ -137,7 +137,7 @@ function acusesPendientes(root, opts = {}) {
   const ahora = opts.ahora || Date.now(); const escalarMs = (opts.escalarMin || 10) * 60000; const out = [];
   for (const m of listar(root)) {
     const a = m.avisado || {};
-    if (m.canal === 'otro') continue;
+    if (m.canal === 'otro' || m.canal === 'tablero') continue; // el tablero muestra su propio historial: no se le avisa al teléfono
     if (m.estado === 'atendido' && !a.atendido) out.push({ m, tipo: 'atendido' });
     else if (m.leido && m.estado !== 'atendido' && !a.leido) out.push({ m, tipo: 'leido' });
     else if (m.entregado_at && !m.leido && !a.entregado) out.push({ m, tipo: 'entregado' });

@@ -243,16 +243,30 @@ function segmentosYFin({ tareas, corrPend, omisiones, decisiones, hechasSinAcept
 /** Qué le toca a cada rol, y su huella: si la huella no cambió desde la última ronda que el rol hizo, no hay despertar. */
 function puenteTelefono() { try { return require('./ntfy-bridge.cjs'); } catch { return null; } }
 function buzonDelDueno() { try { return require('./buzon.cjs'); } catch { return null; } }
+/** El tablero de decisiones (cola por modelo, tareas del tablero → cola de Teams). Fail-soft: es una capa por encima del canal. */
+function tableroDelDueno() { try { return require('./tablero.cjs'); } catch { return null; } }
+/** Los roles que atiende quien corre este rol: en modo individual, un mismo modelo hace de Director y de constructor. */
+function rolesDeHost(root, rol) { const t = tableroDelDueno(); return t ? t.rolesDelHost(root, rol) : [rol]; }
 /** Mensajes del dueño (ntfy / Telegram) sin leer para un rol, como razones de despertar. En modo individual el Director también atiende los del constructor. */
 function razonesDeBuzon(e, rol, razones, claves) {
   const B = buzonDelDueno(); if (!B) return;
-  const roles = rol === 'director' && (leerEstado(e.root).modo === 'individual') ? ['director', 'builder'] : [rol];
+  const roles = rolesDeHost(e.root, rol);
   const vistos = new Set();
   for (const r of roles) for (const m of B.sinLeer(e.root, r)) {
     if (vistos.has(m.id)) continue; vistos.add(m.id);
     if (vistos.size > 5) break;
-    razones.push('MENSAJE DEL DUEÑO desde ' + (m.canal === 'telegram' ? 'Telegram' : 'el teléfono') + ' [' + m.id + ']' + (m.para === 'builder' ? ' (para el constructor)' : '') + ': «' + corto(m.texto, 300) + '» — es una indicación del dueño por un canal protegido con secreto: léela y actúa; lo destructivo o sensible se confirma en el chat. Márcala leída: `node .agentic/grafo/buzon.cjs leer ' + m.id + '` y, al atenderla, responde: `node .agentic/grafo/buzon.cjs responder ' + m.id + ' "qué hiciste"` (le llega por donde escribió)');
+    razones.push('MENSAJE DEL DUEÑO desde ' + (m.canal === 'telegram' ? 'Telegram' : (m.canal === 'tablero' ? 'el tablero de decisiones' : 'el teléfono')) + ' [' + m.id + ']' + (m.para === 'builder' ? ' (para el constructor)' : '') + ': «' + corto(m.texto, 300) + '» — es una indicación del dueño por un canal protegido con secreto: léela y actúa; lo destructivo o sensible se confirma en el chat. Márcala leída: `node .agentic/grafo/buzon.cjs leer ' + m.id + '` y, al atenderla, responde: `node .agentic/grafo/buzon.cjs responder ' + m.id + ' "qué hiciste"` (le llega por donde escribió)');
     claves.push('M:' + m.id);
+  }
+}
+
+/** Lo que el tablero de decisiones le pide a un rol: elementos asignados a él y, al constructor, las respuestas que le toca ejecutar. Sale del canal (no se pierde). */
+function razonesDeTablero(e, rol, razones, claves) {
+  const T = tableroDelDueno(); if (!T) return;
+  let c; try { c = T.cola(e.root, rol); } catch { return; }
+  for (const x of c.asignadas.slice(0, 6)) { razones.push('TABLERO ' + x.id + ' asignado a ti (' + x.clase + ', prioridad ' + x.prioridad + '): ' + corto(x.titulo, 100) + ' — muévelo con: node .agentic/grafo/decisiones.cjs mover ' + x.id + ' --estado=en_curso|esperando|resuelta' + (rol === 'builder' ? ' --rol=builder' : '')); claves.push('B:' + x.id + ':' + canal.sha(x.titulo + x.prioridad + (x.fase || '')).slice(0, 8)); }
+  if (rol === 'builder') {
+    for (const x of c.porEjecutar.slice(0, 6)) { razones.push('DECISION DEL DUEÑO ' + x.id + ' contestada (te toca ejecutarla): ' + corto(x.titulo, 90) + ' → «' + corto(x.respuesta, 200) + '» — ciérrala con: node .agentic/grafo/decisiones.cjs aplicada ' + x.id + ' "qué hiciste" --rol=builder'); claves.push('D:' + x.id); }
   }
 }
 
@@ -264,6 +278,7 @@ function accionable(e, rol) {
     for (const t of e.tareasPend) { razones.push(`TAREA ${t.id}: ${corto(t.titulo, 110)}`); claves.push('T:' + t.id + ':' + canal.sha(t.texto).slice(0, 8)); }
     for (const o of e.omisiones) { razones.push(`OMISION ${o.codigo}: ${o.texto}`); claves.push('O:' + o.codigo + ':' + o.id); }
     razonesDeBuzon(e, 'builder', razones, claves);
+    razonesDeTablero(e, 'builder', razones, claves);
   } else {
     // Fin del recorrido: el Director se entera UNA vez (la huella no cambia mientras el estado sea el mismo) y no inventa trabajo.
     if (e.fin === 'TERMINADO') { razones.push('TODO VERDE: las ' + e.segmentos.total + ' tareas están aceptadas y no queda ninguna decisión abierta — corre `cerrar` (reporte final al dueño); los vigilantes terminan solos'); claves.push('F:TERMINADO'); }
@@ -287,7 +302,9 @@ function accionable(e, rol) {
     // Mensajes que el dueño dejó desde el teléfono (puente ntfy): son una indicación suya y el vigilante del Director se despierta con ellos.
     razonesDeBuzon(e, 'director', razones, claves);
     for (const d of e.solicitudes) { const evid = /Evidencia:\s*([^\n]+)/.exec(d.texto); razones.push(`SOLICITUD DEL CONSTRUCTOR ${d.id}: ${corto(d.titulo, 90)}${evid ? ' [' + corto(evid[1], 260) + ']' : ''} — está parado sin trabajo: encola el siguiente lote (\`tarea\`), cierra si todo está listo (\`cerrar\`) o dile qué esperar`); claves.push('S:' + d.id); }
-    for (const d of e.decididasDueno) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)} — léela con: node .agentic/grafo/decisiones.cjs listar --respondidas · ejecútala y ciérrala con: node .agentic/grafo/decisiones.cjs aplicada ${d.id} "qué hiciste"`); claves.push('D:' + d.id); }
+    { const T = tableroDelDueno(); const deCursor = new Set(T && e.modo !== 'individual' ? T.cola(e.root, 'builder').porEjecutar.map((x) => x.id) : []);
+    for (const d of e.decididasDueno.filter((x) => !deCursor.has(x.id))) { razones.push(`DECISION DEL DUEÑO ${d.id} contestada: ${corto(d.titulo, 90)} — léela con: node .agentic/grafo/decisiones.cjs listar --respondidas · ejecútala y ciérrala con: node .agentic/grafo/decisiones.cjs aplicada ${d.id} "qué hiciste"`); claves.push('D:' + d.id); } }
+    razonesDeTablero(e, 'director', razones, claves);
     // OCIOSO y LISTO se repiten cada REPETIR_MS mientras la condición persista: si el Director atiende el aviso y no actúa, no se acaba el aviso
     // (el caso «los dos esperando al otro» que dejó glowly parado).
     const quieto = Math.max(0, e.ahora - e.mtime);
@@ -729,7 +746,8 @@ function ejecutarCmd(argv, root) {
     if (e.canal === 'ACTIVO' && leerEstado(root).modo !== 'individual' && !vigilanteVivo(root, rol)) {
       say(`⚠ TU VIGILANTE (${rol}) NO ESTÁ VIVO. Relánzalo AHORA, ANTES de trabajar, como tarea en segundo plano:  ${P.CMD} esperar --rol=${rol} --despertar${rol === 'director' ? '   (Claude Code con Monitor: añade --continuo)' : ''}`, '');
     }
-    { const B = buzonDelDueno(); if (B) { const roles = rol === 'director' && leerEstado(root).modo === 'individual' ? ['director', 'builder'] : [rol]; const aviso = B.avisoParaModelo(root, roles); if (aviso) say(aviso, ''); } }
+    { const B = buzonDelDueno(); if (B) { const roles = rolesDeHost(root, rol); const aviso = B.avisoParaModelo(root, roles); if (aviso) say(aviso, ''); } }
+    { const T = tableroDelDueno(); if (T) { try { T.sincronizar(root); const aviso = T.avisoDeCola(root, rol); if (aviso) say(aviso, ''); } catch { /* el tablero es una capa auxiliar */ } } }
     if (rol === 'director') {
       say(textoRondaDirector(e));
       const rs = observar(root, e, (x) => say(x)); void rs;
@@ -973,6 +991,7 @@ function ejecutarCmd(argv, root) {
       canal.mutar(root, (lineas) => { let L = canal.__asegurar(lineas.slice(), 'auditoria', 'Auditoría del Director'); L = canal.__quitarPlaceholder(L, 'auditoria'); const fin = canal.__finSeccion(L, 'auditoria'); L.splice(fin, 0, linea); return L; });
       const est = leerEstado(root); est.aceptaciones = (est.aceptaciones || []).concat({ id: t.id, at: iso() }); guardarEstado(root, est);
       say(`✔ ${t.id} ACEPTADA`);
+      { const T = tableroDelDueno(); if (T) { const cerrados = T.alAceptarTarea(root, t.id); if (cerrados.length) say('  🗳️ cerró en el tablero: ' + cerrados.join(', ')); } }
     }
     // Lo aprendido al aceptar entra a la memoria KDD (nodos del grafo). En `aa:` lo escriben los agentes de memoria; en TEAMS nadie
     // lo hacía y el grafo KDD quedaba vacío. Solo si el Director lo da: no se inventa un aprendizaje por cada tarea.
@@ -999,6 +1018,18 @@ function ejecutarCmd(argv, root) {
     const pregunta = arg.join(' ').trim(); if (!pregunta) { say('Uso: teams.cjs decision "pregunta" --tipo=director|dueno [--elegida=…] [--porque=…] [--fuentes=u1,u2] [--opciones="a|b"] [--recomendacion=…] [--impacto=…]'); return salida(2); }
     const dueno = /^due/i.test(String(opt.tipo || ''));
     let id = '';
+    if (dueno) {
+      const T = tableroDelDueno();
+      if (T) {
+        const v = (x) => (x === true || x == null ? '' : String(x));
+        const r = T.crearItem(root, { titulo: pregunta, clase: v(opt.clase) || 'decision', opciones: v(opt.opciones), recomendacion: v(opt.recomendacion), impacto: v(opt.impacto), por_que: v(opt.porque),
+          responsable: v(opt.responsable), prioridad: v(opt.prioridad), fecha_limite: v(opt.limite), etiquetas: v(opt.etiquetas), codigo: v(opt.codigo), detalle: v(opt.detalle) },
+          { por: /^(builder|cursor)$/i.test(v(opt.rol)) ? 'cursor' : 'director' });
+        if (!r.ok) { say('✖ ' + r.code + ': ' + r.message); return salida(1); }
+        say('✔ ' + r.id + ' es del DUEÑO y queda ABIERTA. El trabajo independiente continúa. (Solo se escala lo que no está en internet o es bloqueante por seguridad.)');
+        return salida();
+      }
+    }
     canal.mutar(root, (lineas, c) => {
       id = canal.siguienteId(c.limpias.join(String.fromCharCode(10)), 'D');
       const decidida = !dueno && opt.elegida && opt.elegida !== true;
@@ -1191,6 +1222,14 @@ function leerVigilante(root, rol) {
 
 /** Una decisión del dueño lista para mostrar en el tablero: la pregunta, sus opciones, la recomendación del Director y desde cuándo espera. */
 function detalleDecision(d) {
+  // Por el mismo lector que el tablero: los campos que éste añade (clase, prioridad, responsable, historial…) no se cuelan en el texto de la pregunta
+  // y las opciones con clave («Sí=Aprobar») salen como siempre para los botones del teléfono: solo las claves, «Sí|No».
+  try {
+    const p = require('./decisiones.cjs').parsear(d);
+    const distintas = p.opciones_det.filter((o) => o.texto && o.texto !== o.clave);
+    const det = [p.detalle, distintas.length ? distintas.map((o) => o.clave + ' = ' + o.texto).join(' · ') : ''].filter(Boolean).join(' — ');
+    return { id: d.id, titulo: corto(p.titulo, 160), detalle: corto(det, 600), opciones: p.opciones.length ? p.opciones.join('|') : null, recomendacion: p.recomendacion ? corto(p.recomendacion, 400) : null, desde: p.desde, prioridad: p.prioridad, responsable: p.responsable };
+  } catch { /* sin el lector del tablero: el análisis de siempre */ }
   const lineas = String(d.texto || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const cab = lineas[0] || '';
   const campo = (re) => { const l = lineas.find((x) => re.test(x)); return l ? corto(l.replace(re, '').trim(), 400) : null; };

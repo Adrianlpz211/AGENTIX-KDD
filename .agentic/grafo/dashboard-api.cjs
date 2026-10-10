@@ -243,6 +243,11 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       try { const l = require('./decisiones.cjs').leer(projectPath); return { status: l.canal ? 'OK' : 'EMPTY', data: l, reason_code: l.canal ? null : 'SIN_CANAL' }; }
       catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
     } },
+    // Tablero de decisiones (la pestaña 🗳️): configuración + elementos en el formato del tablero. Sin canal → vacío con su causa.
+    tablero: { params: ['project_id'], fn: () => {
+      try { const l = require('./tablero.cjs').listar(projectPath); return { status: l.canal ? 'OK' : 'EMPTY', data: l, reason_code: l.canal ? null : 'SIN_CANAL' }; }
+      catch (e) { return { status: 'UNAVAILABLE', data: null, reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }; }
+    } },
     // 3.20.1 — salud funcional, panel Memoria y panel Contexto y esfuerzo. Solo lectura; el proyecto lo fija el servidor.
     'memory-health': { params: ['project_id'], fn: () => {
       try {
@@ -459,8 +464,8 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
     const origen = req.headers.origin;
     if (!origen || origen !== 'http://' + req.headers.host) return responder(403, { errors: [{ code: 'ORIGEN_NO_PERMITIDO' }], reason_code: 'ORIGEN_NO_PERMITIDO' });
     const accion = req.headers['x-akdd-action'];
-    if (accion !== 'memory-retry' && accion !== 'decision-answer') return responder(403, { errors: [{ code: 'ACCION_NO_AUTORIZADA' }], reason_code: 'ACCION_NO_AUTORIZADA' });
-    const tope = accion === 'decision-answer' ? 8192 : 1024;
+    if (!['memory-retry', 'decision-answer', 'tablero-guardar', 'tablero-crear'].includes(accion)) return responder(403, { errors: [{ code: 'ACCION_NO_AUTORIZADA' }], reason_code: 'ACCION_NO_AUTORIZADA' });
+    const tope = accion === 'memory-retry' ? 1024 : 8192;
     if (!/^application\/json(\s*;|$)/i.test(String(req.headers['content-type'] || ''))) return responder(415, { errors: [{ code: 'CONTENT_TYPE_INVALIDO' }], reason_code: 'CONTENT_TYPE_INVALIDO' });
     let cuerpo = ''; let excedido = false;
     req.setEncoding('utf8');
@@ -470,6 +475,23 @@ function crearApi({ dbPath, projectPath, projectId, pollMs, maxClientes, abrir }
       if (excedido) return;
       let j = null;
       try { j = JSON.parse(cuerpo); } catch { return responder(400, { errors: [{ code: 'JSON_INVALIDO' }], reason_code: 'JSON_INVALIDO' }); }
+      if (accion === 'tablero-guardar' || accion === 'tablero-crear') {
+        const T = require('./tablero.cjs');
+        let r;
+        try {
+          if (accion === 'tablero-guardar') {
+            if (!j || typeof j !== 'object' || typeof j.id !== 'string') return responder(400, { errors: [{ code: 'ID_REQUERIDO' }], reason_code: 'ID_REQUERIDO' });
+            if (!j.cambios || typeof j.cambios !== 'object' || Array.isArray(j.cambios)) return responder(400, { errors: [{ code: 'CAMBIOS_REQUERIDOS' }], reason_code: 'CAMBIOS_REQUERIDOS' });
+            r = T.guardar(projectPath, j.id, j.cambios, { por: 'dashboard', texto: typeof j.texto === 'string' ? j.texto : undefined });
+          } else {
+            if (!j || typeof j !== 'object' || !j.cuerpo || typeof j.cuerpo !== 'object' || Array.isArray(j.cuerpo)) return responder(400, { errors: [{ code: 'CUERPO_REQUERIDO' }], reason_code: 'CUERPO_REQUERIDO' });
+            r = T.crearItem(projectPath, j.cuerpo, { por: 'dashboard' });
+          }
+        } catch (e) { return responder(500, { reason_code: 'ERROR', cause: String(e.message || e).slice(0, 160) }); }
+        if (r.ok) return responder(200, { status: 'OK', data: r });
+        const http = r.code === 'NO_EXISTE' ? 404 : (['YA_RESPONDIDA', 'SIN_CANAL'].includes(r.code) ? 409 : 400);
+        return responder(http, { errors: [{ code: r.code, message: r.message || null }], reason_code: r.code });
+      }
       if (accion === 'decision-answer') {
         if (!j || typeof j !== 'object' || typeof j.id !== 'string') return responder(400, { errors: [{ code: 'ID_REQUERIDO' }], reason_code: 'ID_REQUERIDO' });
         let r;

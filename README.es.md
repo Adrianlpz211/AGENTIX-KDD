@@ -352,7 +352,7 @@ Los mismos avisos que Telegram, con botones para las decisiones; lo que escribes
 | 🧬 **Memoria** (`/memoria`) | Qué hay guardado, la cola y las dead-letters, procedencia, registros legados, estados de salud independientes |
 | 📦 **Contexto y esfuerzo** (`/contexto`) | Nivel de esfuerzo, presupuesto acumulado, reducción neta de payload y *cómo se midió*, cobertura por host |
 | 🏢 **Oficina** (`/oficina`) | La oficina 3D: quién trabaja en qué, en vivo — TEAMS completo, individual o un solo modelo |
-| 🗳️ **Decisiones** | Lo que te preguntan los modelos, lo que respondiste y lo que ya se ejecutó (pendiente → respondida → ejecutada) |
+| 🗳️ **Decisiones** | Lo que te preguntan los modelos, lo que respondiste y lo que ya se ejecutó (pendiente → respondida → ejecutada), en lista o tablero con prioridades. **Lo que respondes, mueves o pides con «+ Nueva» llega solo a la cola del modelo que trabaja** (Director o Cursor, en modo individual o Teams): nada que copiar ni pegar. «+ Nueva» se vuelve una tarea real de Teams que se cierra sola al aceptarse |
 | 🔄 **Actualización** (`/actualizacion`) | Versión instalada, compatibilidad de esquema, la última verificación, lo preservado, el respaldo, qué hacer |
 
 **Datos reales sin reiniciar el servidor (3.23.7).** Las tarjetas de arriba y las pestañas Oficina, Memoria, Contexto y Actualización se actualizan en vivo, sin recargar. El resto de la página (los grafos, la estructura de código, los tiempos, la visita, los docs) se genera desde la base y los archivos: cuando cualquiera de ellos cambia, el servidor regenera la página en un proceso aparte (unos 2–3 s en un proyecto grande, sin congelar el servidor), muestra **«Hay datos nuevos — Actualizar ahora»** y se recarga sola cuando dejas de usar el tablero 30 s (`AKDD_DASH_AUTO_REFRESH_MS`, `0` = solo el botón), devolviéndote a donde estabas: pestañas, filtros, búsqueda, nodo elegido y scroll. Límite honesto: el grafo no se redibuja en sitio — la página se recarga y la cámara 3D se reinicia.
@@ -633,7 +633,7 @@ akdd telegram hub servir       #   el ÚNICO servicio para todos los proyectos �
 akdd telegram <activar|estado|servir|pin|enviar|desactivar>   # un bot por proyecto (un proyecto registrado en el bot único usa ese)
 akdd ntfy <activar|estado|probar|resumen|servir|desactivar>   # avisos al teléfono con la app gratuita ntfy
 akdd buzon [leer|responder|estado]                            # el buzón de lo que escribes desde el teléfono
-akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"]   # el tablero de decisiones del dueño desde la terminal
+akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"|mover|nota|asignar|crear|config]   # el tablero de decisiones del dueño desde la terminal
 akdd cobertura [--dias=N] [--json]                            # cuánto de lo que haces queda registrado en Agentix
 akdd reconciliar [--dias=N] [--aplicar]                       # registra commits pasados sin ciclo (como `historico`)
 ```

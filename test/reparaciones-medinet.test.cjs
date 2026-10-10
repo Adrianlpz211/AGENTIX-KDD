@@ -90,17 +90,20 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 test('update: un archivo del framework con CRLF y blancos colapsados (versión publicada, owned.json desfasado) NO es personalizado', () => {
   const { clasificar } = require(path.join(RAIZ, 'src', 'update-classify.js'));
-  const publicado = fs.readFileSync(path.join(RAIZ, 'dashboard.cjs'), 'utf8').replace(/\r\n/g, '\n'); // = 3.24.0, está en el manifiesto
+  // Un archivo del framework que ESTÁ en el manifiesto de versiones publicadas y que no cambia entre versiones. Antes se usaba dashboard.cjs, pero
+  // cualquier cambio en el tablero lo hace diferir de lo publicado y esta prueba se ponía roja sin que el clasificador tuviera nada que ver.
+  const REL = '.agentic/grafo/png-diff.cjs';
+  const publicado = fs.readFileSync(path.join(RAIZ, REL), 'utf8').replace(/\r\n/g, '\n'); // idéntico al publicado: está en el manifiesto
   // lo que dejó git con autocrlf=true + un editor que colapsó líneas en blanco dobles
   // (y líneas en blanco de más / espacios al final: un editor que reacomoda blancos; la diferencia es REAL en bytes, no solo CRLF)
   const alterado = publicado.replace('\n\n', '\n\n\n\n').replace(/^(.+)$/m, '$1   ');
   assert.notEqual(alterado.replace(/\r\n/g, '\n'), publicado, 'la prueba debe alterar de verdad el contenido');
   const enDisco = alterado.replace(/\n/g, '\r\n');
-  const proyecto = proyectoConArchivo('dashboard.cjs', enDisco);
-  const staging = stagingCon('dashboard.cjs', publicado + '\n// versión más nueva\n');
-  const owned = { archivos: { 'dashboard.cjs': sha(Buffer.from(publicado, 'utf8')) } }; // hash LF registrado al instalar: no coincide con el CRLF de disco
+  const proyecto = proyectoConArchivo(REL, enDisco);
+  const staging = stagingCon(REL, publicado + '\n// versión más nueva\n');
+  const owned = { archivos: { [REL]: sha(Buffer.from(publicado, 'utf8')) } }; // hash LF registrado al instalar: no coincide con el CRLF de disco
   const r = clasificar({ projectPath: proyecto, staging, owned, filtro: null });
-  const e = r.entries.find((x) => x.rel === 'dashboard.cjs');
+  const e = r.entries.find((x) => x.rel === REL);
   assert.equal(e.clase, 'FRAMEWORK_SIN_CAMBIOS', e.motivo);
   assert.equal(e.accion, 'ESCRIBIR');
   assert.equal(r.conflicts.length, 0);

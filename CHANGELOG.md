@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.25.0] — 2026-10-10
+
+**Tablero de decisiones en el dashboard: lo que el dueño responde, mueve o pide llega solo a la cola de Code o de Cursor, sin copiar ni pegar nada.**
+- **Pestaña 🗳️ Decisiones rehecha** con el diseño del artefacto «Tablero de decisiones» y los colores del dashboard (incluido el interruptor claro/oscuro): una sola barra de herramientas (buscador, chips, prioridad, selector lista/tablero con iconos, «Copiar para Claude» como respaldo y «+ Nueva»), panel de detalle, arrastrar y soltar, acciones en lote, sin título ni contenido de ejemplo. Por defecto el único responsable es el dueño; cada proyecto declara a los demás (`decisiones.cjs config --responsable="Nombre:#RRGGBB"`).
+- **Entrega automática:** la fuente de verdad sigue siendo la sección «Decisiones» del canal TEAMS (no hay otro archivo). La cola de cada modelo se DERIVA del canal y la leen el vigilante, la ronda y el hook de cada turno: una decisión respondida le toca al Director (en modo individual, al único modelo; si su responsable es Cursor, a Cursor); lo abierto asignado a un modelo es su trabajo; «esperando a otro» no despierta a nadie. Notas del dueño y reaperturas llegan por el buzón («no ejecutes la respuesta anterior»).
+- **«+ Nueva» = pedirle algo al equipo:** se encola solo como tarea real de Teams (`T-00N`, a Cursor en modo completo; al único modelo en individual), con su reporte, su aceptación y su registro en el núcleo; al aceptarse la tarea, el elemento del tablero se cierra solo. Sin canal activo queda asignada y se encola al activarse.
+- **Las reglas del ciclo las pone el servidor, no la página:** una decisión no se resuelve sin respuesta, una respondida no se pisa, reabrir deja la respuesta anterior en el historial; todo texto del dueño es dato (no fabrica bloques ni campos del canal); API `/api/v1/tablero*` con origen exacto y cabecera de acción.
+- **Para los modelos:** `decisiones.cjs` gana `mover`, `nota`, `asignar`, `crear` y `config`; `teams.cjs decision --tipo=dueno` acepta `--prioridad --limite --responsable --clase --codigo`; prompts del Director, del constructor y del individual, `CLAUDE.md` y `.cursorrules` explican el tablero.
+- **Corregido de paso:** con el panel abierto la página dejaba de refrescarse; los avisos al teléfono y la Oficina leían el bloque en bruto y se les colaban los campos nuevos (ahora pasan por el mismo lector); la prueba de update con CRLF ya no depende de que `dashboard.cjs` sea idéntico a una versión publicada.
+- **Límites honestos:** requiere el canal TEAMS activo; ningún sistema despierta un chat que no está abierto (si no hay sesión ni vigilante, el modelo lo toma en su próximo turno; el tablero muestra si el Director o Cursor están atentos). Pruebas: `test/tablero-decisiones.test.cjs` (26, con recorrido en navegador real).
+
 ## [3.24.1] — 2026-10-07
 
 **Reparaciones del caso real de medinet: TEAMS aceptó 16 tareas y Agentix registró 0 ciclos en una semana; tras `akdd update` no aparecía la pestaña Decisiones.**

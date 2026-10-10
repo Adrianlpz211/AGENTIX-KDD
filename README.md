@@ -352,7 +352,7 @@ Same notices as Telegram, with buttons for decisions; what you type in the topic
 | 🧬 **Memoria** (`/memoria`) | What is stored, the queue and dead-letters, provenance, legacy records, independent health states |
 | 📦 **Contexto y esfuerzo** (`/contexto`) | Effort tier, cumulative budget, net payload reduction and *how it was measured*, per-host coverage |
 | 🏢 **Oficina** (`/oficina`) | The 3D office: who works on what, live — TEAMS complete, individual, or a single model |
-| 🗳️ **Decisiones** | What the models ask you, what you answered and what was already executed (pending → answered → executed) |
+| 🗳️ **Decisiones** | What the models ask you, what you answered and what was already executed (pending → answered → executed), as a list or a board with priorities. **What you answer, move or ask for with «+ New» reaches the queue of the model that is working on its own** (Director or Cursor, individual or Teams mode): nothing to copy or paste. «+ New» becomes a real Teams task that closes itself when accepted |
 | 🔄 **Actualización** (`/actualizacion`) | Installed version, schema compatibility, the last verification, what was preserved, the backup, what to do |
 
 **Real data without restarting the server (3.23.7).** The cards on top and the Oficina, Memoria, Contexto and Actualización tabs update live, with no reload. The rest of the page (the graphs, code structure, times, the tour, the docs) is generated from the database and files: whenever any of them changes the server regenerates the page in a separate process (about 2–3 s on a large project, without freezing the server), shows **"New data — Update now"**, and reloads itself once you stop using the board for 30 s (`AKDD_DASH_AUTO_REFRESH_MS`, `0` = button only), putting you back where you were: tabs, filters, search, selected node and scroll. Honest limit: the graph is not redrawn in place — the page reloads and the 3D camera resets.
@@ -633,7 +633,7 @@ akdd telegram hub servir       #   the ONE service for all projects · also: pro
 akdd telegram <activar|estado|servir|pin|enviar|desactivar>   # one bot per project (a project registered in the single bot uses that one)
 akdd ntfy <activar|estado|probar|resumen|servir|desactivar>   # phone notices through the free ntfy app
 akdd buzon [leer|responder|estado]                            # the inbox of what you write from your phone
-akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"]   # the owner-decision board from the terminal
+akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"|mover|nota|asignar|crear|config]   # the owner-decision board from the terminal
 akdd cobertura [--dias=N] [--json]                            # how much of what you do is recorded in Agentix
 akdd reconciliar [--dias=N] [--aplicar]                       # record past commits that have no cycle (as `historico`)
 ```

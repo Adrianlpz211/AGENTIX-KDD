@@ -5273,7 +5273,7 @@ const server = require('http').createServer((req, res) => {
   const fin = (status, texto, extra) => { res.writeHead(status, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, base, extra)); res.end(req.method === 'HEAD' ? undefined : texto); };
   if (!hostPermitido(req.headers.host)) return fin(403, 'Host no permitido');
   // Única escritura de los paneles nuevos: reintentar un job muerto de la cola (valida origen, cabecera y límites).
-  if (req.method === 'POST' && ['/api/v1/memory-retry', '/api/v1/decision-answer'].includes(String(req.url || '').split('?')[0])) return API.manejarAccion(req, res);
+  if (req.method === 'POST' && ['/api/v1/memory-retry', '/api/v1/decision-answer', '/api/v1/tablero-guardar', '/api/v1/tablero-crear'].includes(String(req.url || '').split('?')[0])) return API.manejarAccion(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') return fin(405, 'Método no permitido', { Allow: 'GET, HEAD' });
   let url;
   try { url = new URL(String(req.url || '/'), 'http://127.0.0.1'); } catch { return fin(400, 'URL inválida'); }

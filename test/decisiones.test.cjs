@@ -143,10 +143,13 @@ test('decisiones: POST del dashboard — origen exacto, cabecera de acción, JSO
 
 test('decisiones: la página escapa todo dato, no usa diálogos nativos y exige texto en «Otra»', () => {
   const { HTML } = require(path.join(G, 'decisiones-pagina.cjs'));
-  assert.ok(!/innerHTML|insertAdjacentHTML|document\.write/.test(HTML), 'ningún dato del servidor se interpreta como HTML');
+  // La página arma su HTML con plantillas, así que TODO dato pasa por esc(); que un texto hostil no se ejecuta lo prueba
+  // tablero-decisiones.test.cjs en un navegador real.
+  assert.match(HTML, /function esc\(s\)\{return String\(s==null\?""/, 'existe el escapado de datos');
+  assert.ok(!/insertAdjacentHTML|document\.write|\beval\s*\(|new Function\s*\(/.test(HTML), 'ninguna vía de ejecución de texto ajeno');
   assert.ok(!/\b(alert|confirm|prompt)\s*\(/.test(HTML), 'sin diálogos nativos');
-  assert.match(HTML, /Otra: la escribo yo/); assert.match(HTML, /Elegiste «Otra»: escribe tu respuesta/); assert.match(HTML, /Aceptar recomendación/);
-  assert.match(HTML, /X-Akdd-Action/); assert.match(HTML, /name="viewport"|name=\\?"viewport/);
+  assert.match(HTML, /Otra:<\/b> la escribo yo/); assert.match(HTML, /Escribe tu respuesta en el campo de abajo/); assert.match(HTML, /Aceptar recomendación/);
+  assert.match(HTML, /X-Akdd-Action/); assert.match(HTML, /name="?viewport/);
   assert.doesNotThrow(() => { const m = /<script>([\s\S]*)<\/script>/.exec(HTML); new Function(m[1]); }, 'el script de la página es JavaScript válido');
 });
 
