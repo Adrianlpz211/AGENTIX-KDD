@@ -1,5 +1,12 @@
 # Changelog — Agentic KDD
 
+## [3.25.2] — 2026-10-10
+
+**La tarjeta que se llamaba «Semáforo» ya no engaña: ahora es «Estado y avance» y dice cuántas tareas van.**
+- La tarjeta de la pestaña TEAMS mezclaba un semáforo (¿alguien está parado?) con el avance del trabajo, y solo mostraba la barra de colores y un porcentaje. Ahora se llama **Estado y avance** y, encima de la barra, dice **«Avance: N de M tareas terminadas (X %)»**. La leyenda de colores (terminadas, en curso, parciales, falta) sigue debajo.
+- El mismo nombre en la oficina 3D (botón y panel) y en el texto de ayuda. El comando `teams.cjs comprobar` conserva su rótulo «SEMÁFORO» porque ahí sí es una luz de alerta.
+- Prueba en navegador real: `test/dashboard-teams.test.cjs` («Estado y avance»).
+
 ## [3.25.1] — 2026-10-10
 
 **Las pruebas ya no pueden escribir en el repositorio real desde un hook, y Agentix deja de abrir ventanas de consola en Windows.**

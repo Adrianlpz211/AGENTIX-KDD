@@ -213,6 +213,27 @@ test('tablero de decisiones del dueño: lista con scroll interno, modal con el m
   } finally { await browser.close().catch(() => {}); d.cerrar(); }
 });
 
+test('la tarjeta de estado se llama «Estado y avance» y dice cuántas tareas van: «Avance: N de M tareas terminadas»', { timeout: 120000, skip: hayNavegador() ? false : 'sin playwright-core' }, async () => {
+  const dir = tmp('estado'); crearFixture(dir); conTeams(dir);
+  for (const a of [['activar'], ['modo', 'completo'], ['iniciar']]) assert.equal(teams(dir, ...a).status, 0);
+  for (const t of ['Primera tarea', 'Segunda tarea', 'Tercera tarea']) assert.equal(teams(dir, 'tarea', t, '--criterio=a', '--sin-contexto').status, 0);
+  const d = await arrancarDashboard(dir);
+  const bg = require(path.join(REPO, '.agentic', 'grafo', 'browser-gate.cjs'));
+  const browser = await bg.launchBrowser('system');
+  const errores = [];
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.on('pageerror', (e) => errores.push(String(e.message || e).slice(0, 200)));
+    await page.goto(d.url.replace(/[/]$/, '') + '/oficina', { waitUntil: 'load', timeout: 60000 });
+    await page.waitForSelector('.sem', { timeout: 30000 });
+    const texto = await page.locator('.sem').first().innerText();
+    assert.match(texto, /ESTADO Y AVANCE/i, 'la tarjeta ya no se llama Semáforo');
+    assert.doesNotMatch(texto, /SEM[ÁA]FORO/i);
+    assert.match(texto, /Avance: 0 de 3 tareas terminadas/, 'el conteo va junto a la barra: ' + texto);
+    assert.deepStrictEqual(errores, []);
+  } finally { await browser.close().catch(() => {}); d.cerrar(); }
+});
+
 test('si el puerto del tablero ya está ocupado (otro proyecto), se monta en el siguiente libre en vez de morir', async () => {
   const net = require('net'); const { spawn } = require('child_process'); const { puertoLibre } = require('./fixtures/dashboard-fixture.cjs');
   const dir = tmp('puerto'); crearFixture(dir);

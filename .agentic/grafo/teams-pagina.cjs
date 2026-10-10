@@ -75,7 +75,7 @@ const PLANTILLA = `<!doctype html>
     <button type="button" onclick="window.mundoIr && mundoIr('oficina')">Oficina</button>
     <button type="button" onclick="window.mundoIr && mundoIr('pizarra')">Pizarra</button>
     <button type="button" onclick="window.mundoIr && mundoIr('flujo')">Flujo</button>
-    <button type="button" onclick="window.mundoIr && mundoIr('semaforo')">Semáforo</button>
+    <button type="button" onclick="window.mundoIr && mundoIr('semaforo')">Estado</button>
     <button type="button" onclick="window.mundoIr && mundoIr('sala')">Sala</button>
     <button type="button" onclick="window.mundoIr && mundoIr('reloj')">Reloj</button>
     <span class="sep"></span><span class="dim">Seguir a:</span>
@@ -147,11 +147,13 @@ const PLANTILLA = `<!doctype html>
     }
     sub.textContent = 'canal ' + d.canal + (d.modo ? ' · modo ' + d.modo.toUpperCase() : '') + ' · ' + hora(d.generado) + (j.stale ? ' · dato VIEJO (la base está ocupada)' : '');
 
-    var sem = card('Semáforo', true, 'sem ' + d.semaforo);
+    var sem = card('Estado y avance', true, 'sem ' + d.semaforo);
     var cls = d.semaforo === 'VERDE' ? 'ok' : (d.semaforo === 'AMARILLO' ? 'warn' : (d.semaforo === 'ROJO' ? 'bad' : 'dim'));
     sem.appendChild(el('div', 'big ' + cls, d.semaforo === 'VERDE' ? 'Todo fluye' : (d.semaforo === 'AMARILLO' ? 'Atención' : (d.semaforo === 'ROJO' ? 'Alguien está parado' : 'Canal ' + d.canal))));
     if (d.alertas.length) lista(sem, d.alertas, '', function (a) { return (a.nivel === 'ROJO' ? '🔴 ' : '🟡 ') + a.msg; });
-    else sem.appendChild(el('div', 'dim', d.canal === 'ACTIVO' ? 'Los dos roles con vigilante y loop, sin avisos sin atender.' : 'El semáforo solo se evalúa con el canal ACTIVO.'));
+    else sem.appendChild(el('div', 'dim', d.canal === 'ACTIVO' ? 'Los dos roles con vigilante y loop, sin avisos sin atender.' : 'El estado solo se evalúa con el canal ACTIVO.'));
+    // El conteo va ANTES de la barra: «2 de 3 tareas», no solo un porcentaje ni colores sueltos.
+    if (d.segmentos && d.segmentos.total) { var pr = el('div', null, 'Avance: ' + d.segmentos.verde + ' de ' + d.segmentos.total + ' tareas terminadas' + (d.avance !== null && d.avance !== undefined ? ' (' + d.avance + ' %)' : '')); pr.style.cssText = 'font-weight:600;margin:12px 0 6px'; sem.appendChild(pr); }
     if (d.segmentos && d.segmentos.total) { var sg = d.segmentos; var bs = el('div', 'bar seg'); [['verde', sg.verde], ['azul', sg.azul], ['naranja', sg.naranja], ['rojo', sg.rojo]].forEach(function (p) { if (p[1]) { var seg = el('i', p[0]); seg.style.width = (p[1] / sg.total * 100) + '%'; seg.title = p[0] + ': ' + p[1]; bs.appendChild(seg); } }); sem.appendChild(bs); var lg = el('div', 'lg'); [['verde', 'terminadas', sg.verde], ['azul', 'en curso', sg.azul], ['naranja', 'parciales / esperan al dueño', sg.naranja], ['rojo', 'falta', sg.rojo]].forEach(function (p) { var it = el('span'); var sw = el('b'); sw.style.background = 'var(--' + p[0] + ')'; it.appendChild(sw); it.appendChild(document.createTextNode(p[2] + ' ' + p[1])); lg.appendChild(it); }); sem.appendChild(lg); if (d.fin) sem.appendChild(el('div', d.fin === 'TERMINADO' ? 'ok' : 'warn', d.fin === 'TERMINADO' ? 'Todo en verde: nada más que hacer.' : 'Recorrido completo: solo queda lo que depende del dueño.')); }
     else if (d.avance !== null && d.avance !== undefined) { var b = el('div', 'bar'); var i = el('i'); i.style.width = d.avance + '%'; b.appendChild(i); sem.appendChild(b); sem.appendChild(el('div', 'dim', 'Avance medido: ' + d.avance + ' % (' + d.aceptadas + ' de ' + d.total + ' tareas aceptadas por el Director)')); }
 

@@ -555,7 +555,7 @@
     pPizarra._tex.needsUpdate = true;
   }
   function pintarSemaforo(d) {
-    var g = cSem.getContext('2d'), W = 640, H = 720; fondoVidrio(g, W, H, 'SEMÁFORO', d ? d.canal : '');
+    var g = cSem.getContext('2d'), W = 640, H = 720; fondoVidrio(g, W, H, 'ESTADO', d ? d.canal : '');
     var estado = d ? d.semaforo : 'APAGADO', activo = COL_SEM[estado] ? estado : null;
     ['ROJO', 'AMARILLO', 'VERDE'].forEach(function (n, i) { g.fillStyle = activo === n ? '#' + COL_SEM[n].toString(16).padStart(6, '0') : '#1a2236'; g.beginPath(); g.arc(90, 140 + i * 110, 40, 0, 7); g.fill(); if (activo === n) { g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 5; g.stroke(); } });
     g.textAlign = 'left'; g.fillStyle = activo ? '#' + COL_SEM[activo].toString(16).padStart(6, '0') : '#9fb0cf'; g.font = 'bold 40px sans-serif';
@@ -731,7 +731,7 @@
     if (d) reaccionar(prev, d, silencioso); else estadoTarea = {};
     decidir(); if (silencioso) { teletransportar(); decidir(); }
     pintarPizarra(D); pintarSemaforo(D); pintarFlujo(D, AHORA() / 1000);
-    var n = document.getElementById('nota3d'); if (n) n.textContent = d ? 'Semáforo ' + d.semaforo + ' · canal ' + d.canal + (j && j.stale ? ' · (dato viejo)' : '') + (sim ? ' · DEMOSTRACIÓN' : ' · en vivo') : (sim ? 'DEMOSTRACIÓN · sin TEAMS' : 'Sin TEAMS activo · en vivo');
+    var n = document.getElementById('nota3d'); if (n) n.textContent = d ? 'Estado ' + d.semaforo + ' · canal ' + d.canal + (j && j.stale ? ' · (dato viejo)' : '') + (sim ? ' · DEMOSTRACIÓN' : ' · en vivo') : (sim ? 'DEMOSTRACIÓN · sin TEAMS' : 'Sin TEAMS activo · en vivo');
   }
 
   // ═════════ demostración: datos sintéticos por la MISMA ruta que los reales ═════════
