@@ -331,7 +331,33 @@ function capturarEnMemoria(root, host, evento, entrada, r) {
   } catch { /* la captura es auxiliar: jamás convierte nada en deny */ }
 }
 
+/** Cursor también carga los ganchos de Claude Code del proyecto (.claude/settings.json) y los corre con --host=claude. Esos ganchos hablan
+ *  como el DIRECTOR; en un chat de Cursor (el constructor) le encolarían mensajes de otro rol. La entrada de Cursor se reconoce por sus campos
+ *  propios (conversation_id, generation_id, workspace_roots…) o por una transcripción dentro de .cursor; Claude Code real nunca los trae. */
+function esCursorDisfrazado(entrada) {
+  const e = entrada && typeof entrada === 'object' && !Array.isArray(entrada) ? entrada : {};
+  if (e.conversation_id || e.generation_id || e.cursor_version || (Array.isArray(e.workspace_roots) && e.workspace_roots.length)) return true;
+  return /[\\/]\.cursor[\\/]/i.test(String(e.transcript_path || ''));
+}
+
+/** Rastro para diagnosticar qué host llamó de verdad (solo nombres de campos, nunca su contenido). */
+function anotarLlamadaDeRol(root, host, evento, entrada, ignorada) {
+  try {
+    if (!fs.existsSync(path.join(root, '.agentic'))) return;
+    const f = path.join(root, '.agentic', '_hooks-roles.jsonl');
+    try { if (fs.statSync(f).size > 128 * 1024) fs.renameSync(f, f + '.1'); } catch { /* nuevo */ }
+    const claves = entrada && typeof entrada === 'object' ? Object.keys(entrada).slice(0, 24) : [];
+    fs.appendFileSync(f, JSON.stringify({ at: new Date().toISOString(), host, evento, ignorada: !!ignorada, claves }) + '\n');
+  } catch { /* diagnóstico: nunca frena nada */ }
+}
+
 function procesar(host, evento, entrada, root) {
+  if (evento === 'stop' || evento === 'prompt') {
+    // Los eventos que hablan por un ROL (parar / mensaje del usuario) los atiende el gancho propio de cada host. Si Cursor corrió el de Claude Code, se ignora.
+    const disfrazado = host === 'claude' && esCursorDisfrazado(entrada);
+    anotarLlamadaDeRol(root, host, evento, entrada, disfrazado);
+    if (disfrazado) return null;
+  }
   if (evento === 'stop') {
     // Fin de turno: se anota qué quedó editado y sin commit (no escribe en la base, no bloquea, no imprime nada al host).
     try { require('./cobertura.cjs').anotarSinCommit(root); } catch { /* es un plus */ }
@@ -389,7 +415,7 @@ function procesar(host, evento, entrada, root) {
   return null;
 }
 
-module.exports = { enriquecerEnSegundoPlano, raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenWhatsapp, sinCitas, ENRIQ };
+module.exports = { esCursorDisfrazado, enriquecerEnSegundoPlano, raizProyecto, anotarEvento, evaluarComando, evaluarEdicion, evaluarMcp, enriquecer, procesar, origenWhatsapp, sinCitas, ENRIQ };
 
 if (require.main === module) {
   const opt = Object.fromEntries(process.argv.slice(2).map((a) => /^--([^=]+)=(.*)$/.exec(a)).filter(Boolean).map((m) => [m[1], m[2]]));

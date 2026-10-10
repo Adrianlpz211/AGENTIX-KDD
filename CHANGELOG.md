@@ -1,5 +1,14 @@
 # Changelog — Agentic KDD
 
+## [3.25.3] — 2026-10-10
+
+**A un chat de Cursor (el constructor) ya no le encolan mensajes con voz de Director.**
+- **Qué pasaba (protocolo_reserva):** al intentar terminar su turno, un chat de Cursor recibía solo, como mensaje nuevo, «[TEAMS] No termines todavía: eres el DIRECTOR…». Cursor también carga los ganchos de Claude Code del proyecto (`.claude/settings.json`) y los corre con `--host=claude`, que hablan como el Director.
+- **Arreglo:** los eventos que hablan por un rol (parar y mensaje del usuario) ya no se atienden cuando la llamada de Claude trae la huella de Cursor (`conversation_id`, `generation_id`, `workspace_roots`, `cursor_version` o una transcripción dentro de `.cursor`). Cursor sigue recibiendo el aviso de su propio gancho, que habla como **constructor**; Claude Code real no cambia. La guardia de seguridad (comandos, ediciones, MCP) sigue corriendo igual por los dos caminos.
+- **Rastro para diagnosticar:** `.agentic/_hooks-roles.jsonl` anota quién llamó y si se ignoró (solo nombres de campos, nunca su contenido).
+- **Límite honesto:** si algún Cursor entregara el gancho de Claude con un formato sin ninguna de esas huellas, no se podría distinguir; el rastro mostraría los campos recibidos para ajustar la detección. La salida de raíz en Cursor es desactivar la carga de configuraciones de terceros.
+- Pruebas: `test/hook-cursor-disfrazado.test.cjs` (6).
+
 ## [3.25.2] — 2026-10-10
 
 **La tarjeta que se llamaba «Semáforo» ya no engaña: ahora es «Estado y avance» y dice cuántas tareas van.**
