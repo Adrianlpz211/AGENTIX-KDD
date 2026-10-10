@@ -122,10 +122,10 @@ function preCommit(root, opciones) {
   // 4) Avisos (no bloquean): valores de negocio y diálogos nativos.
   if (!o.sinAvisos) {
     const svs = path.join(GRAFO, 'spec-value-scan.cjs');
-    if (fs.existsSync(svs)) spawnSync(process.execPath, [svs, '--staged'], { cwd: root, stdio: 'inherit' });
+    if (fs.existsSync(svs)) spawnSync(process.execPath, [svs, '--staged'], { windowsHide: true, cwd: root, stdio: 'inherit' });
     const front = vivos.map((e) => e.path).filter((p) => POLITICA.front.test(p));
     const ung = path.join(GRAFO, 'ui-native-gate.cjs');
-    if (front.length && fs.existsSync(ung)) spawnSync(process.execPath, [ung, ...front], { cwd: root, stdio: 'inherit' });
+    if (front.length && fs.existsSync(ung)) spawnSync(process.execPath, [ung, ...front], { windowsHide: true, cwd: root, stdio: 'inherit' });
   }
 
   const bloqueantes = ['security', 'test_integrity'];
@@ -254,7 +254,7 @@ function ejecutarPostCycle(root, item) {
   const { area } = areaDe(root, item.sha);
   const asunto = asuntoDe(root, item.sha);
   const tarea = 'auto post-commit ' + item.sha.slice(0, 7) + (asunto ? ' — ' + asunto : '');
-  const r = spawnSync(process.execPath, [pcPath, area, '--hook', '--commit=' + item.sha, '--task=' + tarea], {
+  const r = spawnSync(process.execPath, [pcPath, area, '--hook', '--commit=' + item.sha, '--task=' + tarea], { windowsHide: true,
     cwd: root, encoding: 'utf8', timeout: 15 * 60 * 1000,
     env: Object.assign({}, process.env, { AKDD_CYCLE_ID: item.event_id }),
   });

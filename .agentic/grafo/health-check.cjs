@@ -474,7 +474,7 @@ function autoFix(projectRoot) {
     console.log(`  Fixing: ${r.nombre}`);
     console.log(`  Cmd:    ${r.fix}`);
     try {
-      execSync(r.fix, { cwd: projectRoot, stdio: 'pipe', timeout: 60000 });
+      execSync(r.fix, { windowsHide: true, cwd: projectRoot, stdio: 'pipe', timeout: 60000 });
       console.log(`  ✅ OK\n`);
     } catch (e) {
       console.log(`  ⚠️  Parcial: ${e.message.substring(0, 80)}\n`);

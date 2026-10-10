@@ -103,7 +103,7 @@ function scan(projectRoot, { staged = true, files = null, readContent = null, re
   const borrados = new Set(deleted);
   let cambiados = files ? [...files, ...deleted] : files;
   if (!cambiados) {
-    const diffFiles = safe(() => execSync(`git diff ${staged ? '--cached' : 'HEAD'} --name-only`, {
+    const diffFiles = safe(() => execSync(`git diff ${staged ? '--cached' : 'HEAD'} --name-only`, { windowsHide: true,
       cwd: projectRoot, stdio: 'pipe', timeout: 15000,
     }).toString(), '');
     cambiados = diffFiles.split('\n').map(s => s.trim()).filter(Boolean);

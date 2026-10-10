@@ -43,7 +43,7 @@ const safe = (fn, fallback = null) => { try { return fn(); } catch { return fall
 
 function git(cmd, projectRoot) {
   try {
-    return execSync(`git ${cmd}`, { cwd: projectRoot, stdio: 'pipe', timeout: GIT_TIMEOUT }).toString();
+    return execSync(`git ${cmd}`, { windowsHide: true, cwd: projectRoot, stdio: 'pipe', timeout: GIT_TIMEOUT }).toString();
   } catch { return null; }
 }
 

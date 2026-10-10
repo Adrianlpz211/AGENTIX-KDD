@@ -145,6 +145,6 @@ if (require.main === module) {
     console.log(`\n  Agentix Graph UI → ${url}\n`);
     if (process.env.AKDD_DASH_NO_OPEN === '1') return;
     const open = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
-    exec(open, () => {});
+    exec(open, { windowsHide: true }, () => {});
   }).catch((e) => { console.error('  No se pudo abrir el servidor del grafo: ' + e.message); process.exitCode = 1; });
 }

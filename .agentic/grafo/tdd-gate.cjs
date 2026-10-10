@@ -18,6 +18,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const { entornoSinGit } = require('./git-env.cjs');   // las pruebas nunca heredan GIT_DIR de un hook (ver git-env.cjs)
 const crypto = require('crypto');
 const fs   = require('fs');
 const path = require('path');
@@ -109,8 +110,8 @@ function detectTestCommand(projectRoot) {
   // siempre a pytest como "detectado" incluso en proyectos Node puros sin Python.
   for (const cmd of TEST_COMMANDS) {
     try {
-      const result = spawnSync(cmd.split(' ')[0], cmd.split(' ').slice(1), {
-        cwd: projectRoot, timeout: 10000, stdio: 'pipe', shell: true
+      const result = spawnSync(cmd.split(' ')[0], cmd.split(' ').slice(1), { windowsHide: true,
+        cwd: projectRoot, timeout: 10000, stdio: 'pipe', shell: true, env: entornoSinGit(process.env)
       });
       if (result.status !== null) return cmd;
     } catch {}
@@ -143,9 +144,9 @@ function runTypecheck(command, projectRoot) {
     const isWin = process.platform === 'win32';
     const shell = isWin ? 'cmd.exe' : 'sh';
     const shellFlag = isWin ? '/c' : '-c';
-    const result = spawnSync(shell, [shellFlag, command], {
+    const result = spawnSync(shell, [shellFlag, command], { windowsHide: true,
       cwd: projectRoot, timeout: parseInt(process.env.AKDD_TEST_TIMEOUT_MS, 10) || 120000,
-      stdio: 'pipe', encoding: 'utf8',
+      stdio: 'pipe', encoding: 'utf8', env: entornoSinGit(process.env),
     });
     const output = (result.stdout || '') + (result.stderr || '');
     return { passed: (result.status ?? 1) === 0, output };
@@ -169,10 +170,10 @@ const ARG_SEGURO = /^[\p{L}\p{N}_./\\:@+][\p{L}\p{N}_ ./\\:@+-]*$/u;
 function subjectHash(projectRoot) {
   const h = crypto.createHash('sha256');
   const git = (args) => {
-    const r = spawnSync('git', args, { cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 });
+    const r = spawnSync('git', args, { windowsHide: true, cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 });
     return r.status === 0 ? r.stdout : '';
   };
-  const usable = spawnSync('git', ['rev-parse', '--git-dir'], { cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 }).status === 0;
+  const usable = spawnSync('git', ['rev-parse', '--git-dir'], { windowsHide: true, cwd: projectRoot, encoding: 'utf8', shell: false, timeout: 10000 }).status === 0;
   /* Sin Git utilizable (no hay repo, o Git lo rechaza) la huella sale del contenido:
      una constante dejaría el gate trabado y haría pasar evidencia vieja por nueva. */
   if (!usable) return huellaContenido(projectRoot);
@@ -258,7 +259,7 @@ function runTests(command, projectRoot, testFile = null, meta = {}) {
   const isWin = process.platform === 'win32';
   // Heredado de un `node --test` padre, el runner del proyecto le reporta al
   // padre por un canal propio y no imprime su resumen: no habría qué medir.
-  const env = Object.assign({}, process.env);
+  const env = entornoSinGit(process.env);
   delete env.NODE_TEST_CONTEXT;
   let result;
   try {
@@ -268,7 +269,7 @@ function runTests(command, projectRoot, testFile = null, meta = {}) {
       ? spawnSync('cmd.exe', ['/d', '/s', '/c', `"${fullCmd}"`], {
         cwd: projectRoot, timeout, stdio: 'pipe', encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, env,
       })
-      : spawnSync('sh', ['-c', fullCmd], {
+      : spawnSync('sh', ['-c', fullCmd], { windowsHide: true,
         cwd: projectRoot, timeout, stdio: 'pipe', encoding: 'utf8', env,
       });
   } catch (err) {

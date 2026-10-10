@@ -95,7 +95,7 @@ function getArchivosCommit(projectPath) {
     const commit = process.env.GITHUB_SHA || 'HEAD';
     const archivos = execSync(
       `git diff-tree --no-commit-id -r --name-only ${commit}`,
-      { cwd: projectPath, stdio: 'pipe' }
+      { windowsHide: true, cwd: projectPath, stdio: 'pipe' }
     ).toString().trim();
     return archivos.split('\n').filter(Boolean);
   } catch(e) { return []; }
@@ -178,7 +178,7 @@ function reportarCI(projectPath, db, opciones) {
       const grafoPath = path.join(projectPath, '.agentic', 'grafo', 'grafo.cjs');
       if (fs.existsSync(grafoPath)) {
         const { execSync } = require('child_process');
-        execSync(`node "${grafoPath}" sync`, { stdio: 'pipe', cwd: projectPath, timeout: 30000 });
+        execSync(`node "${grafoPath}" sync`, { windowsHide: true, stdio: 'pipe', cwd: projectPath, timeout: 30000 });
       }
     } catch(e) {}
     

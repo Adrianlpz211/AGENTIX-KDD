@@ -517,7 +517,7 @@ function aprobarDecision(projectRoot, { elementId, property, evidencia = null, a
 /* ── el paso completo: comparar y capturar ─────────────────────────────────── */
 
 function archivosDelCommit(projectRoot) {
-  const out = safe(() => execSync('git diff-tree --no-commit-id --name-only -r HEAD', {
+  const out = safe(() => execSync('git diff-tree --no-commit-id --name-only -r HEAD', { windowsHide: true,
     cwd: projectRoot, stdio: 'pipe', timeout: 15000,
   }).toString(), '');
   const lista = out.split('\n').map((s) => s.trim()).filter((f) => f && ES_FRONT.test(f));
@@ -559,7 +559,7 @@ function frontRecientes(projectRoot, { horas = HORAS_RECIENTE, tope = 60 } = {})
 }
 
 function motivoDelCommit(projectRoot) {
-  const s = safe(() => execSync('git log -1 --format=%h %s', {
+  const s = safe(() => execSync('git log -1 --format=%h %s', { windowsHide: true,
     cwd: projectRoot, stdio: 'pipe', timeout: 10000,
   }).toString().trim(), '');
   return s ? `capturado del commit ${s.slice(0, 90)}` : 'capturado automáticamente';

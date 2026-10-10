@@ -83,7 +83,7 @@ function archivos(root, { staged, commit, files }) {
     ? 'git diff --cached --name-only --diff-filter=ACM'
     : 'git diff-tree --no-commit-id --name-only -r HEAD';
   if (!staged && !commit) return [];
-  const out = safe(() => execSync(cmd, { cwd: root, stdio: 'pipe', timeout: 15000 }).toString(), '');
+  const out = safe(() => execSync(cmd, { windowsHide: true, cwd: root, stdio: 'pipe', timeout: 15000 }).toString(), '');
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
@@ -97,7 +97,7 @@ function mensajeDelCambio(root, { staged }) {
     }
     return '';
   }
-  return safe(() => execSync('git log -1 --format=%s%n%b', {
+  return safe(() => execSync('git log -1 --format=%s%n%b', { windowsHide: true,
     cwd: root, stdio: 'pipe', timeout: 10000,
   }).toString(), '') || '';
 }
@@ -164,7 +164,7 @@ function formatear(r) {
 }
 
 if (require.main === module) {
-  const root = safe(() => execSync('git rev-parse --show-toplevel', {
+  const root = safe(() => execSync('git rev-parse --show-toplevel', { windowsHide: true,
     stdio: 'pipe', timeout: 10000,
   }).toString().trim(), process.cwd()) || process.cwd();
 

@@ -5349,7 +5349,7 @@ function alEscuchar() {
   const cmd = process.platform === 'win32' ? `start "" "${url}"`
             : process.platform === 'darwin' ? `open "${url}"`
             : `xdg-open "${url}"`;
-  exec(cmd, (err) => {
+  exec(cmd, { windowsHide: true }, (err) => {
     if (err) console.log(`  Open manually: ${url}`);
   });
   console.log('  Press Ctrl+C to stop\n');

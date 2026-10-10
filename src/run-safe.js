@@ -28,7 +28,7 @@ function resultado(r, etiqueta) {
 }
 
 function nodo(script, args, opts) {
-  const o = Object.assign({ stdio: 'pipe' }, opts || {});
+  const o = Object.assign({ stdio: 'pipe', windowsHide: true }, opts || {});
   return resultado(spawnSync(process.execPath, [script, ...(args || []).map(String)], o), 'node ' + require('path').basename(script));
 }
 

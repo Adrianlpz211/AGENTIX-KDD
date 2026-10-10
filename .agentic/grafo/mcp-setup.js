@@ -75,7 +75,7 @@ async function mcpSetup(projectPath, opts = {}) {
   if (claudeCliAvailable) {
     try {
       // claude mcp add agentic-kdd -- node "/ruta/exacta/mcp-server.cjs"
-      execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
+      execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, { windowsHide: true,
         stdio: 'pipe',
         cwd: projectPath,
       });
@@ -84,8 +84,8 @@ async function mcpSetup(projectPath, opts = {}) {
     } catch (e) {
       // Puede fallar si ya existe — intentar actualizar
       try {
-        execSync(`claude mcp remove agentic-kdd`, { stdio: 'pipe', cwd: projectPath });
-        execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, {
+        execSync(`claude mcp remove agentic-kdd`, { windowsHide: true, stdio: 'pipe', cwd: projectPath });
+        execSync(`claude mcp add agentic-kdd -- node "${serverPath}"`, { windowsHide: true,
           stdio: 'pipe', cwd: projectPath,
         });
         results.claude_code = true;
@@ -175,7 +175,7 @@ async function mcpSetup(projectPath, opts = {}) {
 
 function isCLIAvailable(cmd) {
   try {
-    execSync(`${cmd} --version`, { stdio: 'pipe', timeout: 5000 });
+    execSync(`${cmd} --version`, { windowsHide: true, stdio: 'pipe', timeout: 5000 });
     return true;
   } catch { return false; }
 }
@@ -244,7 +244,7 @@ function mcpStatus(projectPath) {
   const claudeAvailable = isCLIAvailable('claude');
   if (claudeAvailable) {
     try {
-      const mcpList = execSync('claude mcp list', { stdio: 'pipe' }).toString();
+      const mcpList = execSync('claude mcp list', { windowsHide: true, stdio: 'pipe' }).toString();
       const hasAgentic = mcpList.includes('agentic-kdd');
       console.log(hasAgentic
         ? chalk.green('  ✓ Claude Code        registrado')

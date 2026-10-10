@@ -417,7 +417,7 @@ function memoriaPostCycle(db, { area, cycleId, taskName, projectRoot }) {
     let changedFiles = [];
     safe(() => {
       const { execSync } = require('child_process');
-      changedFiles = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: projectRoot, stdio: 'pipe', timeout: 5000 })
+      changedFiles = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { windowsHide: true, cwd: projectRoot, stdio: 'pipe', timeout: 5000 })
         .toString().split('\n').map(f => f.trim()).filter(Boolean);
     });
     const anchors = changedFiles.length ? anchorsForChangeset(db, changedFiles, projectRoot) : [];

@@ -63,7 +63,7 @@ function procesosViejos(root) {
       const r = spawnSync('powershell', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }"], { encoding: 'utf8', timeout: 20000, windowsHide: true });
       filas = String(r.stdout || '').split(/\r?\n/).filter(Boolean);
     } else {
-      const r = spawnSync('ps', ['-eo', 'pid,args'], { encoding: 'utf8', timeout: 20000 });
+      const r = spawnSync('ps', ['-eo', 'pid,args'], { windowsHide: true, encoding: 'utf8', timeout: 20000 });
       filas = String(r.stdout || '').split(/\r?\n/).map((l) => l.trim().replace(/^(\d+)\s+/, '$1|'));
     }
     for (const l of filas) {

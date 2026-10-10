@@ -28,7 +28,7 @@ function gitDisponible(projectPath) {
   const gitDir = path.join(projectPath, '.git');
   if (!fs.existsSync(gitDir)) return false;
   try {
-    execSync('git --version', { stdio: 'pipe' });
+    execSync('git --version', { windowsHide: true, stdio: 'pipe' });
     return true;
   } catch(e) { return false; }
 }
@@ -37,9 +37,9 @@ function gitDisponible(projectPath) {
 function getDiff(projectPath) {
   try {
     // Archivos modificados (staged + unstaged)
-    const staged   = execSync('git diff --cached --name-only', { cwd: projectPath, stdio: 'pipe' }).toString().trim();
-    const unstaged = execSync('git diff --name-only', { cwd: projectPath, stdio: 'pipe' }).toString().trim();
-    const untracked = execSync('git ls-files --others --exclude-standard', { cwd: projectPath, stdio: 'pipe' }).toString().trim();
+    const staged   = execSync('git diff --cached --name-only', { windowsHide: true, cwd: projectPath, stdio: 'pipe' }).toString().trim();
+    const unstaged = execSync('git diff --name-only', { windowsHide: true, cwd: projectPath, stdio: 'pipe' }).toString().trim();
+    const untracked = execSync('git ls-files --others --exclude-standard', { windowsHide: true, cwd: projectPath, stdio: 'pipe' }).toString().trim();
     
     const archivos = new Set([
       ...staged.split('\n').filter(Boolean),
@@ -49,7 +49,7 @@ function getDiff(projectPath) {
     // Diff resumido (primeras 200 líneas para no saturar contexto)
     let diffContent = '';
     try {
-      diffContent = execSync('git diff HEAD --stat', { cwd: projectPath, stdio: 'pipe' }).toString().trim();
+      diffContent = execSync('git diff HEAD --stat', { windowsHide: true, cwd: projectPath, stdio: 'pipe' }).toString().trim();
     } catch(e) {}
     
     return {
@@ -67,7 +67,7 @@ function getCommitsRecientes(projectPath, n) {
   try {
     const log = execSync(
       `git log --oneline -${n} --format="%H%x1f%s%x1f%ai%x1f%an"`,
-      { cwd: projectPath, stdio: 'pipe' }
+      { windowsHide: true, cwd: projectPath, stdio: 'pipe' }
     ).toString().trim();
     // Separador \x1f (unit separator) en vez de '|' — no aparece en mensajes de commit
     return log.split('\n').filter(Boolean).map(line => {
@@ -80,7 +80,7 @@ function getCommitsRecientes(projectPath, n) {
 // ─── Obtener rama actual ───────────────────────────────────────────────────────
 function getRamaActual(projectPath) {
   try {
-    return execSync('git branch --show-current', { cwd: projectPath, stdio: 'pipe' }).toString().trim();
+    return execSync('git branch --show-current', { windowsHide: true, cwd: projectPath, stdio: 'pipe' }).toString().trim();
   } catch(e) { return 'unknown'; }
 }
 
@@ -90,14 +90,14 @@ function getArchivosUltimoPR(projectPath) {
     // Archivos del último commit de merge
     const mergeHash = execSync(
       'git log --merges --oneline -1 --format="%H"',
-      { cwd: projectPath, stdio: 'pipe' }
+      { windowsHide: true, cwd: projectPath, stdio: 'pipe' }
     ).toString().trim();
     
     if (!mergeHash) return [];
     
     const archivos = execSync(
       `git diff-tree --no-commit-id -r --name-only ${mergeHash}`,
-      { cwd: projectPath, stdio: 'pipe' }
+      { windowsHide: true, cwd: projectPath, stdio: 'pipe' }
     ).toString().trim();
     
     return archivos.split('\n').filter(Boolean);
@@ -419,14 +419,14 @@ fi
 function getChangedLines(projectPath, file) {
   try {
     const fileNorm = String(file).replace(/\\/g, '/');
-    const out = execSync(`git diff HEAD --unified=0 -- "${fileNorm}"`, {
+    const out = execSync(`git diff HEAD --unified=0 -- "${fileNorm}"`, { windowsHide: true,
       cwd: projectPath, stdio: 'pipe', timeout: 10000,
     }).toString();
 
     if (!out.trim()) {
       // Sin diff: o no cambió, o es untracked (git diff no lo ve — sin base
       // contra qué comparar → null, nunca adivinar).
-      const untracked = execSync('git ls-files --others --exclude-standard', {
+      const untracked = execSync('git ls-files --others --exclude-standard', { windowsHide: true,
         cwd: projectPath, stdio: 'pipe', timeout: 10000,
       }).toString().split('\n').map(s => s.trim().replace(/\\/g, '/')).filter(Boolean);
       return untracked.includes(fileNorm) ? null : [];

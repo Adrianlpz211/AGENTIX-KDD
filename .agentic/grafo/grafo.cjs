@@ -266,7 +266,7 @@ function sincronizar() {
   let archivosRecientes = [];
   try {
     const { execSync } = require('child_process');
-    const diff = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: process.cwd(), stdio: 'pipe', timeout: 5000 }).toString();
+    const diff = execSync('git diff-tree --no-commit-id --name-only -r HEAD', { windowsHide: true, cwd: process.cwd(), stdio: 'pipe', timeout: 5000 }).toString();
     archivosRecientes = diff.split('\n').map(f => f.trim()).filter(Boolean);
   } catch { /* sin git o sin commits — queda vacío, no rompe nada */ }
   let hashContexto = null;

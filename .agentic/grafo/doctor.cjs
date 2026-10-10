@@ -38,7 +38,7 @@ function paso(nombre, cmd, scriptPath) {
     return { ok: true, skipped: true };
   }
   try {
-    const out = execSync(cmd, { cwd: ROOT, stdio: 'pipe', timeout: 120000 }).toString();
+    const out = execSync(cmd, { windowsHide: true, cwd: ROOT, stdio: 'pipe', timeout: 120000 }).toString();
     console.log(out.trim().split('\n').map(l => '  ' + l).join('\n'));
     return { ok: true };
   } catch (e) {

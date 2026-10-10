@@ -177,7 +177,7 @@ const AYUDA = [
 
 function decidir(root, id, resp, via) {
   const T = path.join(root, '.agentic', 'grafo', 'teams.cjs');
-  const r = spawnSync(process.execPath, [T, 'decidir', id, resp, '--porque=respondida por el dueño desde ' + via], { cwd: root, encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync(process.execPath, [T, 'decidir', id, resp, '--porque=respondida por el dueño desde ' + via], { windowsHide: true, cwd: root, encoding: 'utf8', timeout: 60000 });
   return { ok: r.status === 0, salida: corto((r.stdout || '') + ' ' + (r.stderr || ''), 160) };
 }
 

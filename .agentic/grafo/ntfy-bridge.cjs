@@ -237,7 +237,7 @@ async function entrada(root) {
     const dec = /^(D-\d+)[\s:,-]+([\s\S]+)$/i.exec(texto);
     if (dec) {
       const id = dec[1].toUpperCase(), resp = dec[2].trim();
-      const r = spawnSync(process.execPath, [path.join(root, '.agentic', 'grafo', 'teams.cjs'), 'decidir', id, resp, '--porque=respondida por el dueño desde el teléfono (ntfy)'], { cwd: root, encoding: 'utf8', timeout: 60000 });
+      const r = spawnSync(process.execPath, [path.join(root, '.agentic', 'grafo', 'teams.cjs'), 'decidir', id, resp, '--porque=respondida por el dueño desde el teléfono (ntfy)'], { windowsHide: true, cwd: root, encoding: 'utf8', timeout: 60000 });
       await publicar(root, cfg, { titulo: r.status === 0 ? `✔ ${id} resuelta` : `✖ No pude resolver ${id}`, texto: r.status === 0 ? `Quedó registrada tu decisión: ${corto(resp, 200)}. El Director la verá en su próxima revisión.` : corto((r.stdout || '') + (r.stderr || ''), 300) || 'Esa decisión no existe o ya estaba resuelta.', prioridad: 3, tags: [r.status === 0 ? 'white_check_mark' : 'x'] });
       continue;
     }

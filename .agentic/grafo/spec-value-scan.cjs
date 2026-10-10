@@ -115,7 +115,7 @@ function scan(projectRoot, { staged = true, files = null } = {}) {
       diff += contenido.split('\n').map(l => '+' + l).join('\n') + '\n';
     }
   } else {
-    diff = safe(() => execSync(`git diff ${staged ? '--cached' : 'HEAD'} -U0`, {
+    diff = safe(() => execSync(`git diff ${staged ? '--cached' : 'HEAD'} -U0`, { windowsHide: true,
       cwd: projectRoot, stdio: 'pipe', timeout: 15000,
     }).toString(), '');
   }

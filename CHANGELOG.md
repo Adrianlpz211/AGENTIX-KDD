@@ -1,5 +1,14 @@
 # Changelog — Agentic KDD
 
+## [3.25.1] — 2026-10-10
+
+**Las pruebas ya no pueden escribir en el repositorio real desde un hook, y Agentix deja de abrir ventanas de consola en Windows.**
+- **Causa medida (10/10/2026):** `tdd-gate` lanza `npm test` desde el post-commit y la suite heredó `GIT_DIR` / `GIT_INDEX_FILE` del repo real. Las pruebas hacen `git init`, `git config user.name prueba` y `git commit` en carpetas temporales; con esas variables puestas, git ignora la carpeta y escribe en el repo REAL: quedó `core.bare=true`, identidad «prueba», ramas y commits de prueba encima de `main` y el índice destrozado.
+- **Arreglo:** nuevo `git-env.cjs` (`entornoSinGit`): `tdd-gate` (sondeo del comando, corrida de pruebas y `typecheck`) y `scripts/run-tests.cjs` lanzan las pruebas SIN las variables de git que apuntan a un repo. Los comandos de git que Agentix corre sobre el proyecto no cambian. Pruebas: `test/git-env-hooks.test.cjs` (comprueba con un repo «víctima» que una fixture no lo toca; al quitar el arreglo, falla).
+- **Ventanas de consola:** 51 llamadas a `child_process` en 25 archivos (git-context, post-cycle, tdd-gate, canario, puentes de Telegram y ntfy, hooks, `akdd`, dashboard…) no llevaban `windowsHide: true`; en Windows cada una podía abrir una ventana negra de node/git. Ahora todas lo llevan y `test/ventanas-ocultas.test.cjs` falla si alguna vuelve a aparecer sin él.
+- **Integrado de paso:** el tablero de decisiones 3.25.0 (pestaña 🗳️ Decisiones con entrega automática a Code/Cursor) como un solo commit con el autor correcto, tras reparar la configuración dañada.
+- **Límite honesto:** protege a las pruebas que lanza Agentix. Un proyecto cliente cuyas propias pruebas hagan `git init` fuera de su carpeta sigue siendo responsabilidad de ese proyecto; el entorno que reciben ya viene limpio.
+
 ## [3.25.0] — 2026-10-10
 
 **Tablero de decisiones en el dashboard: lo que el dueño responde, mueve o pide llega solo a la cola de Code o de Cursor, sin copiar ni pegar nada.**

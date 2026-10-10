@@ -90,7 +90,7 @@ const error = (motivo, reason_code) => ({ disponible: false, status: 'ERROR', re
 /** Corre `npm audit --json`. Devuelve {stdout, code, timedOut}. */
 function correrNpmAudit(raiz, timeoutMs) {
   try {
-    const stdout = execSync('npm audit --json', {
+    const stdout = execSync('npm audit --json', { windowsHide: true,
       cwd: raiz, timeout: timeoutMs, encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 20 * 1024 * 1024,
     });

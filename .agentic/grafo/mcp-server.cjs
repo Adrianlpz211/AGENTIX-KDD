@@ -698,7 +698,7 @@ async function handleCLITool(name, args={}) {
   const { execSync } = require('child_process');
   const run = (cmd) => {
     try {
-      const out = execSync(cmd, { cwd: ROOT, stdio: 'pipe', timeout: 60000 }).toString();
+      const out = execSync(cmd, { windowsHide: true, cwd: ROOT, stdio: 'pipe', timeout: 60000 }).toString();
       return { ok: true, output: out };
     } catch (e) {
       return { ok: false, output: e.stdout?.toString() || e.message };

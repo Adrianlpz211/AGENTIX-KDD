@@ -196,7 +196,7 @@ function findGrafo() {
    espacios, comillas, backticks o $() es un dato, no un comando. */
 function ejecutar(script, argv, { tolerante = false } = {}) {
   const limpio = argv.filter((a) => a !== '' && a != null).map(String);
-  const r = spawnSync(process.execPath, [script, ...limpio], { stdio: 'inherit', cwd: process.cwd() });
+  const r = spawnSync(process.execPath, [script, ...limpio], { windowsHide: true, stdio: 'inherit', cwd: process.cwd() });
   if (tolerante) return;
   if (r.error) { console.error(`  ${path.basename(script)}: ${r.error.message}`); process.exit(1); }
   if (r.status) process.exit(r.status);

@@ -195,7 +195,7 @@ function commitsEntre(root, desdeMs, hastaMs) {
   if (desdeMs == null || hastaMs == null || hastaMs <= desdeMs) return [];
   const cmd = 'git log --format=%cI --since="' + new Date(desdeMs).toISOString() +
               '" --until="' + new Date(hastaMs).toISOString() + '"';
-  const out = safe(() => execSync(cmd, { cwd: root, stdio: 'pipe', timeout: 20000 }).toString(), '');
+  const out = safe(() => execSync(cmd, { windowsHide: true, cwd: root, stdio: 'pipe', timeout: 20000 }).toString(), '');
   return out.split('\n').map((s) => aMs(s.trim())).filter((n) => n != null).sort((a, b) => a - b);
 }
 

@@ -280,7 +280,7 @@ function ensureSchema(db) {
 function resolverObjetivoSync(files) {
   const { spawnSync } = require('child_process');
   const r = spawnSync(process.execPath, [path.join(GRAFO_DIR, 'dev-target.cjs'), ...files],
-    { cwd: ROOT, encoding: 'utf8', timeout: 20000 });
+    { windowsHide: true, cwd: ROOT, encoding: 'utf8', timeout: 20000 });
   try { return JSON.parse(r.stdout); }
   catch { return { status: 'UNVERIFIED', reason_code: 'ERROR', message: 'dev-target no respondió' }; }
 }
@@ -330,7 +330,7 @@ function cerrarCicloConGates(db, results) {
 function archivosDelCicloTemprano() {
   if (FILES_DECLARADOS) return FILES_DECLARADOS.slice();
   try {
-    return execSync('git diff-tree --no-commit-id --name-only -r --root ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
+    return execSync('git diff-tree --no-commit-id --name-only -r --root ' + COMMIT_REF, { windowsHide: true, cwd: ROOT, stdio: 'pipe', timeout: 5000 })
       .toString().split('\n').map((s) => s.trim()).filter(Boolean);
   } catch { return []; }
 }
@@ -1025,7 +1025,7 @@ async function main() {
       let archivosTocados = [];
       if (FILES_DECLARADOS) archivosTocados = FILES_DECLARADOS; // TEAMS: el sujeto declarado, no el HEAD de git
       else try {
-        const diff = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
+        const diff = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { windowsHide: true, cwd: ROOT, stdio: 'pipe', timeout: 5000 }).toString();
         archivosTocados = diff.split('\n').map(f => f.trim()).filter(Boolean);
       } catch { /* sin git o sin commits todavía — queda vacío, no es error */ }
 
@@ -1092,7 +1092,7 @@ async function main() {
   let commitFilesForScans = [];
   if (FILES_DECLARADOS) commitFilesForScans = FILES_DECLARADOS.slice(); // TEAMS: el sujeto declarado del cierre
   else try {
-    commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { cwd: ROOT, stdio: 'pipe', timeout: 5000 })
+    commitFilesForScans = execSync('git diff-tree --no-commit-id --name-only -r ' + COMMIT_REF, { windowsHide: true, cwd: ROOT, stdio: 'pipe', timeout: 5000 })
       .toString().split('\n').map(f => f.trim()).filter(Boolean);
   } catch {}
 
@@ -1208,7 +1208,7 @@ async function main() {
         const urls = objetivo.urls.length ? objetivo.urls : [];
         const estados = [];
         for (const u of urls) {
-          const r = spawnSync(process.execPath, [bgPath, u, '--json'], { cwd: ROOT, encoding: 'utf8', timeout: 90000 });
+          const r = spawnSync(process.execPath, [bgPath, u, '--json'], { windowsHide: true, cwd: ROOT, encoding: 'utf8', timeout: 90000 });
           let res = null;
           try { res = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).pop()); } catch { /* salida no JSON */ }
           estados.push({ url: u, status: res && res.status ? res.status : 'UNVERIFIED' });
