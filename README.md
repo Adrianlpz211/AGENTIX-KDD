@@ -5,7 +5,7 @@
 ### The armor for your AI coder.
 
 <p>
-<img src="https://img.shields.io/badge/version-3.20.4-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/version-3.24.1-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/license-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-ready-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -44,7 +44,7 @@ Everything Agentix does belongs to one of **three pieces**. If you get lost in t
 |---|---|---|---|
 | ⚓ | **Anchor** — memory | Remembers decisions, rules, errors and the code's structure across sessions, **traces where each piece of knowledge came from**, and surfaces only what is relevant at the right moment. | 4-layer memory (CoALA) · KDD graph · AST code graph with line precision · hybrid BM25 + vector recall under a token budget · **memory with provenance** (activity → observation → knowledge → evidence) · **layered recall** · **compaction that keeps the original** · privacy redaction · known-cure matching · natural-language per-file descriptions · MemCurator · gate ledger · measured task time |
 | 🔧 | **Lever** — verification | Before accepting a change, mechanically checks that it doesn't break what already worked. When in doubt it **stops on the safe side**. Never reports a false "green". | Evidence-based closing (PASS/FAIL/SKIP/UNVERIFIED/ERROR) · TDD Gate · Preservation Gate (per-test contracts + front scenarios) · Regression Guard · protected files · AST blast radius · Spec Gate · Security Gate (secrets/PII/injection/cross-tenant) · Browser Gate · UI Native Gate · design memory · CSS Token Gate · Simple Gate · git hooks · prediction grading |
-| 🔨 | **Hammer** — autonomy | Runs complete development cycles on a leash: analyzes, builds, tests, learns, recovers from stops, and reports. | `aa:` pipeline · effort router (LOW/MEDIUM/HIGH) · LEGION MODE (parallel sub-agents, read/judge steps only) · 4-lens QA · `audit:` department · restore points · RECOVERY protocol · multi-instance locks · safe update · ClickUp bridge (opt-in) · WhatsApp notices (opt-in) |
+| 🔨 | **Hammer** — autonomy | Runs complete development cycles on a leash: analyzes, builds, tests, learns, recovers from stops, and reports. | `aa:` pipeline (the prefix is optional) · TEAMS (Claude Code directs, Cursor builds) · 3D office · phone chat (Telegram + ntfy) · effort router (LOW/MEDIUM/HIGH) · LEGION MODE (parallel sub-agents, read/judge steps only) · 4-lens QA · `audit:` department · restore points · RECOVERY protocol · multi-instance locks · safe update · ClickUp bridge (opt-in) · WhatsApp notices (opt-in) |
 
 **The measured property that defines the armor:** when Agentix doubts, it protects. Against a real parser, of 1,989 symbols compared, the range error falls on the safe side in **99.75%** of cases (dangerous side: 5 cases, all ≤ 5 lines).
 
@@ -52,16 +52,49 @@ Everything Agentix does belongs to one of **three pieces**. If you get lost in t
 
 | You want… | You type | What runs |
 |---|---|---|
-| **One agent, one task** (the daily mode) | `aa: <task>` | The full individual pipeline: enricher → analysis → build → TDD → QA → memory → post-cycle → measured time |
+| **One agent, one task** (the daily mode) | `aa: <task>` — or just ask, the `aa:` prefix is **optional** in a configured project | The full individual pipeline: enricher → analysis → build → TDD → QA → memory → post-cycle → measured time |
+| **A team: Claude Code directs, Cursor builds** | `teams: activar` (see [TEAMS](#teams--claude-code-directs-cursor-builds-one-md-channel)) | One MD channel, background watchers, a traffic light, a 3D office, and every accepted task registered in the same core as `aa:` |
 | **Read-only audit** | `audit: auditar` | Seven auditors in parallel; never touches code |
 
-Everything `aa:` does closes through one **core** — cycles, KDD memory, contracts, AST, design memory, preservation gate and dashboard.
+Everything `aa:` and TEAMS do closes through one **core** — cycles, KDD memory, contracts, AST, design memory, preservation gate and dashboard.
 
 ---
 
 ## Quick start
 
 ```bash
+# 1. Install the CLI (once per machine)
+npm install -g agentic-kdd
+
+# 2. In your project
+cd your-project
+akdd init
+
+# 3. Connect the MCP once for ALL your projects (recommended)
+akdd mcp --global
+
+# 4. Open Claude Code or Cursor and type:
+aa: configurar
+```
+
+From there you just work. In a project that is **configured** the `aa:` prefix is optional: a message that asks to change code or configuration is treated as `aa:` (Claude Code gets the Context Enricher brief injected into the prompt; Cursor launches it in the background). Questions and conversation are answered normally. The pipeline runs on its own and only stops you on a genuine STOP (a contradicted business rule, a broken test, a critical file).
+
+```
+add pagination to the clients list              ← same as "aa: add pagination…"
+aa: --dry-run refactor the payment validation   ← proposes, writes nothing
+aa: explore how to model recurring invoices     ← thinks with you, writes nothing
+aa: sprint — full invoicing module              ← chained tasks; each feeds the next
+aa: aprende                                     ← absorbs work done outside the pipeline
+audit: auditar                                  ← 7 parallel auditors; read-only
+teams: activar                                  ← Claude Code directs, Cursor builds (see TEAMS)
+akdd dashboard                                  ← see everything, live
+akdd cobertura                                  ← how much of what you do is recorded in Agentix
+```
+
+> The command vocabulary (`aa:`, `audit:`, `teams:`) is Spanish — the task you write after it can be in any language. Chat prefixes are instructions for the agent, not shell commands.
+
+**Optional, once you are running:** [get alerts and answer from your phone](#-chat-with-agentix-from-your-phone--telegram-and-ntfy) · [update an existing project](#updating--one-command-that-proves-what-it-did).
+
 # 1. Install the CLI
 npm install -g agentic-kdd
 
@@ -114,11 +147,15 @@ It stops you only on a genuine STOP, with the exact zone and the reason. Everyth
 
 | When | What runs automatically |
 |------|--------------------------|
-| On every git **commit** | **Pre-commit** over the *index* (what you are really committing): security shield (leaked secrets, cross-tenant, JWT bypass **block**; PII and invisible Unicode warn), test integrity (removing a case from a protected test **blocks**), UI native, business values. **Commit-msg**: the canary — a *fix* without any test **blocks**. **Post-commit**: queues the commit by SHA and closes the cycle in the background. Never blocks. |
-| On every **post-cycle** | Spec/test integrity scan · design memory (values that return to an abandoned state, properties that disappear) · CSS tokens · Simple Gate · Preservation Gate · risk-prediction grading · deps audit · **memory with provenance** (the cycle is recorded as a real activity, the queue is drained, validated knowledge whose files changed becomes *suspect*) · cycle closed from real gate states |
-| Inside every **`aa:`** | Context Enricher brief · effort tier · gates · tests · 4-lens QA · memory · measured duration |
+| On every **prompt** you send (Claude Code and Cursor hooks) | If the message looks like a task and the project is configured, it is treated as `aa:`: the enricher brief arrives in the prompt (Claude Code) or runs in the background (Cursor). Messages from your phone and decisions you answered on the board are delivered here too. `akdd host-hooks status` shows them; `init` and `update` install them for the hosts the project uses and respect an `uninstall` of yours |
+| On every git **commit** | **Pre-commit** over the *index* (what you are really committing): security shield (leaked secrets, cross-tenant, JWT bypass **block**; PII and invisible Unicode warn), test integrity (removing a case from a protected test **blocks**), UI native, business values. **Commit-msg**: the canary — a *fix* without any test **blocks**. **Post-commit**: queues the commit by SHA, closes the cycle in the background, retries with growing waits and gives up visibly after 5 attempts. Never blocks. |
+| On every **post-cycle** | Spec/test integrity scan · design memory (values that return to an abandoned state, properties that disappear) · CSS tokens · Simple Gate · Preservation Gate · risk-prediction grading · deps audit · **memory with provenance** · cycle closed from real gate states · duration derived from real traces (a cycle with no trace reads *no data*, never `0`) |
+| Inside every **`aa:`** | Context Enricher brief (risk **by evidence on the files named**, known cures) · effort tier · gates · tests · 4-lens QA · memory · measured duration |
+| When TEAMS **accepts a task** | The task is registered like an `aa:` cycle (origin `teams`), and it is only reported as registered once the cycle really exists in the database |
 | Every **5 cycles** | Checkpoint to resume in another chat or machine |
-| On **init / update** | Hooks install themselves (respecting your own); the AST index rebuilds once if the engine changed versions; the schema migrates **inside** `akdd update`, with backup and verification |
+| On **init / update** | Hooks install themselves (respecting your own); the AST index rebuilds once if the engine changed versions; the schema migrates **inside** `akdd update`, with backup and verification; if you have a Telegram bot configured on this machine, the project registers itself in it |
+
+How much of your work lands in Agentix: `akdd cobertura` compares commits against recorded cycles (exact), the quality of what was recorded per origin, and prompts that looked like tasks (approximate). Past commits with no cycle can be recorded retroactively with `akdd reconciliar [--dias=N] [--aplicar]` (marked `historico`, no tests, duration left empty). **Work you never commit is only warned about, not recorded.**
 
 Emergency hatch for the hooks: `AKDD_SKIP_GATES=1 git commit ...` — the optional IDE guard (`akdd host-hooks install`) denies that hatch and `--no-verify` to the agent.
 
@@ -181,6 +218,12 @@ Every answer carries explicit states (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MISSI
 
 `LOW` means less: no global search and no needless delegation — while scope, protected files, security and leases stay in every tier, and a "small change" to auth, payments or a migration stays `HIGH`. Reads of unchanged files are reused, and a changed hash always invalidates. Controlling the *provider's* reasoning effort needs an explicit integration that is **not installed**; Agentix declares `HOST_NATIVE_UNCONTROLLED` and never promises to shrink a host's internal thinking. `akdd effort budget …` shows the cumulative budget of a task.
 
+### Risk by evidence, contracts tied to their test, and the judge in shadow
+
+- **Risk by evidence (3.23.8).** The enricher no longer says "medium" by habit. It measures the files your task names: how many files import them (AST), whether selective protected behaviors touch them and whether errors were already recorded on them. No evidence → LOW. A real project went from 54 of 60 predictions "medium" to a spread you can use (a core file with 98 dependents reads HIGH, an untouched one LOW).
+- **Contracts tied to their test (3.23.8).** The Preservation Gate needs to know which test file backs each contract; contracts born from a whole-suite run had none, so every cycle ended `UNVERIFIED (NO_TEST_FILE_MAPPED)`. `node .agentic/grafo/contract-guard.cjs backfill-test-files` attributes each contract to its test by the literal test title (only when unique) and derives its sources from the test's imports. It is a dry run; add `--aplicar` to write.
+- **Judge in shadow (3.23.9).** `decision-oracle.cjs` answers three typed questions about each task (is it a task or a chat? will it end in STOP/FAIL/revert? does it touch a protected business value?) **without influencing anything**, and a later mechanical step labels each answer with what really happened. It exists to measure, with data, when an autonomous mode may keep going alone. `node .agentic/grafo/decision-oracle.cjs metricas` prints the numbers; no engine is promoted above "advisor" without ≥ 100 labelled cases and ≥ 30 real positives.
+
 ---
 
 ## 🔧 Verification — the Lever
@@ -210,24 +253,28 @@ The protocol many people run by hand, now a command wired into Agentix. Everythi
 teams: activar        ← Claude Code assimilates the protocol and ASKS you: COMPLETE mode (Director + 3 sub-agents, Cursor builds)
                          or INDIVIDUAL mode (Claude Code builds too), and whether you want an extra auditor
 teams: plan <all you already have laid out in docs, plus extra details>   ← Claude Code reads it all and assimilates it
-teams: constructor        ← in Cursor: it prepares itself, launches its watchers and waits ("READY, waiting for iniciar")
+teams: constructor    ← in Cursor: it prepares itself, launches its watchers and waits ("READY, waiting for iniciar")
 teams: iniciar        ← in Claude Code: it starts; Cursor wakes up on its own
 teams: pausa          ← stops everything: both watchers end and nobody spends tokens polling
-teams: continuar      ← in Claude Code and, above all, in Cursor: relaunch watchers and keep going
-teams: estado · avance · reporte · comprobar · cerrar
+teams: continuar      ← in Claude Code AND in Cursor: relaunch watchers and keep going
+teams: estado · avance · reporte · comprobar · diagnostico · cerrar
 ```
 
 | Piece | What it does |
 |---|---|
-| **One channel** | `.legion/AUDITORIA-CURSOR.md`: Corrections, Tasks, Report, Director audit, Decisions. If it is not written there, it did not happen |
+| **One channel** | `.legion/AUDITORIA-CURSOR.md`: Corrections, Tasks, Report, Director audit, Decisions. If it is not written there, it did not happen. Every write leaves a copy; if another editor overwrites the file and a task/correction/decision goes missing, Agentix restores it and tells the Director |
 | **Audit never gates progress** | The builder keeps going while the Director's 3 sub-agents (frontend/UI-UX, backend, business) audit behind it. A late finding goes to *Correcciones pendientes* and the builder reads it first, mid-task. Only a real BLOQUEANTE stops |
-| **The round prints everything** | `ronda` prints every pending correction and task in full, so the builder cannot skip parts of the file; it only closes when it prints `RONDA_COMPLETA` |
+| **The round prints everything** | `ronda` prints every pending correction and task in full; it only closes when it prints `RONDA_COMPLETA`. A turn with pending work cannot end on a summary: it ends with files touched or a `reportar` |
 | **Punctual reports** | One line per task (HECHO / PARCIAL / NO_HECHO + reason + exact verification). Missing reports, HECHO with open boxes and "resolved" without saying what are detected for you |
-| **Decisions** | The Director decides when it knows, **researches the internet by itself (with or without your links)** when it doubts, and only asks you what is not on the internet or is security-blocking |
-| **Wake-up and a real end** | Each role runs a background watcher the host delivers; the ~3 min loop is the independent backup. `cerrar` publishes the final report and tells **both** watchers to stop — nobody waits for something that will never arrive |
-| **Connected to Agentix** | Every task the Director accepts is registered by itself with `origin = teams` in the same core as `aa:` (cycle, KDD memory, contracts, AST, design, preservation, dashboard). If registration fails it stays pending and retries; it never stops the work |
+| **Decisions** | The Director decides when it knows, **researches the internet by itself** when it doubts, and only asks you what is not on the internet or is security-blocking. Questions for you become **decisions** with options, impact and a recommendation; answer them on the dashboard (🗳️), from your phone or in chat |
+| **It does not fall asleep** | Watchers last up to 12 h and only end on `pausa`, `cerrar` or all-green. If a role's watcher died or work is left when it tries to end its turn, the host's stop hook asks it to continue (anti-loop brake: 3 tries, then it tells you). Re-queuing the same tasks does **not** wake Cursor; `teams: diagnostico` says from evidence on disk (files touched, reports, rounds) whether the builder is WORKING or STOPPED, and gives you the exact message to paste if it stopped |
+| **Nobody waits in silence** | A builder with a task and no files touched asks for work after 3 rounds; a PARCIAL stuck 10 min with no files touched becomes a decision for the Director; the traffic light (green / amber / red, with the reason in words) never shows a made-up green |
+| **A bar that tells the truth** | 🟩 done · 🟦 in progress · 🟧 partial / waiting on you · 🟥 missing. It only stops after **walking everything**: all green → `TERMINADO`; only owner decisions left → `ESPERA_DUENO` |
+| **Connected to Agentix** | Every task the Director accepts is registered with `origin = teams` in the same core as `aa:` (cycle, KDD memory, contracts, AST, design, preservation, dashboard) and is only counted once the cycle exists in the database; a database that was never migrated is reported with the repair instead of a false "registered". Add `--aprendizaje="…" --tipo=decision\|patron\|error` when accepting to put a real lesson in the KDD graph |
 
-Agentix **observes**; it does not run a state machine. Honest limits: the wake-up depends on the host delivering the background task (`teams: comprobar` tells you what is verified), and live Cursor + Claude Code together is still `NO_EJECUTADO` in the matrix.
+**The 3D Office.** The dashboard tab **🏢 Oficina** shows the work as it happens, refreshed every 2 s: who is at their desk, the delivery that travels to the Director, the audit, the confetti on accept, the red envelope on a return, a whiteboard with the queue, a flow screen that builds module by module, the traffic light and a clock. It works with TEAMS complete, TEAMS individual, or a **single model** working with `aa:`.
+
+Agentix **observes**; it does not run a state machine. Honest limits: Agentix cannot write in Cursor's chat — if the builder stops, it detects it and hands you the message. The wake-up depends on the host delivering the background task (`teams: comprobar` tells you what is verified). Live Cursor + Claude Code together is verified in a real campaign (glowly, medinet) but `NO_EJECUTADO` in the formal matrix, and nobody has seen Cursor resume from the stop hook's `followup_message`.
 
 ### The rest of the hammer
 
@@ -243,21 +290,102 @@ Agentix **observes**; it does not run a state machine. Honest limits: the wake-u
 
 ---
 
+## 📱 Chat with Agentix from your phone — Telegram and ntfy
+
+Two **optional** channels, off by default. They do the same job: Agentix **writes to you** when something happens, and you can **answer** from your phone. Telegram is the full chat; ntfy is the lightweight option.
+
+### What Agentix sends you (no need to message first)
+
+A background service looks at each project every 20 seconds and tells you:
+
+| Mode | You get |
+|---|---|
+| **TEAMS** | Each accepted task (with progress, **measured** time worked and what is left), everything accepted, a decision that needs you (**with buttons**), a problem that lasts 5 minutes (builder stopped, watcher dead, request unanswered), the close, and a report every hour while the channel is active |
+| **Individual `aa:`** (Claude only, Cursor only or both) | Each closed cycle with its result — as soon as the cycle is recorded (the commit triggers that) |
+
+It groups, never repeats (a problem at most once an hour), and has a daily cap. Every notice shows `[project]` in front. This works the same whether you use Claude Code, Cursor or both: notices come from the project's state on disk, not from the model.
+
+### Telegram: **one bot for all your projects**
+
+A Telegram bot can only be read by one process, so Agentix uses **one bot per person** and every project of that person just registers in it. Each person (or client) creates **their own** bot: nobody shares a token or sees someone else's projects.
+
+```text
+1. In Telegram, talk to @BotFather → /newbot → name → a username ending in "bot". Copy the token (it is a secret: never paste it in a chat).
+2. In ANY Agentix project (3.24.1+), in your own terminal — once per machine:
+       node .agentic/grafo/telegram-hub.cjs activar
+   Paste the token when asked. It prints a 6-digit PIN (valid 15 min, 5 attempts).
+3. In Telegram, open your bot, press Start and send:  /start 123456   (your PIN). Only that user is paired; any other chat is ignored.
+4. Register each project:
+       node .agentic/grafo/telegram-hub.cjs registrar        (inside the project)
+   After this first time, `akdd init` and `akdd update` register a project in your bot by themselves.
+5. Leave ONE service running for all projects (any folder):
+       node .agentic/grafo/telegram-hub.cjs servir
+   Without that window open the bot hears nothing and sends nothing.
+```
+
+**Talking to it**
+
+| You write | It goes to |
+|---|---|
+| `@medinet status` · `@medinet @cursor continue with T-12` · `@medinet D-003 A` | That project (`@cursor` = its builder, `@director`, `@todos`; `D-003 A` answers decision D-003) |
+| A reply to a notice | The project of **that notice** — no name needed |
+| Plain text | The current project (`/proyecto <name>` changes it; with a single project, that one) |
+| `/proyectos` · `/estado todos` | Every project with its channel, traffic light and progress |
+| `/estado` · `/barra` · `/tareas` · `/decisiones` · `/buzon` (optionally followed by a project name) | A production view: never code, never secrets |
+
+Notices carry the decision buttons (A / B / C) and they act **only on that project**. Everything you write is **data from you**: answering a decision and asking for status are the only things done automatically; the rest is read by the project's Director/builder, who confirms anything destructive in their own chat. Messages that ask to change rules, reveal secrets or leave the project are not obeyed.
+
+**Where each thing lives.** Token and pairing: `~/.agentix/telegram/` (outside every repo, mode 0600, never committed). One project per bot is also supported (`telegram-bridge.cjs activar` inside it), but a project registered in your single bot uses that one and its own bot is switched off.
+
+### How fast does the model see what you write?
+
+The message reaches the project's inbox **at once** and the bot answers "📥 received". What changes is when the model reads it:
+
+| Where | When it sees it |
+|---|---|
+| **Claude Code in TEAMS** | Almost immediately (its watcher wakes with it) and again injected in its next turn |
+| **Cursor in TEAMS** | When its watcher wakes or at its next round (every few minutes) |
+| **Claude Code, individual** | In your **next message** to Claude; if it is idle, it does not see it before |
+| **Cursor, individual (no TEAMS)** | **Not automatically**: Cursor's hook cannot inject context. It stays saved and acknowledged, but Cursor will not read it on its own |
+
+You see the acknowledgements in your chat: 📥 received → 👀 delivered (the model saw it) → 📖 read → ✅ handled (with the reply). If nobody handles it in 10 minutes it escalates once.
+
+### ntfy (lightweight, no account)
+
+```text
+ntfy: activar        → prints a long random topic and the steps; install the free "ntfy" app and subscribe to that topic
+ntfy: estado · probar · resumen · desactivar
+```
+
+Same notices as Telegram, with buttons for decisions; what you type in the topic reaches the same inbox (`D-001 <decision>` answers a decision, `status` returns progress). The topic is the only secret (never committed); `--pin=…` asks for a PIN before your messages and `--servidor=…`/`--token=…` use your own ntfy server. Run `node .agentic/grafo/ntfy-bridge.cjs servir` in the background.
+
+### Verified and not verified
+
+- Pairing and `/proyectos` were done with a real bot. Routing, notices, decision buttons and acknowledgements are verified with a simulated Telegram server (a mutant that removes the authorized-user check is caught), **not yet live**.
+- ntfy is verified against a simulated server, not with a real phone.
+- If the service window is closed, nothing arrives. Run it as a background task or a login item.
+
+---
+
 ## Dashboard
 
-`akdd dashboard` → localhost:3847. The tab bar has the original views plus the pages added in 3.20.1:
+`akdd dashboard` opens the board on **your project's own port**: 3847 + (a hash of its folder % 100), always the same for the same project, so two projects never cover each other (`AKDD_DASH_PORT` overrides it; if it is busy the next free one is used and printed). The tab bar:
 
 | Tab | What you see |
 |---|---|
-| 🧠 **Knowledge Graph** | KDD memory, Code Structure and Combined — three graphs in real 3D, with a **☰ Table** view and the guided tour. Unchanged |
+| 🧠 **Knowledge Graph** | KDD memory, Code Structure and Combined — three graphs in real 3D, with a **☰ Table** view and the guided tour |
 | 📚 **Project Docs** | Per-module documentation and natural-language file descriptions |
 | 🛡️ **Preservation Intel** | Contracts, Creative Engine, MemCurator, design memory |
 | ⏱ **Línea de Tiempo** | Measured time per task and module |
 | 🧬 **Memoria** (`/memoria`) | What is stored, the queue and dead-letters, provenance, legacy records, independent health states |
 | 📦 **Contexto y esfuerzo** (`/contexto`) | Effort tier, cumulative budget, net payload reduction and *how it was measured*, per-host coverage |
+| 🏢 **Oficina** (`/oficina`) | The 3D office: who works on what, live — TEAMS complete, individual, or a single model |
+| 🗳️ **Decisiones** | What the models ask you, what you answered and what was already executed (pending → answered → executed) |
 | 🔄 **Actualización** (`/actualizacion`) | Installed version, schema compatibility, the last verification, what was preserved, the backup, what to do |
 
-The new pages are read-only and paginated; opening one never writes. Health shows independent states — service, readable, schema, search, last verified write, queue, update — and the dashboard is **not green** if the schema is broken even when HTTP answers 200. Missing data reads "not available", never `0`. A read-only API (`/api/v1/summary`, `/tasks`, `/contracts`, `/incidents`, `/usage`, `/restore-points`…) and the graph libraries are served locally — no CDN.
+**Real data without restarting the server (3.23.7).** The cards on top and the Oficina, Memoria, Contexto and Actualización tabs update live, with no reload. The rest of the page (the graphs, code structure, times, the tour, the docs) is generated from the database and files: whenever any of them changes the server regenerates the page in a separate process (about 2–3 s on a large project, without freezing the server), shows **"New data — Update now"**, and reloads itself once you stop using the board for 30 s (`AKDD_DASH_AUTO_REFRESH_MS`, `0` = button only), putting you back where you were: tabs, filters, search, selected node and scroll. Honest limit: the graph is not redrawn in place — the page reloads and the 3D camera resets.
+
+The pages are read-only and paginated; opening one never writes. Health shows independent states — service, readable, schema, search, last verified write, queue, update — and the dashboard is **not green** if the schema is broken even when HTTP answers 200. Missing data reads "not available", never `0`. A read-only API (`/api/v1/summary`, `/tasks`, `/contracts`, `/incidents`, `/usage`, `/restore-points`, `/teams`, `/oficina`…) and the graph libraries are served locally — no CDN.
 
 Every capture below is from a real production SaaS project (~414 files).
 
@@ -332,6 +460,8 @@ akdd health
 
 Installing the new CLI does **not** touch any project; each project updates when you tell it to. `akdd update` **inspects → backs up → applies → verifies → reports**, and only exits `0` when the result is something it can back with evidence:
 
+After updating, a project registers itself in your Telegram bot if one is configured on the machine. Updating a project in the middle of a TEAMS campaign: put the channel on pause first (`teams: pausa`), update, close and reopen Cursor on that project (its MCP server holds the old code in memory) and then `teams: continuar` in Claude Code **and** in Cursor.
+
 | Step | What happens |
 |---|---|
 | **Inspect** | Reads the package you installed, your files and the *real* structure of `memoria.db` (tables, columns, indexes) — not just `config.md` or the npm version. An old database with no migration registry is inspected by capability; `user_version = 0` is never assumed to mean "empty". |
@@ -367,11 +497,11 @@ Options: `--check` (plan only), `--json` (one JSON document on stdout), `--no-mi
 
 ## How mature each organ is (honesty by tiers)
 
-**🥇 Battle-tested** (repeated real use): the `aa:` pipeline, 4-layer memory + hybrid search, classic gates (Spec/TDD/Security/Regression), automatic per-commit registration, checkpoints, multi-instance locks, dashboard graphs, MCP, line-level containment, parallel Front/Back.
+**🥇 Battle-tested** (repeated real use, including real campaigns on live projects): the `aa:` pipeline, 4-layer memory + hybrid search, classic gates (Spec/TDD/Security/Regression), automatic per-commit registration, checkpoints, multi-instance locks, dashboard graphs, MCP, line-level containment, parallel Front/Back, **TEAMS (Director + builder, channel, watchers, traffic light, decisions)** and the transactional **update**.
 
-**🥈 Verified with fixtures, real Git, real SQLite and a real browser** (controlled scenarios, not yet months of production): evidence-based closing, the transactional update and its upgrades from the real npm packages, effort router and context packages, per-test contracts, protected files, AST blast radius, index-based git hooks and the canary, restore points, **memory with provenance, the durable queue, layered recall and compaction**, the global MCP launcher, the dashboard pages, time measurement.
+**🥈 Verified with fixtures, real Git, real SQLite and a real browser** (controlled scenarios, not yet months of production): evidence-based closing, effort router and context packages, per-test contracts, protected files, AST blast radius, index-based git hooks and the canary, restore points, memory with provenance, the durable queue, layered recall and compaction, the global MCP launcher, the dashboard pages and the live page refresh, the 3D office, risk by evidence, time measurement, implicit `aa:` through the host hooks, the continuity stop hook, **Telegram (single bot, routing, buttons, acknowledgements) and ntfy against simulated servers**.
 
-**🥉 Logic verified, live host NOT verified**: IDE host-hook adapters inside each IDE, WhatsApp notices end to end.
+**🥉 Logic verified, live host NOT verified**: IDE host-hook adapters inside each IDE (including Cursor resuming from the stop hook), Telegram and ntfy with a live phone end to end, WhatsApp notices, the judge in shadow (it only measures; it has too few real positives to conclude anything yet).
 
 **🔒 Private beta**: team collaboration (shared memory).
 
@@ -520,6 +650,22 @@ akdd tiempo inicio "<task>" · akdd tiempo fin   # Measured duration (worked vs 
 akdd tiempos [module]          # Time per module — measured, never estimated
 ```
 
+### TEAMS, phone chat, inbox and decisions (3.21 → 3.24)
+```bash
+akdd teams <command>           # = node .agentic/grafo/teams.cjs: activar · modo · plan · constructor · iniciar · pausa · continuar
+                               #   estado · avance · reporte · comprobar · diagnostico · tarea · corregir · aceptar [--aprendizaje="…" --tipo=decision|patron|error]
+                               #   decision · decidir · cerrar · reabrir · heredar · observar [--reintentar]
+akdd telegram hub activar      # Single Telegram bot for all your projects (also: node .agentic/grafo/telegram-hub.cjs …)
+akdd telegram hub registrar    #   this project joins it (automatic after init / update)
+akdd telegram hub servir       #   the ONE service for all projects · also: proyectos · estado · pin · quitar · desactivar
+akdd telegram <activar|estado|servir|pin|enviar|desactivar>   # one bot per project (a project registered in the single bot uses that one)
+akdd ntfy <activar|estado|probar|resumen|servir|desactivar>   # phone notices through the free ntfy app
+akdd buzon [leer|responder|estado]                            # the inbox of what you write from your phone
+akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"]   # the owner-decision board from the terminal
+akdd cobertura [--dias=N] [--json]                            # how much of what you do is recorded in Agentix
+akdd reconciliar [--dias=N] [--aplicar]                       # record past commits that have no cycle (as `historico`)
+```
+
 ### ClickUp bridge · WhatsApp (opt-in — off by default)
 ```bash
 akdd cu on · akdd cu set-list <id> · akdd cu sprint [--auto] · akdd cu done <task-id>
@@ -558,6 +704,12 @@ akdd locks release-all         # Release everything (session cleanup)
 10. **Compaction is a payload measure, not a promise.** The benchmark measures bytes Agentix controls, deterministically; tokens are `bytes/4` estimates. When recovering the original is needed, the saving shrinks — and in some cases it is zero by design.
 11. **The redactor reduces risk; it is not a DLP.** Regular expressions miss secrets that carry no context. Use `.agentic/privacy-policy.json` to deny paths and fields.
 12. **The wake-up is the host's, and is verified only by a read.** The watcher detects; the model is woken by the background task (or the loop) of its host. Agentix never calls the wake verified until the session confirms a read after a notice; where neither exists the mode is `MANUAL_ONLY`.
+13. **Cursor in individual mode does not read your phone messages by itself.** Its hook cannot inject context into the prompt; the message stays saved and acknowledged. In TEAMS it reads them at its round or when its watcher wakes. Claude Code reads them at your next message (instantly in TEAMS).
+14. **Agentix cannot write in Cursor's chat.** If the builder stops, Agentix detects it from evidence and gives you the message to paste (also on your phone). Re-queuing tasks does not wake it, and nobody has seen Cursor resume from the stop hook's `followup_message`.
+15. **Telegram is verified against a simulated server**; with a real bot only pairing and `/proyectos` were exercised. Notices stop when the service window is closed.
+16. **Work you never commit is only warned about.** Agentix records on commit and on TEAMS acceptance. A task accepted by TEAMS and then committed can count twice (a `teams` cycle and a `commit` cycle).
+17. **Test evidence on a tree that is being edited is often `UNVERIFIED`.** If the builder edits files while the tests run, the subject hash changes. The real fix — running the tests on a clean copy of the commit — is not built yet.
+18. **The live board reloads the page, it does not redraw the graph in place.** Cards and the Oficina/Memoria/Contexto/Actualización tabs are live; the rest reloads itself when you stop using it.
 
 ---
 
@@ -595,7 +747,7 @@ Results, the log and the exact tarball land in `_output/release-<version>/` (`ve
 
 ## Status & transparency
 
-Agentix is **young, evolving software**. 3.20 was built by asking, gate by gate, whether a green could be faked — and closing it where it could; 3.20.1 added memory you can trace, an update that proves itself, and the groundwork for a rebuilt TEAMS mode. Even so, **an audit doesn't certify zero defects** — if you find something, open an issue.
+Agentix is **young, evolving software**. 3.20 was built by asking, gate by gate, whether a green could be faked — and closing it where it could; 3.20.1 added memory you can trace, an update that proves itself, and the groundwork for a rebuilt TEAMS mode. Even so, **an audit doesn't certify zero defects** — if you find something, open an issue. Since then, 3.21–3.24 rebuilt TEAMS from scratch around the manual protocol that worked in production, added the 3D office, a live board, phone chat (Telegram and ntfy), implicit `aa:`, and a round of real-campaign fixes found by continuously auditing Agentix while it ran on live projects.
 
 The real promise, without inflation:
 

@@ -5,7 +5,7 @@
 ### La armadura de tu IA de código.
 
 <p>
-<img src="https://img.shields.io/badge/versión-3.20.4-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
+<img src="https://img.shields.io/badge/versión-3.24.1-3FE2E8?style=for-the-badge&labelColor=0A0E14" alt="version"/>
 <img src="https://img.shields.io/badge/licencia-MIT-D9A33C?style=for-the-badge&labelColor=0A0E14" alt="license"/>
 <img src="https://img.shields.io/badge/Claude_Code_·_Cursor-listo-8A97A6?style=for-the-badge&labelColor=0A0E14" alt="compat"/>
 </p>
@@ -44,24 +44,57 @@ Todo lo que hace Agentix pertenece a una de **tres piezas**. Si te pierdes en la
 |---|---|---|---|
 | ⚓ | **Ancla** — memoria | Recuerda decisiones, reglas, errores y la estructura del código entre sesiones, **rastrea de dónde salió cada pieza de conocimiento** y presenta solo lo relevante en el momento justo. | Memoria de 4 capas (CoALA) · grafo KDD · grafo AST del código con precisión de línea · recall híbrido BM25 + vectores con presupuesto de tokens · **memoria con procedencia** (actividad → observación → conocimiento → evidencia) · **recuperación por capas** · **compactación que conserva el original** · redacción de privacidad · curas conocidas · descripciones en lenguaje natural por archivo · MemCurator · libreta de gates · tiempo de tarea medido |
 | 🔧 | **Palanca** — verificación | Antes de aceptar un cambio, comprueba mecánicamente que no rompa lo que ya funcionaba. Ante la duda **frena del lado seguro**. Jamás reporta un falso "verde". | Cierre por evidencia (PASS/FAIL/SKIP/UNVERIFIED/ERROR) · TDD Gate · Preservation Gate (contratos por test + escenarios de front) · Regression Guard · archivos protegidos · radio de impacto por AST · Spec Gate · Security Gate (secretos/PII/inyección/cross-tenant) · Browser Gate · UI Native Gate · memoria de diseño · CSS Token Gate · Simple Gate · git hooks · calificación de predicciones |
-| 🔨 | **Martillo** — autonomía | Corre ciclos completos de desarrollo con correa: analiza, construye, prueba, aprende, se recupera de los frenos y reporta. | Pipeline `aa:` · router de esfuerzo (LOW/MEDIUM/HIGH) · MODO LEGIÓN (sub-agentes en paralelo, solo en pasos de leer/juzgar) · QA de 4 lentes · departamento `audit:` · puntos de restauración · protocolo RECOVERY · locks multi-instancia · actualización segura · puente ClickUp (opt-in) · avisos de WhatsApp (opt-in) |
+| 🔨 | **Martillo** — autonomía | Corre ciclos completos de desarrollo con correa: analiza, construye, prueba, aprende, se recupera de los frenos y reporta. | Pipeline `aa:` (el prefijo es opcional) · TEAMS (Claude Code dirige, Cursor construye) · oficina 3D · chat del teléfono (Telegram + ntfy) · router de esfuerzo (LOW/MEDIUM/HIGH) · MODO LEGIÓN (sub-agentes en paralelo, solo en pasos de leer/juzgar) · QA de 4 lentes · departamento `audit:` · puntos de restauración · protocolo RECOVERY · locks multi-instancia · actualización segura · puente ClickUp (opt-in) · avisos de WhatsApp (opt-in) |
 
 **La propiedad medida que define la armadura:** cuando Agentix duda, protege. Contra un parser real, de 1.989 símbolos comparados, el error de rango cae del lado seguro en el **99,75 %** de los casos (lado peligroso: 5 casos, todos ≤ 5 líneas).
 
-### Un motor, dos formas de trabajar
+### Un motor, tres formas de trabajar
 
 | Quieres… | Escribes | Qué corre |
 |---|---|---|
-| **Un agente, una tarea** (el modo diario) | `aa: <tarea>` | El pipeline individual completo: enricher → análisis → construcción → TDD → QA → memoria → post-cycle → tiempo medido |
+| **Un agente, una tarea** (el modo diario) | `aa: <tarea>` — o pídelo sin más: en un proyecto configurado el prefijo `aa:` es **opcional** | El pipeline individual completo: enricher → análisis → construcción → TDD → QA → memoria → post-cycle → tiempo medido |
+| **Un equipo: Claude Code dirige, Cursor construye** | `teams: activar` (ver [TEAMS](#teams--claude-code-dirige-cursor-construye-un-solo-canal-md)) | Un canal MD, vigilantes en segundo plano, un semáforo, una oficina 3D y cada tarea aceptada registrada en el mismo núcleo que `aa:` |
 | **Auditoría de solo lectura** | `audit: auditar` | Siete auditores en paralelo; jamás toca código |
 
-Todo lo que hace `aa:` cierra por un **mismo núcleo**: ciclos, memoria KDD, contratos, AST, memoria de diseño, preservation gate y dashboard.
+Todo lo que hacen `aa:` y TEAMS se cierra por un mismo **núcleo** — ciclos, memoria KDD, contratos, AST, memoria de diseño, preservation gate y dashboard.
 
 ---
 
 ## Inicio rápido
 
 ```bash
+# 1. Instala el CLI (una vez por máquina)
+npm install -g agentic-kdd
+
+# 2. En tu proyecto
+cd tu-proyecto
+akdd init
+
+# 3. Conecta el MCP una vez para TODOS tus proyectos (recomendado)
+akdd mcp --global
+
+# 4. Abre Claude Code o Cursor y escribe:
+aa: configurar
+```
+
+Desde ahí solo trabajas. En un proyecto **configurado** el prefijo `aa:` es opcional: un mensaje que pide cambiar código o configuración se trata como `aa:` (a Claude Code se le inyecta el brief del Context Enricher en el prompt; Cursor lo lanza en segundo plano). Las preguntas y la conversación se responden normal. El pipeline corre solo y únicamente te frena ante un STOP genuino (una regla de negocio contradicha, un test roto, un archivo crítico).
+
+```
+agrega paginación a la lista de clientes        ← igual que "aa: agrega paginación…"
+aa: --dry-run refactoriza la validación de pagos ← propone, no escribe nada
+aa: explore cómo modelar facturas recurrentes   ← piensa contigo, no escribe nada
+aa: sprint — módulo completo de facturación     ← tareas encadenadas; cada una alimenta la siguiente
+aa: aprende                                     ← absorbe el trabajo hecho fuera del pipeline
+audit: auditar                                  ← 7 auditores en paralelo; solo lectura
+teams: activar                                  ← Claude Code dirige, Cursor construye (ver TEAMS)
+akdd dashboard                                  ← ver todo, en vivo
+akdd cobertura                                  ← cuánto de lo que haces queda registrado en Agentix
+```
+
+> El vocabulario de comandos (`aa:`, `audit:`, `teams:`) es en español — la tarea que escribes después puede ir en cualquier idioma. Los prefijos del chat son instrucciones para el agente, no comandos de shell.
+
+**Opcional, ya funcionando:** [recibe avisos y contesta desde el teléfono](#-chatea-con-agentix-desde-tu-teléfono--telegram-y-ntfy) · [actualiza un proyecto que ya usa Agentix](#actualizar--un-comando-que-demuestra-lo-que-hizo).
+
 # 1. Instala el CLI
 npm install -g agentic-kdd
 
@@ -114,11 +147,15 @@ Solo te detiene ante un STOP genuino, con la zona exacta y la razón. Todo lo qu
 
 | Cuándo | Qué corre automáticamente |
 |------|--------------------------|
-| En cada **commit** de git | **Pre-commit** sobre el *índice* (lo que realmente commiteas): escudo de seguridad (secretos filtrados, cross-tenant, bypass de JWT **bloquean**; PII y Unicode invisible avisan), integridad de tests (quitar un caso de un test protegido **bloquea**), UI nativa, valores de negocio. **Commit-msg**: el canario — un *fix* sin ningún test **bloquea**. **Post-commit**: encola el commit por SHA y cierra el ciclo en segundo plano. Nunca bloquea. |
-| En cada **post-cycle** | Escaneo de integridad de spec/tests · memoria de diseño (valores que vuelven a un estado abandonado, propiedades que desaparecen) · tokens CSS · Simple Gate · Preservation Gate · calificación de la predicción de riesgo · auditoría de dependencias · **memoria con procedencia** (el ciclo queda como actividad real, se drena la cola, el conocimiento validado cuyos archivos cambiaron pasa a *sospechoso*) · ciclo cerrado desde estados reales de gates |
-| Dentro de cada **`aa:`** | Brief del Context Enricher · nivel de esfuerzo · gates · tests · QA de 4 lentes · memoria · duración medida |
+| En cada **mensaje** que envías (hooks de Claude Code y Cursor) | Si el mensaje parece una tarea y el proyecto está configurado, se trata como `aa:`: el brief del enricher llega en el prompt (Claude Code) o corre en segundo plano (Cursor). Aquí también se entregan los mensajes de tu teléfono y las decisiones que respondiste en el tablero. `akdd host-hooks status` los muestra; `init` y `update` los instalan en los hosts que el proyecto usa y respetan un `uninstall` tuyo |
+| En cada **commit** de git | **Pre-commit** sobre el *índice* (lo que realmente commiteas): escudo de seguridad (secretos filtrados, cross-tenant, bypass de JWT **bloquean**; PII y Unicode invisible avisan), integridad de tests (quitar un caso de un test protegido **bloquea**), UI nativa, valores de negocio. **Commit-msg**: el canario — un *fix* sin ningún test **bloquea**. **Post-commit**: encola el commit por SHA, cierra el ciclo en segundo plano, reintenta con esperas crecientes y se rinde a la vista tras 5 intentos. Nunca bloquea. |
+| En cada **post-cycle** | Escaneo de integridad de spec/tests · memoria de diseño (valores que vuelven a un estado abandonado, propiedades que desaparecen) · tokens CSS · Simple Gate · Preservation Gate · calificación de la predicción de riesgo · auditoría de dependencias · **memoria con procedencia** · ciclo cerrado desde estados reales de los gates · duración derivada de huellas reales (un ciclo sin huella dice *sin dato*, nunca `0`) |
+| Dentro de cada **`aa:`** | Brief del Context Enricher (riesgo **por evidencia de los archivos nombrados**, curas conocidas) · nivel de esfuerzo · gates · tests · QA de 4 lentes · memoria · duración medida |
+| Cuando TEAMS **acepta una tarea** | Se registra como un ciclo `aa:` (origen `teams`) y solo se da por registrada cuando el ciclo existe de verdad en la base |
 | Cada **5 ciclos** | Checkpoint para retomar en otro chat o máquina |
-| En **init / update** | Los hooks se instalan solos (respetando los tuyos); el índice AST se reconstruye una vez si el motor cambió de versión; el esquema migra **dentro** de `akdd update`, con respaldo y verificación |
+| En **init / update** | Los hooks se instalan solos (respetando los tuyos); el índice AST se reconstruye una vez si el motor cambió de versión; el esquema migra **dentro** de `akdd update`, con respaldo y verificación; si tienes un bot de Telegram configurado en esta máquina, el proyecto se registra solo en él |
+
+Cuánto de tu trabajo llega a Agentix: `akdd cobertura` compara commits contra ciclos registrados (exacto), la calidad de lo registrado por origen y los mensajes que parecían tarea (aproximado). Los commits pasados sin ciclo se pueden registrar con `akdd reconciliar [--dias=N] [--aplicar]` (marcados `historico`, sin pruebas y con la duración vacía). **El trabajo que nunca commiteas solo se avisa, no se registra.**
 
 Escotilla de emergencia para los hooks: `AKDD_SKIP_GATES=1 git commit ...` — la guardia opcional del IDE (`akdd host-hooks install`) le niega esa escotilla y `--no-verify` al agente.
 
@@ -181,6 +218,12 @@ Cada respuesta trae estados explícitos (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MI
 
 `LOW` significa menos: sin búsqueda global y sin delegación innecesaria — mientras alcance, archivos protegidos, seguridad y arriendos siguen en todos los niveles, y un "cambio pequeño" en auth, pagos o una migración sigue siendo `HIGH`. Las lecturas de archivos sin cambios se reutilizan, y un hash distinto siempre invalida. Controlar el esfuerzo de razonamiento *del proveedor* requiere una integración explícita que **no está instalada**; Agentix declara `HOST_NATIVE_UNCONTROLLED` y nunca promete reducir el pensamiento interno de un host. `akdd effort budget …` muestra el presupuesto acumulado de una tarea.
 
+### Riesgo por evidencia, contratos atados a su test y el juez en sombra
+
+- **Riesgo por evidencia (3.23.8).** El enricher ya no dice «medio» por costumbre. Mide los archivos que nombra tu tarea: cuántos archivos los importan (AST), si comportamientos protegidos selectivos los tocan y si ya hay errores registrados sobre ellos. Sin evidencia → BAJO. Un proyecto real pasó de 54 de 60 predicciones «medio» a una distribución que sirve (un archivo central con 98 dependientes sale ALTO; uno sin historia, BAJO).
+- **Contratos atados a su test (3.23.8).** El Preservation Gate necesita saber qué archivo de test respalda cada contrato; los nacidos de una corrida de toda la suite no lo tenían y cada ciclo terminaba `UNVERIFIED (NO_TEST_FILE_MAPPED)`. `node .agentic/grafo/contract-guard.cjs backfill-test-files` atribuye cada contrato a su test por el título literal (solo si es único) y deduce sus fuentes de los imports del test. Es un ensayo; con `--aplicar` escribe.
+- **Juez en sombra (3.23.9).** `decision-oracle.cjs` responde tres preguntas tipadas sobre cada tarea (¿es tarea o conversación?, ¿terminará en STOP/FAIL/reversión?, ¿toca un valor de negocio protegido?) **sin influir en nada**, y un paso mecánico posterior etiqueta cada respuesta con lo que pasó de verdad. Existe para medir con datos cuándo un modo autónomo puede seguir solo. `node .agentic/grafo/decision-oracle.cjs metricas` imprime los números; ningún motor sube de «asesor» sin ≥ 100 casos etiquetados y ≥ 30 positivos reales.
+
 ---
 
 ## 🔧 Verificación — la Palanca
@@ -204,30 +247,34 @@ Cada respuesta trae estados explícitos (`OK`, `NO_RESULTS`, `NO_DB`, `SCHEMA_MI
 
 ### TEAMS — Claude Code dirige, Cursor construye (un solo canal MD)
 
-El protocolo que mucha gente corre a mano, ahora un comando conectado a Agentix. Todo por chat, en este orden:
+El protocolo que mucha gente corre a mano, ahora como un comando conectado a Agentix. Todo es por chat, en este orden:
 
 ```
-teams: activar        ← Claude Code asimila el protocolo y TE PREGUNTA: modo COMPLETO (Director + 3 sub-agentes, Cursor construye)
-                         o modo INDIVIDUAL (Claude Code también construye), y si quieres un auditor extra
-teams: plan <todo lo que ya tienes aterrizado en docs, más detalles extra>   ← Claude Code lo lee todo y lo asimila
-teams: constructor        ← en Cursor (el constructor): se prepara solo, lanza sus vigilantes y espera («LISTO, a la espera de iniciar»)
-teams: iniciar        ← en Claude Code: empieza; Cursor despierta solo
-teams: pausa          ← detiene todo: los dos vigilantes terminan y nadie gasta tokens consultando
-teams: continuar      ← en Claude Code y, sobre todo, en Cursor: relanzan vigilantes y siguen
-teams: estado · avance · reporte · comprobar · cerrar
+teams: activar        ← Claude Code asimila el protocolo y te PREGUNTA: modo COMPLETO (Director + 3 sub-agentes, Cursor construye)
+                         o INDIVIDUAL (Claude Code también construye), y si quieres un auditor extra
+teams: plan <todo lo que ya tienes aterrizado en docs, más detalles extra>   ← Claude Code lo lee completo y lo asimila
+teams: constructor    ← en Cursor: se prepara solo, lanza sus vigilantes y espera («LISTO, a la espera de iniciar»)
+teams: iniciar        ← en Claude Code: arranca; Cursor despierta solo
+teams: pausa          ← lo detiene todo: los dos vigilantes terminan y nadie gasta tokens consultando
+teams: continuar      ← en Claude Code Y en Cursor: relanzan vigilantes y siguen
+teams: estado · avance · reporte · comprobar · diagnostico · cerrar
 ```
 
 | Pieza | Qué hace |
 |---|---|
-| **Un solo canal** | `.legion/AUDITORIA-CURSOR.md`: Correcciones, Tareas, Reporte, Auditoría del Director, Decisiones. Si no está escrito ahí, no pasó |
-| **La auditoría nunca gatea el avance** | El constructor sigue mientras los 3 sub-agentes del Director (frontend/UI-UX, backend, negocio) auditan por detrás. Un hallazgo tardío va a *Correcciones pendientes* y el constructor lo lee primero, a media tarea. Solo un BLOQUEANTE real frena |
-| **La ronda imprime todo** | `ronda` imprime cada corrección y tarea pendiente completa: el constructor no puede saltarse partes del archivo; solo cierra cuando imprime `RONDA_COMPLETA` |
+| **Un canal** | `.legion/AUDITORIA-CURSOR.md`: Correcciones, Tareas, Reporte, Auditoría del Director, Decisiones. Si no está escrito ahí, no pasó. Cada escritura deja una copia; si otro editor pisa el archivo y falta una tarea/corrección/decisión, Agentix la repone y se lo dice al Director |
+| **La auditoría nunca frena el avance** | El constructor sigue mientras los 3 sub-agentes del Director (frontend/UI-UX, backend, negocio) auditan detrás. Un hallazgo tardío va a *Correcciones pendientes* y el constructor lo lee primero, a media tarea. Solo un BLOQUEANTE real frena |
+| **La ronda lo imprime todo** | `ronda` imprime cada corrección y tarea pendiente completas; solo cierra cuando imprime `RONDA_COMPLETA`. Un turno con trabajo pendiente no puede terminar en un resumen: termina con archivos tocados o con un `reportar` |
 | **Reportes puntuales** | Una línea por tarea (HECHO / PARCIAL / NO_HECHO + motivo + verificación exacta). Se detectan por ti los reportes que faltan, HECHO con casillas abiertas y «resuelto» sin decir qué |
-| **Decisiones** | El Director decide cuando sabe, **investiga en internet por su cuenta (con o sin tus links)** cuando duda, y solo te pregunta lo que no está en internet o es bloqueante por seguridad |
-| **Despertar y un fin real** | Cada rol corre un vigilante de fondo que el host entrega; el loop de ~3 min es el respaldo independiente. `cerrar` publica el reporte final y manda terminar a **los dos** vigilantes: nadie espera algo que no va a llegar |
-| **Conectado a Agentix** | Cada tarea que el Director acepta se registra sola con `origen = teams` en el mismo núcleo que `aa:` (ciclo, memoria KDD, contratos, AST, diseño, preservación, tablero). Si el registro falla queda pendiente y reintenta; nunca frena el trabajo |
+| **Decisiones** | El Director decide cuando sabe, **investiga en internet por su cuenta** cuando duda, y solo te pregunta lo que no está en internet o bloquea por seguridad. Lo que te pregunta se vuelve una **decisión** con opciones, impacto y recomendación; la respondes en el dashboard (🗳️), desde el teléfono o en el chat |
+| **No se duerme** | Los vigilantes duran hasta 12 h y solo terminan por `pausa`, `cerrar` o todo en verde. Si el vigilante de un rol murió o queda trabajo al intentar terminar su turno, el gancho de parada del host le pide seguir (freno anti-bucle: 3 intentos y te avisa). Reencolar las mismas tareas **no** despierta a Cursor; `teams: diagnostico` dice con evidencia del disco (archivos tocados, reportes, rondas) si el constructor está TRABAJANDO o PARADO, y te da el mensaje exacto para pegarle si paró |
+| **Nadie espera en silencio** | Un constructor con tarea y sin archivos tocados pide trabajo tras 3 rondas; una PARCIAL estancada 10 min sin archivos tocados pasa a decisión del Director; el semáforo (verde / ámbar / rojo, con la razón en palabras) jamás muestra un verde inventado |
+| **Una barra que dice la verdad** | 🟩 terminadas · 🟦 en curso · 🟧 parciales / esperan por ti · 🟥 faltan. Solo se detiene tras **recorrer todo**: todo en verde → `TERMINADO`; solo quedan decisiones tuyas → `ESPERA_DUENO` |
+| **Conectado a Agentix** | Cada tarea que el Director acepta se registra con `origen = teams` en el mismo núcleo que `aa:` (ciclo, memoria KDD, contratos, AST, diseño, preservación, dashboard) y solo cuenta cuando el ciclo existe en la base; una base que nunca se migró se reporta con su reparación en vez de un «registrada» falso. Añade `--aprendizaje="…" --tipo=decision\|patron\|error` al aceptar para meter una lección real en el grafo KDD |
 
-Agentix **observa**; no corre una máquina de estados. Límites honestos: el despertar depende de que el host entregue la tarea de fondo (`teams: comprobar` dice qué está verificado), y Cursor + Claude Code reales a la vez sigue `NO_EJECUTADO` en la matriz.
+**La Oficina 3D.** La pestaña **🏢 Oficina** del dashboard muestra el trabajo mientras ocurre, refrescada cada 2 s: quién está en su puesto, la entrega que viaja al Director, la auditoría, el confeti al aceptar, el sobre rojo al devolver, una pizarra con la cola, una pantalla de flujo que se va construyendo módulo a módulo, el semáforo y un reloj. Funciona con TEAMS completo, TEAMS individual o **un solo modelo** trabajando con `aa:`.
+
+Agentix **observa**; no corre una máquina de estados. Límites honestos: Agentix no puede escribir en el chat de Cursor — si el constructor para, lo detecta y te da el mensaje. El despertar depende de que el host entregue la tarea en segundo plano (`teams: comprobar` dice qué está verificado). Cursor + Claude Code reales a la vez está verificado en campañas reales (glowly, medinet) pero es `NO_EJECUTADO` en la matriz formal, y nadie ha visto a Cursor reanudarse con el `followup_message` del gancho de parada.
 
 ### El resto del martillo
 
@@ -243,21 +290,102 @@ Agentix **observa**; no corre una máquina de estados. Límites honestos: el des
 
 ---
 
+## 📱 Chatea con Agentix desde tu teléfono — Telegram y ntfy
+
+Dos canales **opcionales**, apagados por defecto. Hacen lo mismo: Agentix **te escribe** cuando pasa algo y tú puedes **contestar** desde el teléfono. Telegram es el chat completo; ntfy es la opción ligera.
+
+### Lo que Agentix te manda (sin que escribas primero)
+
+Un servicio en segundo plano mira cada proyecto cada 20 segundos y te avisa:
+
+| Modo | Recibes |
+|---|---|
+| **TEAMS** | Cada tarea aceptada (con avance, tiempo **medido** trabajado y lo que falta), todo aceptado, una decisión que te necesita (**con botones**), un problema que dura 5 minutos (constructor parado, vigilante caído, solicitud sin respuesta), el cierre y un reporte cada hora mientras el canal está activo |
+| **Individual `aa:`** (solo Claude, solo Cursor o los dos) | Cada ciclo cerrado con su resultado — en cuanto el ciclo queda registrado (el commit lo dispara) |
+
+Agrupa, nunca repite (un problema como mucho una vez por hora) y tiene tope diario. Cada aviso lleva `[proyecto]` delante. Funciona igual si usas Claude Code, Cursor o los dos: los avisos salen del estado del proyecto en disco, no del modelo.
+
+### Telegram: **un solo bot para todos tus proyectos**
+
+Un bot de Telegram solo lo puede leer un proceso, así que Agentix usa **un bot por persona** y todos los proyectos de esa persona se registran en él. Cada persona (o cliente) crea **su propio** bot: nadie comparte token ni ve proyectos ajenos.
+
+```text
+1. En Telegram habla con @BotFather → /newbot → nombre → un usuario que termine en "bot". Copia el token (es un secreto: nunca lo pegues en un chat).
+2. En CUALQUIER proyecto con Agentix (3.24.1+), en tu propia terminal — una vez por máquina:
+       node .agentic/grafo/telegram-hub.cjs activar
+   Pega el token cuando lo pida. Imprime un PIN de 6 dígitos (vale 15 min y 5 intentos).
+3. En Telegram abre tu bot, pulsa Iniciar y envía:  /start 123456   (tu PIN). Solo ese usuario queda emparejado; cualquier otro chat se ignora.
+4. Registra cada proyecto:
+       node .agentic/grafo/telegram-hub.cjs registrar        (dentro del proyecto)
+   Después de esta primera vez, `akdd init` y `akdd update` registran un proyecto en tu bot solos.
+5. Deja UN servicio corriendo para todos los proyectos (en cualquier carpeta):
+       node .agentic/grafo/telegram-hub.cjs servir
+   Sin esa ventana abierta el bot no oye ni envía nada.
+```
+
+**Cómo hablarle**
+
+| Escribes | Va a |
+|---|---|
+| `@medinet estado` · `@medinet @cursor sigue con T-12` · `@medinet D-003 A` | Ese proyecto (`@cursor` = su constructor, `@director`, `@todos`; `D-003 A` responde la decisión D-003) |
+| Una respuesta a un aviso | El proyecto de **ese aviso** — sin escribir el nombre |
+| Texto sin más | El proyecto actual (`/proyecto <nombre>` lo cambia; con un solo proyecto, ese) |
+| `/proyectos` · `/estado todos` | Todos los proyectos con su canal, semáforo y avance |
+| `/estado` · `/barra` · `/tareas` · `/decisiones` · `/buzon` (opcionalmente seguidos de un nombre de proyecto) | Vista de producción: nunca código, nunca secretos |
+
+Los avisos traen los botones de decisión (A / B / C) y actúan **solo sobre ese proyecto**. Todo lo que escribes es **dato tuyo**: responder una decisión y pedir el estado son lo único que se ejecuta solo; lo demás lo lee el Director/constructor del proyecto, que confirma en su propio chat cualquier acción destructiva. Un mensaje que pida cambiar reglas, revelar secretos o salirse del proyecto no se obedece.
+
+**Dónde vive cada cosa.** Token y emparejado: `~/.agentix/telegram/` (fuera de cualquier repo, modo 0600, nunca se versiona). También se admite un bot por proyecto (`telegram-bridge.cjs activar` dentro de él), pero un proyecto registrado en tu bot único usa ese y su bot propio queda apagado.
+
+### ¿Con qué rapidez ve el modelo lo que escribes?
+
+El mensaje llega al buzón del proyecto **al instante** y el bot responde «📥 recibido». Lo que cambia es cuándo lo lee el modelo:
+
+| Dónde | Cuándo lo ve |
+|---|---|
+| **Claude Code en TEAMS** | Casi al instante (su vigilante despierta con él) y otra vez inyectado en su siguiente turno |
+| **Cursor en TEAMS** | Cuando despierta su vigilante o en su siguiente ronda (cada pocos minutos) |
+| **Claude Code, individual** | En tu **siguiente mensaje** a Claude; si está quieto, no lo ve antes |
+| **Cursor, individual (sin TEAMS)** | **No automáticamente**: el hook de Cursor no puede inyectar contexto. Queda guardado y reconocido, pero Cursor no lo leerá solo |
+
+Los acuses los ves en tu chat: 📥 recibido → 👀 entregado (el modelo lo vio) → 📖 leído → ✅ atendido (con la respuesta). Si nadie lo atiende en 10 minutos se escala una vez.
+
+### ntfy (ligero, sin cuenta)
+
+```text
+ntfy: activar        → imprime un tema largo y aleatorio y los pasos; instala la app gratuita «ntfy» y suscríbete a ese tema
+ntfy: estado · probar · resumen · desactivar
+```
+
+Los mismos avisos que Telegram, con botones para las decisiones; lo que escribes en el tema llega al mismo buzón (`D-001 <decisión>` responde una decisión, `estado` devuelve el avance). El tema es el único secreto (nunca se versiona); `--pin=…` exige un PIN al principio de tus mensajes y `--servidor=…`/`--token=…` usan tu propio servidor ntfy. Corre `node .agentic/grafo/ntfy-bridge.cjs servir` en segundo plano.
+
+### Verificado y no verificado
+
+- El emparejado y `/proyectos` se hicieron con un bot real. El reparto, los avisos, los botones de decisión y los acuses están verificados con un servidor de Telegram simulado (un mutante que quita la comprobación del usuario autorizado es detectado), **todavía no en vivo**.
+- ntfy está verificado contra un servidor simulado, no con un teléfono real.
+- Si la ventana del servicio se cierra, no llega nada. Córrelo como tarea en segundo plano o al iniciar sesión.
+
+---
+
 ## Dashboard
 
-`akdd dashboard` → localhost:3847. La barra de pestañas trae las vistas originales más las páginas añadidas en 3.20.1:
+`akdd dashboard` abre el tablero en **el puerto propio de tu proyecto**: 3847 + (un hash de su carpeta % 100), siempre el mismo para el mismo proyecto, así dos proyectos nunca se tapan (`AKDD_DASH_PORT` lo manda; si está ocupado se usa el siguiente libre y lo imprime). La barra de pestañas:
 
 | Pestaña | Qué ves |
 |---|---|
-| 🧠 **Knowledge Graph** | Memoria KDD, Code Structure y Combinado — tres grafos en 3D real, con vista **☰ Tabla** y el tour guiado. Sin cambios |
+| 🧠 **Knowledge Graph** | Memoria KDD, Code Structure y Combined — tres grafos en 3D real, con vista **☰ Tabla** y la visita guiada |
 | 📚 **Project Docs** | Documentación por módulo y descripciones de archivos en lenguaje natural |
 | 🛡️ **Preservation Intel** | Contratos, Creative Engine, MemCurator, memoria de diseño |
 | ⏱ **Línea de Tiempo** | Tiempo medido por tarea y módulo |
-| 🧬 **Memoria** (`/memoria`) | Qué hay guardado, la cola y los dead-letters, procedencia, registros legacy, estados de salud independientes |
+| 🧬 **Memoria** (`/memoria`) | Qué hay guardado, la cola y las dead-letters, procedencia, registros legados, estados de salud independientes |
 | 📦 **Contexto y esfuerzo** (`/contexto`) | Nivel de esfuerzo, presupuesto acumulado, reducción neta de payload y *cómo se midió*, cobertura por host |
-| 🔄 **Actualización** (`/actualizacion`) | Versión instalada, compatibilidad del esquema, la última verificación, qué se preservó, el respaldo, qué hacer |
+| 🏢 **Oficina** (`/oficina`) | La oficina 3D: quién trabaja en qué, en vivo — TEAMS completo, individual o un solo modelo |
+| 🗳️ **Decisiones** | Lo que te preguntan los modelos, lo que respondiste y lo que ya se ejecutó (pendiente → respondida → ejecutada) |
+| 🔄 **Actualización** (`/actualizacion`) | Versión instalada, compatibilidad de esquema, la última verificación, lo preservado, el respaldo, qué hacer |
 
-Las páginas nuevas son de solo lectura y paginadas; abrirlas nunca escribe. La salud muestra estados independientes — servicio, legible, esquema, búsqueda, última escritura verificada, cola, actualización — y el dashboard **no se pone verde** si el esquema está roto aunque HTTP responda 200. Un dato ausente dice "no disponible", nunca `0`. Una API de solo lectura (`/api/v1/summary`, `/tasks`, `/contracts`, `/incidents`, `/usage`, `/restore-points`…) y las librerías de grafos se sirven localmente — sin CDN.
+**Datos reales sin reiniciar el servidor (3.23.7).** Las tarjetas de arriba y las pestañas Oficina, Memoria, Contexto y Actualización se actualizan en vivo, sin recargar. El resto de la página (los grafos, la estructura de código, los tiempos, la visita, los docs) se genera desde la base y los archivos: cuando cualquiera de ellos cambia, el servidor regenera la página en un proceso aparte (unos 2–3 s en un proyecto grande, sin congelar el servidor), muestra **«Hay datos nuevos — Actualizar ahora»** y se recarga sola cuando dejas de usar el tablero 30 s (`AKDD_DASH_AUTO_REFRESH_MS`, `0` = solo el botón), devolviéndote a donde estabas: pestañas, filtros, búsqueda, nodo elegido y scroll. Límite honesto: el grafo no se redibuja en sitio — la página se recarga y la cámara 3D se reinicia.
+
+Las páginas son de solo lectura y paginadas; abrir una nunca escribe. La salud muestra estados independientes — servicio, legible, esquema, búsqueda, última escritura verificada, cola, actualización — y el dashboard **no sale en verde** si el esquema está roto aunque HTTP responda 200. Un dato ausente dice «no disponible», nunca `0`. Una API de solo lectura (`/api/v1/summary`, `/tasks`, `/contracts`, `/incidents`, `/usage`, `/restore-points`, `/teams`, `/oficina`…) y las librerías de grafos se sirven en local — sin CDN.
 
 Todas las capturas de abajo son de un proyecto SaaS real en producción (~414 archivos).
 
@@ -332,6 +460,8 @@ akdd health
 
 Instalar el CLI nuevo **no** toca ningún proyecto; cada proyecto se actualiza cuando tú lo ordenas. `akdd update` **inspecciona → respalda → aplica → verifica → reporta**, y solo sale con `0` cuando el resultado se puede respaldar con evidencia:
 
+Tras actualizar, un proyecto se registra solo en tu bot de Telegram si hay uno configurado en la máquina. Actualizar un proyecto en medio de una campaña TEAMS: pon antes el canal en pausa (`teams: pausa`), actualiza, cierra y reabre Cursor en ese proyecto (su servidor MCP guarda el código viejo en memoria) y luego `teams: continuar` en Claude Code **y** en Cursor.
+
 | Paso | Qué ocurre |
 |---|---|
 | **Inspeccionar** | Lee el paquete que instalaste, tus archivos y la estructura *real* de `memoria.db` (tablas, columnas, índices) — no solo `config.md` ni la versión de npm. Una base vieja sin registro de migraciones se inspecciona por capacidad; `user_version = 0` jamás se asume como "vacía". |
@@ -367,11 +497,11 @@ Opciones: `--check` (solo el plan), `--json` (un único documento JSON por stdou
 
 ## Qué tan maduro está cada órgano (honestidad por niveles)
 
-**🥇 Probado en batalla** (uso real repetido): el pipeline `aa:`, la memoria de 4 capas + búsqueda híbrida, los gates clásicos (Spec/TDD/Security/Regression), el registro automático por commit, los checkpoints, los locks multi-instancia, los grafos del dashboard, el MCP, la contención a nivel de línea, Front/Back en paralelo.
+**🥇 Probado en batalla** (uso real repetido, incluidas campañas reales en proyectos vivos): el pipeline `aa:`, la memoria de 4 capas + búsqueda híbrida, los gates clásicos (Spec/TDD/Security/Regression), el registro automático por commit, los checkpoints, los locks multi-instancia, los grafos del dashboard, el MCP, la contención a nivel de línea, Front/Back en paralelo, **TEAMS (Director + constructor, canal, vigilantes, semáforo, decisiones)** y el **update** transaccional.
 
-**🥈 Verificado con fixtures, Git real, SQLite real y navegador real** (escenarios controlados, aún no meses de producción): cierre por evidencia, la actualización transaccional y sus upgrades desde los paquetes npm reales, router de esfuerzo y paquetes de contexto, contratos por test, archivos protegidos, radio de impacto AST, git hooks sobre el índice y el canario, puntos de restauración, **memoria con procedencia, cola durable, recuperación por capas y compactación**, el lanzador MCP global, las páginas del dashboard, la medición de tiempo.
+**🥈 Verificado con fixtures, Git real, SQLite real y navegador real** (escenarios controlados, aún no meses de producción): el cierre con evidencia, el router de esfuerzo y los paquetes de contexto, los contratos por test, los archivos protegidos, el radio de impacto por AST, los hooks de git sobre el índice y el canario, los puntos de restauración, la memoria con procedencia, la cola durable, la recuperación por capas y la compactación, el lanzador MCP global, las páginas del dashboard y su refresco vivo, la oficina 3D, el riesgo por evidencia, la medición de tiempo, el `aa:` implícito por los hooks del host, el gancho de parada de continuidad, **Telegram (bot único, reparto, botones, acuses) y ntfy contra servidores simulados**.
 
-**🥉 Lógica verificada, host en vivo NO verificado**: los adaptadores de host-hooks dentro de cada IDE, los avisos de WhatsApp de punta a punta.
+**🥉 Lógica verificada, host en vivo NO verificado**: los adaptadores de host-hooks dentro de cada IDE (incluido Cursor reanudándose con el gancho de parada), Telegram y ntfy con un teléfono real de punta a punta, los avisos por WhatsApp, el juez en sombra (solo mide; aún tiene muy pocos positivos reales para concluir algo).
 
 **🔒 Beta privada**: colaboración en equipo (memoria compartida).
 
@@ -520,6 +650,22 @@ akdd tiempo inicio "<tarea>" · akdd tiempo fin   # Duración medida (trabajado 
 akdd tiempos [módulo]          # Tiempo por módulo — medido, jamás estimado
 ```
 
+### TEAMS, chat del teléfono, buzón y decisiones (3.21 → 3.24)
+```bash
+akdd teams <comando>           # = node .agentic/grafo/teams.cjs: activar · modo · plan · constructor · iniciar · pausa · continuar
+                               #   estado · avance · reporte · comprobar · diagnostico · tarea · corregir · aceptar [--aprendizaje="…" --tipo=decision|patron|error]
+                               #   decision · decidir · cerrar · reabrir · heredar · observar [--reintentar]
+akdd telegram hub activar      # Bot único de Telegram para todos tus proyectos (también: node .agentic/grafo/telegram-hub.cjs …)
+akdd telegram hub registrar    #   este proyecto se une (automático tras init / update)
+akdd telegram hub servir       #   el ÚNICO servicio para todos los proyectos · también: proyectos · estado · pin · quitar · desactivar
+akdd telegram <activar|estado|servir|pin|enviar|desactivar>   # un bot por proyecto (un proyecto registrado en el bot único usa ese)
+akdd ntfy <activar|estado|probar|resumen|servir|desactivar>   # avisos al teléfono con la app gratuita ntfy
+akdd buzon [leer|responder|estado]                            # el buzón de lo que escribes desde el teléfono
+akdd decisiones [listar|responder D-001 --opcion=…|aplicada D-001 "…"]   # el tablero de decisiones del dueño desde la terminal
+akdd cobertura [--dias=N] [--json]                            # cuánto de lo que haces queda registrado en Agentix
+akdd reconciliar [--dias=N] [--aplicar]                       # registra commits pasados sin ciclo (como `historico`)
+```
+
 ### Puente ClickUp · WhatsApp (opt-in — apagados por defecto)
 ```bash
 akdd cu on · akdd cu set-list <id> · akdd cu sprint [--auto] · akdd cu done <task-id>
@@ -558,6 +704,12 @@ akdd locks release-all         # Libera todo (limpieza de sesión)
 10. **La compactación es una medida de payload, no una promesa.** El benchmark mide bytes que Agentix controla, de forma determinista; los tokens son estimaciones `bytes/4`. Cuando hace falta recuperar el original, el ahorro se encoge — y en algunos casos es cero por diseño.
 11. **El redactor reduce riesgo; no es un DLP.** Las expresiones regulares no atrapan secretos que no traen contexto. Usa `.agentic/privacy-policy.json` para denegar rutas y campos.
 12. **El despertar es del host, y solo se verifica con una lectura.** El watcher detecta; al modelo lo despierta la tarea en segundo plano (o el loop) de su host. Agentix nunca da el despertar por verificado hasta que la sesión confirma una lectura tras un aviso; donde no hay ninguno el modo es `MANUAL_ONLY`.
+13. **Cursor en modo individual no lee solo los mensajes de tu teléfono.** Su hook no puede inyectar contexto en el prompt; el mensaje queda guardado y reconocido. En TEAMS los lee en su ronda o cuando despierta su vigilante. Claude Code los lee en tu siguiente mensaje (al instante en TEAMS).
+14. **Agentix no puede escribir en el chat de Cursor.** Si el constructor para, Agentix lo detecta con evidencia y te da el mensaje para pegarle (también en el teléfono). Reencolar tareas no lo despierta, y nadie ha visto a Cursor reanudarse con el `followup_message` del gancho de parada.
+15. **Telegram está verificado contra un servidor simulado**; con un bot real solo se ejercitaron el emparejado y `/proyectos`. Los avisos se detienen si cierras la ventana del servicio.
+16. **El trabajo que nunca commiteas solo se avisa.** Agentix registra al commitear y al aceptar TEAMS. Una tarea aceptada por TEAMS y luego commiteada puede contarse dos veces (un ciclo `teams` y un ciclo `commit`).
+17. **La evidencia de tests sobre un árbol que se está editando suele salir `UNVERIFIED`.** Si el constructor edita archivos mientras corren las pruebas, la huella del sujeto cambia. El arreglo real — correr las pruebas en una copia limpia del commit — todavía no está construido.
+18. **El tablero vivo recarga la página, no redibuja el grafo en sitio.** Las tarjetas y las pestañas Oficina/Memoria/Contexto/Actualización van en vivo; el resto se recarga solo cuando dejas de usarlo.
 
 ---
 
@@ -595,7 +747,7 @@ Los resultados, el log y el tarball exacto quedan en `_output/release-<version>/
 
 ## Estado y transparencia
 
-Agentix es un software **joven y en evolución**. La 3.20 se construyó preguntando, gate por gate, si un verde se podía falsificar — y cerrándolo donde se podía; la 3.20.1 sumó memoria que se puede rastrear, una actualización que se demuestra a sí misma y la base para un modo TEAMS reconstruido. Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue.
+Agentix es un software **joven y en evolución**. La 3.20 se construyó preguntando, gate por gate, si un verde se podía falsificar — y cerrándolo donde se podía; la 3.20.1 sumó memoria que se puede rastrear, una actualización que se demuestra a sí misma y la base para un modo TEAMS reconstruido. Aun así, **una auditoría no certifica cero defectos** — si encuentras algo, abre un issue. Desde entonces, la 3.21–3.24 reconstruyó TEAMS desde cero sobre el protocolo manual que funcionó en producción, añadió la oficina 3D, un tablero vivo, el chat del teléfono (Telegram y ntfy), el `aa:` implícito y una tanda de correcciones de campañas reales, encontradas auditando Agentix de forma continua mientras corría en proyectos vivos.
 
 La promesa real, sin inflar:
 

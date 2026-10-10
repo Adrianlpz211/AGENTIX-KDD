@@ -106,6 +106,7 @@ test('la oficina 3D en navegador real: sin TEAMS juegan; los comandos los mueven
     await page.waitForFunction(() => typeof window.mundoSimular === 'function' && !!document.querySelector('#escena canvas'), null, { timeout: 30000 });
     const sitios = (r) => Object.fromEntries(r.filter((x) => !/^(perro|clawd)/.test(String(x.k))).map((x) => [x.k, x.sitio || ('→' + x.destino)]));
     const zona = (v) => /^(sofa|bean)/.test(v) ? 'sala' : /^esc_/.test(v) ? 'puesto' : v;
+    const trabaja = (x) => x.modo === 'type' || x.modo === 'wave';   // 'wave' = Clawd la está saludando; sigue en su puesto
     const paso = (nombre, seg, opc) => page.evaluate(([n, sg, o]) => { window.mundoSimular(n, o); return window.mundoPaso(sg); }, [nombre, seg, opc || {}]);
     // 1) sin TEAMS: los cinco en la sala de descanso jugando; los perros duermen
     let r = await paso('apagado', 1, { silencioso: true });
@@ -125,17 +126,17 @@ test('la oficina 3D en navegador real: sin TEAMS juegan; los comandos los mueven
     assert.ok(/galleta_director/.test(z.director) && /galleta_cons/.test(z.cons), JSON.stringify(z));
     assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.vivo && x.estado !== 'dormido'));
     // 6) trabajo real: construyen y revisan; la auditoría pone a teclear a los tres sub-agentes
-    r = await paso('trabajo', 30); assert.ok(r.find((x) => x.k === 'director').modo === 'type' && r.find((x) => x.k === 'cons').modo === 'type');
+    r = await paso('trabajo', 30); assert.ok(trabaja(r.find((x) => x.k === 'director')) && trabaja(r.find((x) => x.k === 'cons')));
     r = await paso('parado', 6); assert.equal(r.find((x) => x.k === 'cons').modo, 'read', 'el constructor que no avanza se ve parado (sentado, sin teclear)');
     r = await paso('trabajo', 4);
-    r = await paso('auditoria', 4); assert.deepStrictEqual(['fe', 'be', 'neg'].map((k) => r.find((x) => x.k === k).modo), ['type', 'type', 'type']);
+    r = await paso('auditoria', 4); assert.ok(['fe', 'be', 'neg'].every((k) => trabaja(r.find((x) => x.k === k))), 'los tres auditan: ' + JSON.stringify(['fe', 'be', 'neg'].map((k) => r.find((x) => x.k === k).modo)));
     // 7) sin vigilante los perros se van a dormir, aunque la gente siga en su puesto
     r = await paso('alarma', 14); assert.ok(r.filter((x) => String(x.k).startsWith('perro')).every((x) => x.estado === 'dormido' && !x.vivo));
     // 8) a los 3 min sin nada que hacer se levantan y se van a descansar (se juega en la sala)
     r = await paso('espera3', 40); assert.deepStrictEqual(Object.values(sitios(r)).map(zona), ['sala', 'sala', 'sala', 'sala', 'sala']);
     // un solo modelo (sin TEAMS): quien trabaja con aa: se sienta a trabajar y el otro sigue descansando
     r = await paso('solo_claude', 14, { silencioso: true }); z = sitios(r);
-    assert.equal(z.director, 'esc_director'); assert.equal(zona(z.cons), 'sala'); assert.equal(r.find((x) => x.k === 'director').modo, 'type');
+    assert.equal(z.director, 'esc_director'); assert.equal(zona(z.cons), 'sala'); assert.ok(trabaja(r.find((x) => x.k === 'director')), 'el Director trabaja (o lo está saludando Clawd): ' + JSON.stringify(r.find((x) => x.k === 'director')));
     r = await paso('solo_cursor', 16); z = sitios(r);
     assert.equal(z.cons, 'esc_cons'); assert.equal(zona(z.director), 'sala');
     // la mascota camina y saluda (no está clavada en un sitio)
