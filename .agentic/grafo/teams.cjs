@@ -301,6 +301,9 @@ function accionable(e, rol) {
 // Caso real (glowly, 05/10/2026): el Director ya no tenía nada que revisar, el constructor repetía «el canal sigue sin tareas
 // nuevas» ronda tras ronda y los dos se quedaron esperándose ~20 min hasta que el dueño intervino. Ahora el constructor, a la
 // tercera ronda idéntica, deja una SOLICITUD en el canal; el vigilante del Director lo despierta con ella.
+/* Carpetas que escriben las HERRAMIENTAS (el propio Agentix, Claude Code, Cursor, git, el editor), no el constructor. Caso medinet (10/10/2026): el temporizador
+   de Claude Code movía `.claude/scheduled_tasks.lock` cada pocos minutos y eso hacía creer que Cursor «trabajaba» durante 41 h mientras estaba parado. */
+const RUIDO_DE_HERRAMIENTAS = /^(\.agentic|\.legion|_output|\.claude|\.cursor|\.git|\.vscode|\.idea|\.next|\.turbo|node_modules)\//;
 /** Último cambio en archivos del proyecto: { t, archivo } (t = 0 si no hay nada sin guardar en git); null = no se puede saber (sin git). */
 function cambioReciente(root) {
   if (process.env.AKDD_TEAMS_ULTIMO_CAMBIO) { const t = Number(process.env.AKDD_TEAMS_ULTIMO_CAMBIO); return t ? { t, archivo: 'archivo de prueba' } : null; }
@@ -310,7 +313,7 @@ function cambioReciente(root) {
     if (r.status !== 0) return null;
     let max = 0, quien = '';
     for (const l of String(r.stdout).split(String.fromCharCode(10))) {
-      const p = l.slice(3).replace(/^"|"$/g, '').replace(/.* -> /, ''); if (!p || /^(\.agentic|\.legion|_output)\//.test(p)) continue;
+      const p = l.slice(3).replace(/^"|"$/g, '').replace(/.* -> /, ''); if (!p || RUIDO_DE_HERRAMIENTAS.test(p)) continue;
       try { const m = fs.statSync(path.join(root, p)).mtimeMs; if (m > max) { max = m; quien = p; } } catch { /* borrado o ilegible */ }
     }
     return { t: max, archivo: quien };

@@ -95,34 +95,6 @@ akdd cobertura                                  ← how much of what you do is r
 
 **Optional, once you are running:** [get alerts and answer from your phone](#-chat-with-agentix-from-your-phone--telegram-and-ntfy) · [update an existing project](#updating--one-command-that-proves-what-it-did).
 
-# 1. Install the CLI
-npm install -g agentic-kdd
-
-# 2. In your project
-cd your-project
-akdd init
-
-# 3. Connect the MCP once for ALL your projects (recommended)
-akdd mcp --global
-
-# 4. Open Claude Code or Cursor and type:
-aa: configurar
-```
-
-From there, every task starts with `aa:`. The pipeline runs on its own and only stops you on a genuine STOP (a contradicted business rule, a broken test, a critical file).
-
-```
-aa: add pagination to the clients list
-aa: --dry-run refactor the payment validation   ← proposes, writes nothing
-aa: explore how to model recurring invoices     ← thinks with you, writes nothing
-aa: sprint — full invoicing module              ← chained tasks; each feeds the next
-aa: aprende                                     ← absorbs work done outside the pipeline
-audit: auditar                                  ← 7 parallel auditors; read-only
-akdd dashboard                                  ← see everything
-```
-
-> The command vocabulary (`aa:`, `audit:`) is Spanish — the task you write after it can be in any language. Chat prefixes are instructions for the agent, not shell commands.
-
 ---
 
 ## The daily cycle — what `aa:` does

@@ -1187,3 +1187,19 @@ test('H-007 — «Nadie avanza» no sale (ni semáforo ROJO) mientras el constru
   process.env.AKDD_TEAMS_ULTIMO_CAMBIO = String(t0 - 60 * 60000);          // nada desde hace una hora: ahora sí
   try { const s = T.salud(root, { ahora: tarde }); assert.ok(s.alertas.some((a) => /Nadie avanza: hay 1 cosa/.test(a.msg)), JSON.stringify(s.alertas)); } finally { delete process.env.AKDD_TEAMS_ULTIMO_CAMBIO; }
 });
+
+test('H-008 — un archivo de herramientas (.claude/scheduled_tasks.lock) NO es trabajo del constructor: sin código tocado ni reportes, el diagnóstico es PARADO', () => {
+  const root = proyecto(); arrancado(root);
+  const git = (...a) => require('child_process').spawnSync('git', a, { cwd: root, encoding: 'utf8' });
+  git('init', '-q'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 'x');
+  fs.writeFileSync(path.join(root, 'README.md'), 'x'); git('add', 'README.md'); git('commit', '-q', '-m', 'base', '--no-verify');
+  salida(root, 'tarea', 'Algo que hacer', '--criterio=a', '--sin-contexto');
+  // lo que mueve el temporizador de Claude Code y el IDE: ruido de herramientas
+  for (const rel of ['.claude/scheduled_tasks.lock', '.cursor/estado.json', '.vscode/s.json']) { fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), String(Date.now())); }
+  const ev = () => T.evidenciaConstructor(root, T.calcular(root));
+  assert.equal(ev().veredicto, 'PARADO', ev().texto);
+  assert.match(ev().texto, /ningún archivo modificado sin guardar/);
+  // código real tocado: ahora sí trabaja
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true }); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'export const a = 1;');
+  assert.equal(ev().veredicto, 'TRABAJANDO'); assert.match(ev().texto, /src\/a\.ts/);
+});

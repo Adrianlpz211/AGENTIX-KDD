@@ -1924,6 +1924,18 @@
           "Q1 sube"
         ]
       ]
+    },
+    {
+      "id": "TEAMS-v4-revision-h-008",
+      "doc": "TEAMS",
+      "requisito": "Un archivo de herramientas (.claude, .cursor, .git…) no cuenta como trabajo del constructor",
+      "alcance": "proceso real (teams.cjs)",
+      "pruebas": [
+        [
+          "teams-v4",
+          "H-008"
+        ]
+      ]
     }
   ]
 }
