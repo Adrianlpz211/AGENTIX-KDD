@@ -47,8 +47,15 @@ const PIN_INTENTOS = 5;
 const MAX_POR_MIN = 20;
 const TICK_CADA_MS = 20 * 1000;
 
-const leerConfig = (root) => leerJ(arch(root, 'config.json'), null);
+const leerConfigPropia = (root) => leerJ(arch(root, 'config.json'), null);
 const guardarConfig = (root, c) => escribirJ(arch(root, 'config.json'), c, true);
+/** Un proyecto usa SU bot si lo activó; si no, el bot único del dueño (telegram-hub.cjs) cuando el proyecto está registrado en él. */
+function leerConfig(root) {
+  const own = leerConfigPropia(root);
+  if (own && own.activo) return own;
+  try { const v = require('./telegram-hub.cjs').vistaProyecto(root); if (v) return v; } catch { /* sin hub */ }
+  return own;
+}
 const leerEstado = (root) => leerJ(arch(root, 'estado.json'), { offset: 0, enviados: 0, dia: '' });
 const guardarEstado = (root, e) => escribirJ(arch(root, 'estado.json'), e);
 
@@ -104,14 +111,15 @@ function trocear(texto, max = 3800) {
 function opcionesDe(texto) {
   return String(texto || '').split(/\s*[|;]\s*|\s*,\s*(?![^()]*\))/).map((x) => x.trim()).filter(Boolean).slice(0, 6);
 }
-function tecladoDecision(decision) {
+function tecladoDecision(decision, slug) {
   if (!decision || !decision.id) return undefined;
   const ops = opcionesDe(decision.opciones); if (!ops.length) return undefined;
-  const filas = []; for (let i = 0; i < ops.length; i += 2) filas.push(ops.slice(i, i + 2).map((o, k) => ({ text: corto(o, 40), callback_data: `d|${decision.id}|${i + k}` })));
+  const filas = []; for (let i = 0; i < ops.length; i += 2) filas.push(ops.slice(i, i + 2).map((o, k) => ({ text: corto(o, 40), callback_data: (slug ? `d|${slug}|` : 'd|') + `${decision.id}|${i + k}` })));
   return { inline_keyboard: filas };
 }
 
 async function enviarA(cfg, chatId, texto, extra) {
+  if (cfg.prefijo && !String(texto).startsWith(cfg.prefijo)) texto = cfg.prefijo + String(texto == null ? '' : texto); // bot único: cada aviso dice de qué proyecto es
   const trozos = trocear(texto); let ult = { ok: true };
   for (let i = 0; i < trozos.length; i++) {
     const p = Object.assign({ chat_id: chatId, text: trozos[i], disable_web_page_preview: true }, extra || {});
@@ -119,6 +127,7 @@ async function enviarA(cfg, chatId, texto, extra) {
     ult = await api(cfg, 'sendMessage', p);
     if (!ult.ok && ult.esperar) { await new Promise((r) => setTimeout(r, Math.min(ult.esperar, 5) * 1000)); ult = await api(cfg, 'sendMessage', p); }
     if (!ult.ok) return ult;
+    if (cfg.hub && ult.resultado) { try { require('./telegram-hub.cjs').recordarMensaje(ult.resultado.message_id, cfg.slug); } catch { /* auxiliar */ } }
   }
   return ult;
 }
@@ -128,7 +137,7 @@ async function difundir(root, { titulo, texto, prioridad, decision }) {
   const cfg = leerConfig(root); if (!cfg || !cfg.activo || !cfg.chat_id) return { ok: false, causa: 'NO_EMPAREJADO' };
   const est = leerEstado(root); if (est.dia !== hoy()) { est.dia = hoy(); est.enviados = 0; }
   if (est.enviados >= (cfg.max_dia || 300)) return { ok: false, causa: 'TOPE_DIARIO' };
-  const r = await enviarA(cfg, cfg.chat_id, (titulo ? titulo + NL + NL : '') + String(texto == null ? '' : texto), { disable_notification: (prioridad || 3) <= 2, reply_markup: tecladoDecision(decision) });
+  const r = await enviarA(cfg, cfg.chat_id, (titulo ? titulo + NL + NL : '') + String(texto == null ? '' : texto), { disable_notification: (prioridad || 3) <= 2, reply_markup: tecladoDecision(decision, cfg.hub ? cfg.slug : undefined) });
   if (r.ok) { const f = leerEstado(root); f.enviados = (f.dia === est.dia ? (f.enviados || 0) : 0) + 1; f.dia = est.dia; guardarEstado(root, f); }
   return { ok: r.ok, causa: r.ok ? undefined : r.causa };
 }
@@ -230,7 +239,7 @@ async function procesarUpdate(root, cfg, u, ctx) {
     if (c === 'decisiones') {
       const d = salud(root); const ds = (d && d.cola && d.cola.decisiones_dueno) || [];
       if (!ds.length) await enviarA(cfg, chat.id, 'No hay decisiones tuyas pendientes.');
-      for (const x of ds.slice(0, 5)) await enviarA(cfg, chat.id, `❓ ${x.id} — ${x.titulo}${x.detalle ? NL + corto(x.detalle, 500) : ''}${x.opciones ? NL + 'Opciones: ' + x.opciones : ''}${x.recomendacion ? NL + 'Recomiendo: ' + x.recomendacion : ''}`, { reply_markup: tecladoDecision(x) });
+      for (const x of ds.slice(0, 5)) await enviarA(cfg, chat.id, `❓ ${x.id} — ${x.titulo}${x.detalle ? NL + corto(x.detalle, 500) : ''}${x.opciones ? NL + 'Opciones: ' + x.opciones : ''}${x.recomendacion ? NL + 'Recomiendo: ' + x.recomendacion : ''}`, { reply_markup: tecladoDecision(x, cfg.hub ? cfg.slug : undefined) });
       return { accion: 'DECISIONES' };
     }
     if (c === 'buzon') {
@@ -320,6 +329,7 @@ async function pedirToken() {
 }
 async function main(argv, root) {
   const { opt, libres } = parseArgs(argv); const cmd = libres[0] || 'estado';
+  if (cmd === 'hub') return await require('./telegram-hub.cjs').main(libres.slice(1).concat(Object.entries(opt).map(([k, v]) => (v === true ? '--' + k : '--' + k + '=' + v))), root);
   if (cmd === 'activar') {
     const prev = leerConfig(root) || {};
     let token = String(opt.token && opt.token !== true ? opt.token : (process.env.AKDD_TELEGRAM_TOKEN || prev.token || '')).trim();
@@ -354,7 +364,9 @@ async function main(argv, root) {
     return 0;
   }
   const cfg = leerConfig(root);
+  if (cfg && cfg.hub && ['pin', 'desemparejar', 'servir', 'leer', 'desactivar'].includes(cmd)) { console.log('Este proyecto usa el bot ÚNICO («' + cfg.slug + '»): usa  node .agentic/grafo/telegram-hub.cjs ' + cmd + '  (o «hub ' + cmd + '» aquí).'); return 1; }
   if (cmd === 'estado') {
+    if (cfg && cfg.hub) { console.log('TELEGRAM_ACTIVO vía el bot ÚNICO · proyecto «' + cfg.slug + '» · bot @' + (cfg.bot && cfg.bot.username) + ' · ' + (cfg.chat_id ? 'chat EMPAREJADO' : 'chat SIN EMPAREJAR') + ' · servicio ' + (require('./telegram-hub.cjs').estadoServicio().vivo ? 'VIVO' : 'PARADO — node .agentic/grafo/telegram-hub.cjs servir')); return 0; }
     if (!cfg || !cfg.activo) { console.log('TELEGRAM_APAGADO — «activar» lo enciende (opcional; Agentix funciona igual sin esto).'); return 0; }
     const sv = estadoServicio(root); const est = leerEstado(root);
     console.log(`TELEGRAM_ACTIVO · bot @${cfg.bot && cfg.bot.username} · chat ${cfg.chat_id ? 'EMPAREJADO (' + (cfg.nombre || 'dueño') + ')' : 'SIN EMPAREJAR' + (cfg.pin && Date.now() < cfg.pin_expira ? ' (PIN vigente)' : ' (sin PIN: corre «pin»)')} · servicio ${sv.vivo ? 'VIVO (latido hace ' + sv.latido_hace_s + ' s)' : 'PARADO — lánzalo: node .agentic/grafo/telegram-bridge.cjs servir'} · avisos hoy ${est.dia === hoy() ? est.enviados : 0}`);
@@ -378,7 +390,7 @@ async function main(argv, root) {
   return 2;
 }
 
-module.exports = { main, activar: (root, a) => main(['activar', ...(a || [])], root), difundir, leerConfig, vuelta, procesarUpdate, servir, estadoServicio, opcionesDe, tecladoDecision, trocear, barraTexto, limpiar };
+module.exports = { _i: { api, enviarA, salud, procesarUpdate, limpiar, asegurarIgnorado, estadoServicio, leerConfigPropia, guardarConfigPropia: guardarConfig }, main, activar: (root, a) => main(['activar', ...(a || [])], root), difundir, leerConfig, vuelta, procesarUpdate, servir, estadoServicio, opcionesDe, tecladoDecision, trocear, barraTexto, limpiar };
 
 if (require.main === module) {
   let root = process.cwd(); const a = process.argv.slice(2); const i = a.findIndex((x) => x.startsWith('--root='));
