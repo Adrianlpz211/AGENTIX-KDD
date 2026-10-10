@@ -36,6 +36,15 @@ const GITHUB_REPO = 'Adrianlpz211/AGENTIX-KDD';
 const REPO_URL = `https://github.com/${GITHUB_REPO}`;
 const CLI_ROOT = path.join(__dirname, '..');
 
+/** Si en esta máquina ya hay un bot único de Telegram activo, el proyecto actualizado se registra solo en él. Nunca hace fallar el update. */
+function autoTelegram(R, projectPath) {
+  try {
+    const hub = require(path.join(CLI_ROOT, '.agentic', 'grafo', 'telegram-hub.cjs'));
+    const r = hub.autoRegistrar(projectPath);
+    if (r && r.ok) R.telegram = { slug: r.slug, ya: r.ya };
+  } catch { /* el registro en Telegram es un plus */ }
+}
+
 const SALIDA = {
   VERIFIED: 0, VERIFIED_WITH_WARNINGS: 0, NO_CHANGES_VERIFIED: 0, PLAN_READY: 0, NO_CHANGES_NEEDED: 0,
   BLOCKED: 1, UNVERIFIED: 2, ROLLED_BACK: 3, RECOVERY_REQUIRED: 4,
@@ -540,6 +549,7 @@ async function ejecutar(ctx) {
     R.not_verified.push('esquema de memoria.db incompleto por --no-migrate');
     return cerrarResultado(R, 'UNVERIFIED', { reason: 'SCHEMA_PENDING', ...legado(ctx, fuente, res, journal) });
   }
+  autoTelegram(R, projectPath);
   const huboCambios = res.escritos.length > 0 || (migracion && migracion.applied.length > 0) || res.obsoletosBorrados.length > 0;
   const estado = R.not_verified.length ? 'UNVERIFIED' : (R.warnings.length ? 'VERIFIED_WITH_WARNINGS' : (huboCambios ? 'VERIFIED' : 'NO_CHANGES_VERIFIED'));
   return cerrarResultado(R, estado, legado(ctx, fuente, res, journal));
@@ -636,6 +646,7 @@ async function sinCambios(ctx, plan) {
     R.warnings.push(...(f.warnings || []));
   }
   R.files = { written: 0, unchanged: plan.classification.entries.length, preserved: [], conflicts: [], protected: plan.classification.entries.filter((e) => e.accion === 'OMITIR').map((e) => e.rel) };
+  if (!problemas.length) autoTelegram(R, projectPath);
   if (problemas.length) { R.errors.push(...problemas.map((m) => ({ code: 'VERIFICACION_FALLIDA', message: m }))); return cerrarResultado(R, 'UNVERIFIED', { reason: 'VERIFICACION_FALLIDA', ...legado(ctx, ctx.fuente, null, null) }); }
   return cerrarResultado(R, R.warnings.length ? 'VERIFIED_WITH_WARNINGS' : 'NO_CHANGES_VERIFIED', { ...legado(ctx, ctx.fuente, { escritos: [], sinCambios: plan.classification.entries.map((e) => e.rel), personalizados: [], protegidos: [], obsoletosBorrados: [], obsoletosConservados: [], hashes: {} }, null) });
 }
@@ -654,6 +665,7 @@ function imprimir(R) {
   if (R.schema && R.schema.migrations && R.schema.migrations.applied) console.log(gris(`  · Esquema: ${R.schema.migrations.applied.length} migración(es) aplicada(s), ${(R.schema.migrations.adopted || []).length} adoptada(s) (estructura ya existente)`));
   if (R.preservation && R.preservation.db) console.log(gris(`  · Memoria: ${R.preservation.db.status} — ${R.preservation.db.summary ? R.preservation.db.summary.rows_compared + ' fila(s) comparadas por contenido' : 'sin detalle'}`));
   if (R.backup) console.log(gris(`  · Respaldo verificado: ${R.backup.path}`));
+  if (R.telegram) console.log(gris(`  · Telegram: ${R.telegram.ya ? 'ya estaba en' : 'registrado en'} tu bot único como @${R.telegram.slug}`));
   for (const w of R.warnings) console.log(ama('  ! ' + w));
   for (const e of R.errors) console.log(rojo('  ✖ ' + (e.message || e)));
   for (const n of R.not_verified) console.log(ama('  ? No verificado: ' + n));

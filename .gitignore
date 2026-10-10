@@ -111,3 +111,12 @@ _output/*-baseline/
 
 .agentic/_telegram/
 .agentic/_buzon/
+
+# Estado de ejecución que Agentix escribe solo (hooks, cobertura, enricher): nunca se versiona
+.agentic/_brief_*.json
+.agentic/_cobertura.jsonl
+.agentic/_sin-commit.json
+.agentic/_ultimo_respaldo_*.txt
+.agentic/_hooks-eventos.jsonl*
+.agentic/specs/src.md
+_output/revision/

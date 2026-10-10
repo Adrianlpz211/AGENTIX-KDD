@@ -180,3 +180,22 @@ test('HUB-7 el servicio único hace una vuelta completa (recibe, reparte y lanza
     assert.ok(typeof otra === 'string');
   } finally { e.cerrar(); }
 });
+
+test('HUB-8 registro automático: con un bot único activo, el proyecto se registra solo; sin hub, en carpeta temporal o con AKDD_NO_TELEGRAM_AUTOREG no hace nada; y update/init lo invocan', async () => {
+  const e = await entorno({ n: 1 });
+  try {
+    const nuevo = proyecto('omega', { teams: true });
+    const r = HUB.autoRegistrar(nuevo);
+    assert.equal(r.ok, true); assert.equal(r.slug, 'omega'); assert.ok(HUB.leerHub().proyectos.omega);
+    assert.equal(HUB.autoRegistrar(nuevo).ya, true, 'idempotente');
+    process.env.AKDD_NO_TELEGRAM_AUTOREG = '1';
+    try { const otro = proyecto('sigma', { teams: true }); assert.equal(HUB.autoRegistrar(otro).causa, 'DESACTIVADO'); assert.ok(!HUB.leerHub().proyectos.sigma); } finally { delete process.env.AKDD_NO_TELEGRAM_AUTOREG; }
+    assert.equal(HUB.autoRegistrar(path.join(os.tmpdir(), 'no-existe-nada')).ok, false, 'sin .agentic no se registra');
+    // sin AKDD_TELEGRAM_HOME propio, una carpeta temporal NUNCA se registra (así las pruebas no ensucian el bot real del dueño)
+    const guardado = process.env.AKDD_TELEGRAM_HOME; delete process.env.AKDD_TELEGRAM_HOME;
+    try { const r2 = HUB.autoRegistrar(proyecto('tmp-x')); assert.equal(r2.ok, false); assert.match(r2.causa, /CARPETA_TEMPORAL|SIN_HUB/); } finally { process.env.AKDD_TELEGRAM_HOME = guardado; }
+    const upd = fs.readFileSync(path.join(__dirname, '..', 'src', 'update-run.js'), 'utf8');
+    assert.equal((upd.match(/autoTelegram\(R, projectPath\);/g) || []).length, 2, 'update lo invoca en sus dos cierres correctos');
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'init.js'), 'utf8'), /autoRegistrar\(projectPath\)/);
+  } finally { e.cerrar(); }
+});

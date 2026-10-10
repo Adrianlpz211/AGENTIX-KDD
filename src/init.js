@@ -434,6 +434,12 @@ Estado: Pendiente aa: configurar
     console.log(chalk.gray("  (MCP: ejecuta akdd mcp para configurarlo manualmente)"));
   }
 
+  // Telegram: si en esta máquina ya hay un bot único activo, el proyecto nuevo se registra solo.
+  try {
+    const r = require(path.join(projectPath, '.agentic', 'grafo', 'telegram-hub.cjs')).autoRegistrar(projectPath);
+    if (r && r.ok) console.log(chalk.gray(`  · Telegram: ${r.ya ? 'ya estaba en' : 'registrado en'} tu bot único como @${r.slug}`));
+  } catch { /* el registro en Telegram es un plus */ }
+
   // Instrucción final
   console.log('\n' + chalk.dim('  ─────────────────────────────────────────────'));
   console.log(chalk.bold('  Último paso — abre este proyecto en'));

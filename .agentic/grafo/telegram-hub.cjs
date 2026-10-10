@@ -263,6 +263,44 @@ async function servir(opts = {}) {
   }
 }
 
+
+/**
+ * Registra un proyecto en el bot único. Lo usa el comando «registrar» y, solo, `akdd update` / `akdd init` (registro automático).
+ * → { ok, slug, ya, actual, apagoPropio } o { ok:false, causa, mensaje }. Nunca lanza.
+ */
+function registrarProyecto(root, { nombre } = {}) {
+  try {
+    const h = leerHub(); const t = TG()._i;
+    if (!h || !h.activo || !h.token) return { ok: false, causa: 'HUB_APAGADO', mensaje: 'El bot único está apagado: «activar» primero.' };
+    if (!fs.existsSync(path.join(root, '.agentic'))) return { ok: false, causa: 'SIN_AGENTIX', mensaje: '«' + root + '» no tiene Agentix (.agentic). Corre esto dentro de un proyecto con Agentix.' };
+    const own = t.leerConfigPropia(root);
+    if (own && own.activo && t.estadoServicio(root).vivo) return { ok: false, causa: 'SERVICIO_PROPIO_VIVO', mensaje: 'Este proyecto tiene su PROPIO servicio de Telegram vivo (un bot solo lo lee un proceso). Deténlo y repite.' };
+    h.proyectos = h.proyectos || {};
+    const ya = Object.entries(h.proyectos).find(([, p]) => normRoot(p.root) === normRoot(root));
+    const slug = ya ? ya[0] : slugLibre(h, slugDe(nombre || path.basename(root)), root);
+    h.proyectos[slug] = { root, nombre: path.basename(root), desde: (ya && ya[1].desde) || new Date().toISOString() };
+    if (!h.actual || !h.proyectos[h.actual]) h.actual = slug;
+    guardarHub(h); t.asegurarIgnorado(root);
+    let apagoPropio = false;
+    if (own && own.activo) { own.activo = false; t.guardarConfigPropia(root, own); apagoPropio = true; }
+    return { ok: true, slug, ya: !!ya, actual: h.actual === slug, apagoPropio };
+  } catch (e) { return { ok: false, causa: 'ERROR', mensaje: String(e && e.message || e).slice(0, 160) }; }
+}
+
+/**
+ * Registro AUTOMÁTICO tras `akdd update` / `akdd init`: solo si en esta máquina ya hay un bot único activo. Nunca falla el update.
+ * No registra carpetas temporales (las pruebas y los proyectos de usuario nunca viven ahí) salvo que se fije AKDD_TELEGRAM_HOME a propósito.
+ */
+function autoRegistrar(root) {
+  try {
+    if (process.env.AKDD_NO_TELEGRAM_AUTOREG === '1') return { ok: false, causa: 'DESACTIVADO' };
+    const h = leerHub(); if (!h || !h.activo || !h.token) return { ok: false, causa: 'SIN_HUB' };
+    const r0 = path.resolve(String(root)).toLowerCase(); const tmp = path.resolve(os.tmpdir()).toLowerCase();
+    if (!process.env.AKDD_TELEGRAM_HOME && (r0 === tmp || r0.startsWith(tmp + path.sep))) return { ok: false, causa: 'CARPETA_TEMPORAL' };
+    return registrarProyecto(root);
+  } catch { return { ok: false, causa: 'ERROR' }; }
+}
+
 // ───────────────────────────── comandos ─────────────────────────────
 function parseArgs(a) { const opt = {}; const libres = []; for (const x of a) { const m = /^--([^=]+)(?:=(.*))?$/.exec(x); if (m) opt[m[1]] = m[2] === undefined ? true : m[2]; else libres.push(x); } return { opt, libres }; }
 const nuevoPin = () => String(crypto.randomInt(100000, 1000000));
@@ -313,17 +351,10 @@ async function main(argv, rootPorDefecto) {
   if (!h || !h.activo) { console.log('El bot único está apagado: «activar» primero.'); return 1; }
 
   if (cmd === 'registrar') {
-    if (!fs.existsSync(path.join(root, '.agentic'))) { console.log('«' + root + '» no tiene Agentix (.agentic). Corre esto dentro de un proyecto con Agentix.'); return 1; }
-    const own = t.leerConfigPropia(root);
-    if (own && own.activo && t.estadoServicio(root).vivo) { console.log('Este proyecto tiene su PROPIO servicio de Telegram vivo (un bot solo lo lee un proceso). Deténlo y repite.'); return 1; }
-    h.proyectos = h.proyectos || {};
-    const ya = Object.entries(h.proyectos).find(([, p]) => normRoot(p.root) === normRoot(root));
-    const slug = ya ? ya[0] : slugLibre(h, slugDe(opt.nombre && opt.nombre !== true ? opt.nombre : path.basename(root)), root);
-    h.proyectos[slug] = { root, nombre: path.basename(root), desde: (ya && ya[1].desde) || new Date().toISOString() };
-    if (!h.actual || !h.proyectos[h.actual]) h.actual = slug;
-    guardarHub(h); t.asegurarIgnorado(root);
-    if (own && own.activo) { own.activo = false; t.guardarConfigPropia(root, own); console.log('(El bot propio de este proyecto quedó apagado: ahora usa el bot único. Su token se conserva en el proyecto.)'); }
-    console.log((ya ? 'Ya estaba registrado: ' : 'Registrado: ') + slug + '  →  ' + root + NL + 'Desde Telegram: @' + slug + ' estado' + (h.actual === slug ? '  (es el proyecto actual)' : '  ·  /proyecto ' + slug));
+    const r = registrarProyecto(root, { nombre: opt.nombre && opt.nombre !== true ? opt.nombre : null });
+    if (!r.ok) { console.log(r.mensaje); return 1; }
+    if (r.apagoPropio) console.log('(El bot propio de este proyecto quedó apagado: ahora usa el bot único. Su token se conserva en el proyecto.)');
+    console.log((r.ya ? 'Ya estaba registrado: ' : 'Registrado: ') + r.slug + '  →  ' + root + NL + 'Desde Telegram: @' + r.slug + (r.actual ? ' estado  (es el proyecto actual)' : ' estado  ·  /proyecto ' + r.slug));
     return 0;
   }
   if (cmd === 'quitar') {
@@ -346,7 +377,7 @@ async function main(argv, rootPorDefecto) {
   return 2;
 }
 
-module.exports = { main, vuelta, procesarUpdate, servir, vistaProyecto, recordarMensaje, proyectoDeMensaje, leerHub, estadoServicio, slugDe, homeDir };
+module.exports = { main, registrarProyecto, autoRegistrar, vuelta, procesarUpdate, servir, vistaProyecto, recordarMensaje, proyectoDeMensaje, leerHub, estadoServicio, slugDe, homeDir };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.cwd()).then((c) => { if (typeof c === 'number') process.exitCode = c; }).catch((e) => { console.error('telegram-hub: ' + String(e && e.message || e).replace(/\d+:[A-Za-z0-9_-]{20,}/g, '***')); process.exitCode = 1; });
