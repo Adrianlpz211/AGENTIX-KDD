@@ -1,5 +1,13 @@
 # Changelog — Agentic KDD
 
+## [3.25.9] — 2026-10-11
+
+**La huella del código ya no se rinde nunca por tamaño: lo que no es código o no cabe en el presupuesto de lectura se vigila por tamaño + fecha. Lo encontró el auditor de engranajes en protocolo_reserva a los pocos minutos de existir.**
+- **Qué pasaba:** en protocolo_reserva (miles de imágenes de producción, cada una bajo 2 MB) la suma pasaba de los 100 MB de lectura y la huella salía «incompleta» aunque ningún archivo fuera enorme: ninguna verificación quedaba verificada y no nació ningún contrato (0 en total).
+- **Arreglo:** medios y binarios (imágenes, audio, video, modelos, fuentes, comprimidos, PDF…) no se leen: tamaño + fecha. Y si el presupuesto de bytes leídos se agota, el resto pasa al mismo modo en vez de dejar la huella incompleta. Solo la deja incompleta un directorio ilegible o pasar de 20.000 archivos, y entonces dice por qué.
+- Verificado sobre el árbol real de protocolo_reserva: completa, 1.647 archivos, 251 vigilados por tamaño + fecha.
+- Pruebas: `test/source-evidence-grandes.test.cjs` (7), con el caso de las imágenes.
+
 ## [3.25.8] — 2026-10-11
 
 **Agentix como un reloj: un auditor de engranajes que dice cuál pieza no gira, con el dato y qué hacer, y que no falla en silencio ni siquiera él.**

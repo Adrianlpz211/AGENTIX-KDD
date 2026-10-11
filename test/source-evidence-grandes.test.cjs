@@ -49,15 +49,26 @@ test('SEG-3 un cambio en el archivo grande (otro tamaño) se sigue detectando', 
   assert.deepEqual(SE.diff(antes, despues), ['volcado.xml']);
 });
 
-test('SEG-4 los topes siguen valiendo para lo que sí se lee, y dicen el motivo real', () => {
+test('SEG-4 si se agota el presupuesto de lectura, el resto va por tamaño + fecha y la huella sigue completa; el tope de archivos sí la rompe, con su motivo', () => {
   const root = proyecto();
   for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(root, 'src', `f${i}.ts`), 'x'.repeat(600 * 1024));   // 4 × 600 KB, bajo el umbral de «grande»
-  const h = SE.capture(root, { maxBytes: 1 * MB, grande: 1 * MB });
-  assert.equal(h.complete, false);
-  assert.match(h.motivo, /más de 1 MB/);
-  const h2 = SE.capture(root, { maxArchivos: 2 });
+  const h = SE.capture(root, { maxBytes: 1 * MB, grande: 1 * MB, cache: false });
+  assert.equal(h.complete, true, 'motivo: ' + h.motivo);
+  assert.ok(Object.values(h.files).some((v) => /^presupuesto:\d+:\d+$/.test(v)), 'lo que no cupo en el presupuesto quedó con marca de tamaño + fecha');
+  assert.ok(Object.values(h.files).some((v) => /^[0-9a-f]{64}$/.test(v)), 'lo que sí cupo se hasheó');
+  const h2 = SE.capture(root, { maxArchivos: 2, cache: false });
   assert.equal(h2.complete, false);
   assert.match(h2.motivo, /más de 2 archivos/);
+});
+
+test('SEG-7 el caso protocolo_reserva: miles de imágenes bajo 2 MB que juntas pasan de 100 MB no vuelven la huella incompleta', () => {
+  const root = proyecto();
+  fs.mkdirSync(path.join(root, 'assets'), { recursive: true });
+  for (let i = 0; i < 6; i++) { const fd = fs.openSync(path.join(root, 'assets', `img${i}.png`), 'w'); fs.ftruncateSync(fd, 1.5 * MB); fs.closeSync(fd); }
+  const h = SE.capture(root, { maxBytes: 4 * MB, cache: false });   // 9 MB de imágenes con un presupuesto de 4 MB
+  assert.equal(h.complete, true, 'motivo: ' + h.motivo);
+  assert.match(h.files['assets/img0.png'], /^bin:\d+:\d+$/);
+  assert.match(h.files['src/a.ts'], /^[0-9a-f]{64}$/, 'el código sigue por contenido');
 });
 
 test('SEG-5 la caché: lo que no cambió no se relee y lo que cambió se detecta (aunque mida lo mismo)', () => {

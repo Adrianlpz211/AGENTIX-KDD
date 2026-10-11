@@ -1,6 +1,6 @@
 # Agentic KDD — Configuración del proyecto
 CONFIGURADO: SI
-VERSION: 3.25.8
+VERSION: 3.25.9
 
 ---
 <!-- Configuración autodetectada por aa: configurar -->

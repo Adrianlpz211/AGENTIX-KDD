@@ -18,6 +18,8 @@ const MAX_ARCHIVOS = 20000, MAX_BYTES = 100 * 1024 * 1024;
    `repomix-output.xml` de 122 MB en la raíz superaba el tope de 100 MB y la huella salía SIEMPRE incompleta: toda verificación terminaba UNVERIFIED y no
    nació ningún contrato en 10 días (12 en total), con el motor creativo sin datos que mover. Un volcado o un binario enorme no es código que pruebas ejerciten. */
 const GRANDE = 2 * 1024 * 1024;
+/* Medios y binarios: no son código que las pruebas ejerciten por contenido, solo se vigila que no cambien (tamaño + fecha). */
+const BINARIO = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|tiff?|psd|ai|exr|hdr|mp3|wav|ogg|flac|aac|m4a|mp4|webm|mov|avi|mkv|glb|fbx|blend|stl|woff2?|ttf|otf|eot|zip|tar|gz|tgz|7z|rar|pdf|bin|dat|pak|wasm|dll|exe|so|dylib|ktx2?|basis)$/i;
 
 const hashDeArchivos = (files) => crypto.createHash('sha256').update(JSON.stringify(Object.entries(files).sort((a, b) => a[0].localeCompare(b[0])))).digest('hex');
 
@@ -42,13 +44,18 @@ function capture(root, opts) {
         walk(abs);
       } else if (e.isFile() && !/^browser-gate-.*\.png$|^visual-diff-.*\.png$/.test(e.name) && !/\.(?:db|sqlite|sqlite3)(?:-wal|-shm)?$|\.bak-\d+$|\.log$|\.tsbuildinfo$/.test(e.name) && !/^\.agentic\/_(?:.*)/.test(rel)) {
         let st; try { st = fs.statSync(abs); } catch { continue; }   // desapareció entre listar y leer: lo verá `diff`
+        if (nArch >= maxArchivos) { complete = false; motivo = 'más de ' + maxArchivos + ' archivos'; return; }
+        // Lo que no es código (medios, binarios) o es enorme NO se lee: huella = tamaño + fecha. Una edición lo cambia, así que se sigue detectando.
+        // Y si el presupuesto de bytes leídos se agota, el resto pasa al mismo modo en vez de dejar la huella «incompleta»: en protocolo_reserva (miles de
+        // imágenes de producción, ya bajo 2 MB cada una) el tope de 100 MB la dejaba incompleta aunque ninguna fuera enorme, y ningún contrato nació.
         if (st.size > grande) { files[rel] = 'grande:' + st.size + ':' + Math.floor(st.mtimeMs); nArch++; continue; }
+        if (BINARIO.test(e.name)) { files[rel] = 'bin:' + st.size + ':' + Math.floor(st.mtimeMs); nArch++; continue; }
         const previo = viejo[rel];
         if (previo && previo.s === st.size && previo.m === st.mtimeMs) { files[rel] = previo.h; nuevo[rel] = previo; nArch++; continue; }
+        if (size + st.size > maxBytes) { files[rel] = 'presupuesto:' + st.size + ':' + Math.floor(st.mtimeMs); nArch++; continue; }
         let b;
         try { b = fs.readFileSync(abs); } catch { continue; } // desapareció entre listar y leer: no es «incompleto», es un cambio que `diff` verá
         size += b.length;
-        if (nArch >= maxArchivos || size > maxBytes) { complete = false; motivo = nArch >= maxArchivos ? 'más de ' + maxArchivos + ' archivos' : 'más de ' + Math.round(maxBytes / 1048576) + ' MB de archivos de tamaño normal'; return; }
         const h = crypto.createHash('sha256').update(b).digest('hex'); files[rel] = h; nuevo[rel] = { s: st.size, m: st.mtimeMs, h }; nArch++;
       }
     }
