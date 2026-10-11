@@ -302,7 +302,7 @@ function runTests(command, projectRoot, testFile = null, meta = {}) {
   // (con un constructor editando sin parar, casi siempre): medinet quedó con 12 contratos en 1.600 pruebas.
   let evidencia = sourceBefore;
   if (!sourceBefore.complete || !sourceAfter.complete) {
-    invalidar({ motivo: 'huella incompleta (más de ' + 20000 + ' archivos, más de 100 MB o un directorio ilegible)' });
+    invalidar({ motivo: 'huella incompleta: ' + (sourceBefore.motivo || sourceAfter.motivo || 'más de 20000 archivos, más de 100 MB o un directorio ilegible') });
   } else {
     const cambios = se.diff(sourceBefore, sourceAfter);
     if (cambios.length) {

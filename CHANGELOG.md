@@ -1,5 +1,15 @@
 # Changelog — Agentic KDD
 
+## [3.25.6] — 2026-10-10
+
+**Un archivo enorme en la raíz ya no impide verificar las pruebas: los contratos vuelven a nacer y el motor creativo vuelve a tener datos.**
+- **Causa medida (medinet):** la huella del código (`source-evidence.cjs`) leía todos los archivos y se rendía al pasar de 100 MB. Un `repomix-output.xml` de 122 MB en la raíz la dejaba SIEMPRE incompleta, así que cada verificación del cierre de ciclo terminaba `UNVERIFIED (SOURCE_CHANGED_OR_INCOMPLETE)`: ningún contrato nuevo en 10 días (12 en total, solo 1 protegido) y el motor creativo, que sube de nivel con 10 contratos, se quedó en nivel 1 y sin sugerencias nuevas. El pase creativo en sí funciona (se comprobó sobre una copia de la memoria de medinet): se quedaba sin datos.
+- **Arreglo 1:** un archivo de más de 2 MB no se lee: su huella es tamaño + fecha y no gasta presupuesto de bytes; un cambio de tamaño o de fecha se sigue detectando. Los topes siguen valiendo para lo que sí se lee.
+- **Arreglo 2 (más rápido):** caché de huellas por archivo (tamaño + fecha → hash) en `.agentic/_cache/huella-v1.json`: solo se relee lo que cambió. En medinet la captura pasó de 23–50 s (y siempre incompleta) a 1,6 s la primera vez y ~100 ms las siguientes, con 1.774 archivos y las 176 pruebas dentro de la huella.
+- **Arreglo 3:** cuando la huella sale incompleta, el motivo real queda escrito («más de N MB de archivos de tamaño normal», «directorio ilegible: …») en vez de la lista genérica.
+- **Límite honesto:** en medinet sigue fallando una prueba propia (`use-arrastrar.dom.test.ts`) y la suite completa tarda; si falla o se pasa del tiempo (`AKDD_TEST_TIMEOUT_MS`, 120 s por defecto) el control seguirá sin verificar. Esto quita el bloqueo que no dependía del proyecto.
+- Pruebas: `test/source-evidence-grandes.test.cjs` (6).
+
 ## [3.25.5] — 2026-10-10
 
 **Retomar tras una pausa o un `reabrir`: cada chat sabe dónde quedó, qué cambió mientras no estaba y qué hacer primero, y el dueño recibe el mensaje listo para pegar en Cursor.**
