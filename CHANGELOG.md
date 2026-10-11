@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.25.8] — 2026-10-11
+
+**Agentix como un reloj: un auditor de engranajes que dice cuál pieza no gira, con el dato y qué hacer, y que no falla en silencio ni siquiera él.**
+- **El problema:** cada mecanismo (registro de commits, TEAMS, contratos, memoria que aprende, motor creativo, ganchos, servicios) fallaba en silencio por diseño («fail-soft») y nadie veía el conjunto. En una semana aparecieron, descubiertos a mano, contratos parados 10 días por un archivo de 122 MB, el motor creativo sin datos desde agosto, 24 cierres fallidos por base ocupada en un log que nadie lee, 68 archivos sin commit durante 3 días y un control con 62 alarmas falsas.
+- **`akdd engranajes`** (`engranajes.cjs`): comprueba 16 engranajes contra EVIDENCIA (git, la base y los archivos de estado) y da, por cada uno, estado (🟢 🟡 🔴 ⚪), el dato y la acción concreta. Solo lee. Probado sobre medinet real, señala por sí solo lo que se había encontrado a mano: «contratos: el último registrado hace 10 días con 77 ciclos con pruebas en 7 días» y «92 archivos sin commit desde hace 3 días».
+- **Reglas de honestidad:** un engranaje que no se puede comprobar sale **SIN_DATO** con su causa, nunca «OK» por no haber podido mirar; si la comprobación misma revienta, el engranaje sale **ROTO** con el error. Sale con código 1 si algo está roto.
+- **Se refresca solo:** `post-cycle` lo corre como último paso de CADA ciclo (deja `.agentic/_engranajes.json` y escribe a stderr los rotos) y el **semáforo de TEAMS** muestra una alerta «Registro de Agentix: N engranaje(s) ROTO(s)» (campo `engranajes` de `salud`).
+- Engranajes: commits→ciclos, TEAMS aceptada→registrada y verificada, trabajo sin commit, calidad del registro, contratos, verificación TDD (con el motivo real), huella del código, motor creativo, cierre de ciclos, controles sin falsas alarmas, memoria que aprende, ganchos de git, ganchos de Claude Code y Cursor (incluye el `loop_limit` del stop), servicios de aviso, TEAMS y base sin copias sueltas.
+- Pruebas: `test/engranajes.test.cjs` (12): cada engranaje se rompe a propósito y se comprueba que lo detecta, incluido el auditor roto.
+- **Límite honesto:** el auditor dice qué no gira; arreglar cada causa sigue siendo trabajo. Y no prueba que el trabajo esté bien hecho, solo que quedó registrado.
+
 ## [3.25.7] — 2026-10-11
 
 **La cola se EMPUJA a Cursor: al terminar cada turno, el gancho de parada le entrega la siguiente tarea completa, con `aa:`, y su rol queda armado desde que se continúa.**

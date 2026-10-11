@@ -1627,6 +1627,13 @@ async function main() {
     if (!silent) console.log(fresh.ok ? `✅ ${fresh.commit.slice(0, 8)}` : `⚠️  (${fresh.reason})`);
   } catch (e) { if (!silent) console.log('⚠️  (omitido)'); }
 
+  // Último paso: el auditor de engranajes deja constancia de qué gira y qué no (lo lee el semáforo de TEAMS y el monitor). Nunca falla el ciclo.
+  try {
+    const eg = require('./engranajes.cjs').refrescar(ROOT);
+    results.engranajes = { veredicto: eg.veredicto, rotos: eg.rotos, atencion: eg.atencion };
+    if (eg.rotos) console.error('[post-cycle] 🔴 ' + eg.rotos + ' engranaje(s) ROTO(s): ' + eg.engranajes.filter((g) => g.estado === 'ROTO').map((g) => g.nombre).join(' | ') + ' — corre: node .agentic/grafo/engranajes.cjs');
+  } catch (e) { console.error('[post-cycle] ⚠️ el auditor de engranajes no pudo correr: ' + String((e && e.message) || e).slice(0, 120)); }
+
   results.fallos = fallosRegistro;
   if (fallosRegistro.length) {
     // Siempre a stderr (aunque sea --silent o hook): un registro que no se escribió no puede pasar por «hecho».

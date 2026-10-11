@@ -22,7 +22,7 @@ const GRANDE = 2 * 1024 * 1024;
 const hashDeArchivos = (files) => crypto.createHash('sha256').update(JSON.stringify(Object.entries(files).sort((a, b) => a[0].localeCompare(b[0])))).digest('hex');
 
 function capture(root, opts) {
-  const o = opts || {}, grande = o.grande || GRANDE, maxBytes = o.maxBytes || MAX_BYTES, maxArchivos = o.maxArchivos || MAX_ARCHIVOS;
+  const o = opts || {}, grande = Number.isFinite(o.grande) ? o.grande : GRANDE, maxBytes = Number.isFinite(o.maxBytes) ? o.maxBytes : MAX_BYTES, maxArchivos = Number.isFinite(o.maxArchivos) ? o.maxArchivos : MAX_ARCHIVOS;
   const files = {}, base = path.resolve(root); let size = 0, complete = true, motivo = null, nArch = 0;
   // Caché de huellas por archivo (tamaño + fecha → hash): solo se vuelve a leer lo que cambió. En medinet la captura leía ~40 MB en cada una de las dos
   // capturas de cada corrida (hasta 50 s con la máquina cargada); con la caché son milisegundos. Una edición cambia la fecha: se detecta igual.

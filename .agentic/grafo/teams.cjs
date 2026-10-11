@@ -1304,6 +1304,16 @@ function salud(root, opts = {}) {
     if (!trabajo && e.total && !e.listo && quieto >= 10) sube(1, 'Nadie tiene nada accionable pero el proyecto no está cerrado: el Director debe encolar el siguiente lote o cerrar');
     if (e.listo) sube(1, 'Todo aceptado y sin pendientes (LISTO_PARA_CERRAR): falta que el Director ejecute «cerrar»');
   }
+  // El registro de Agentix tampoco falla en silencio: si el auditor de engranajes (que post-cycle refresca en cada ciclo) dejó algo ROTO, el semáforo lo dice.
+  let engranajes = null;
+  try {
+    const eg = require('./engranajes.cjs').ultimo(root, 6 * 3600 * 1000);
+    if (eg) {
+      const rotos = (eg.engranajes || []).filter((g) => g.estado === 'ROTO');
+      engranajes = { at: eg.at, veredicto: eg.veredicto, rotos: eg.rotos, atencion: eg.atencion, total: eg.total, lista: rotos.map((g) => g.nombre).slice(0, 5) };
+      if (rotos.length) sube(1, 'Registro de Agentix: ' + rotos.length + ' engranaje(s) ROTO(s): ' + rotos.map((g) => g.nombre.split(':')[0].split(' (')[0]).slice(0, 3).join(' · ') + ' — corre: node .agentic/grafo/engranajes.cjs');
+    }
+  } catch { /* sin auditor: no es un fallo del semáforo */ }
   const informativo = e.canal !== 'ACTIVO';
   // Lo que se ve en la oficina 3D: quién hace qué AHORA, derivado de la bitácora de comandos y del canal.
   const evs = leerEventos(root, 60);
@@ -1316,6 +1326,7 @@ function salud(root, opts = {}) {
   const ultEv = evs.length ? Date.parse(evs[evs.length - 1].t) : 0;
   const actividadSeg = Math.round(Math.max(0, ahora - Math.max(e.mtime || 0, ultEv)) / 1000);
   return {
+    engranajes,
     canal: e.canal, modo: est.modo || null, semaforo: informativo ? e.canal : ['VERDE', 'AMARILLO', 'ROJO'][nivel],
     ntfy: (() => { try { const nb = puenteTelefono(); const c = nb && nb.leerConfig(root); if (!c || !c.activo) return { activo: false }; return { activo: true, servicio_vivo: nb.estadoServicio(root).vivo, buzon_sin_leer: nb.sinLeer(root).length }; } catch { return { activo: false }; } })(),
     alertas, roles, quieto_min: quieto, actividad_seg: actividadSeg, plan: !!est.plan, builder_conectado: !!est.builder, extras: (est.extras || []).length, auditoria,

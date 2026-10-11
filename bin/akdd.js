@@ -153,6 +153,7 @@ const HELP = `
                            Real restore points in private Git refs (HEAD/branch/index untouched)
     akdd host-hooks <status|install|uninstall> [--host=cursor|claude|all]   Optional IDE guard
     akdd reconciliar [--dias=30] [--aplicar]   Register retroactively the commits that never got a cycle (no tests/AST, duration without data)
+    akdd engranajes [--json]             Is every gear of Agentix turning? (commit hook, TEAMS, contracts, memory, creative, hooks, services) — says which one is not, with the evidence
     akdd cobertura [--dias=7] [--json]   How much of the work lands in Agentix: commits vs cycles (exact), record quality, task-like messages (approx.)
     akdd decisiones [listar|responder|aplicada]   Owner decisions board (dashboard tab 🗳️ Decisiones): list, answer, close
     akdd telegram <activar|estado|servir|pin|enviar|desactivar|hub …>   Optional Telegram chat with Agentix from anywhere (no tunnel: the PC polls Telegram); pairs to ONE user with a PIN
@@ -246,6 +247,7 @@ switch (command) {
   }
   case 'decisiones': case 'decision': runModule('decisiones.cjs', ...args.slice(1)); break;
   case 'cobertura': runModule('cobertura.cjs', ...args.slice(1)); break;
+  case 'engranajes': runModule('engranajes.cjs', ...args.slice(1)); break;
   case 'reconciliar': runModule('registro-historico.cjs', ...args.slice(1)); break;
   case 'simple': runModule('simple-gate.cjs', ...args.slice(1)); break;
   case 'teams': runModule('teams.cjs', ...args.slice(1)); break;
