@@ -1046,7 +1046,7 @@ function ejecutarCmd(argv, root) {
       if (T) {
         const v = (x) => (x === true || x == null ? '' : String(x));
         const r = T.crearItem(root, { titulo: pregunta, clase: v(opt.clase) || 'decision', opciones: v(opt.opciones), recomendacion: v(opt.recomendacion), impacto: v(opt.impacto), por_que: v(opt.porque),
-          responsable: v(opt.responsable), prioridad: v(opt.prioridad), fecha_limite: v(opt.limite), etiquetas: v(opt.etiquetas), codigo: v(opt.codigo), detalle: v(opt.detalle) },
+          responsable: v(opt.responsable), prioridad: v(opt.prioridad), fecha_limite: v(opt.limite), etiquetas: v(opt.etiquetas), codigo: v(opt.codigo), detalle: v(opt.detalle), forzar: !!opt.forzar },
           { por: /^(builder|cursor)$/i.test(v(opt.rol)) ? 'cursor' : 'director' });
         if (!r.ok) { say('✖ ' + r.code + ': ' + r.message); return salida(1); }
         say('✔ ' + r.id + ' es del DUEÑO y queda ABIERTA. El trabajo independiente continúa. (Solo se escala lo que no está en internet o es bloqueante por seguridad.)');

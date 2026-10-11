@@ -1,5 +1,12 @@
 # Changelog — Agentic KDD
 
+## [3.26.1] — 2026-10-11
+
+**Una decisión ya resuelta no se vuelve a pedir: las sesiones (también las individuales) ven lo resuelto y el tablero rechaza la pregunta duplicada.** Caso medinet: una sesión individual sugirió decisiones, el dueño las respondió y la sesión las siguió pidiendo.
+- **Causa:** el aviso de cada turno solo mostraba decisiones pendientes o respondidas sin ejecutar; al cerrarse desaparecían de la vista de toda sesión, y crear una decisión no comparaba con las existentes.
+- **Arreglo:** `crear` rechaza una pregunta parecida a una abierta (`YA_PREGUNTADA`) o resuelta (`YA_RESUELTA`, con la respuesta del dueño); `--forzar` la permite. El hook de cada turno añade las decisiones resueltas de los últimos 3 días con su respuesta. Las tareas no se bloquean.
+- Pruebas: `test/decisiones-duplicadas.test.cjs` (4).
+
 ## [3.26.0] — 2026-10-11
 
 **Cierre real de los huecos que quedaban: trabajo sin commit visible (ciclo provisional), control de pruebas sin falsa alarma, `akdd update` que espera la base, `engranajes --reparar` y una prueba de campaña de punta a punta.**

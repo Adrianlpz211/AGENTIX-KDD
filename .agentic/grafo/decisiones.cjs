@@ -285,6 +285,17 @@ function aplicada(root, id, nota, { por } = {}) {
 /** Lo que el modelo debe ejecutar y cerrar: respondidas sin ejecutar. Sin estado propio: se deriva del canal, no se pierde. */
 function pendientesDeEjecutar(root) { return leer(root).items.filter((x) => x.estado === 'respondida'); }
 
+/** Lo ya resuelto en los últimos días, con su respuesta: lo ve CUALQUIER sesión (también las individuales), para no volver a pedirlo. */
+function resueltasRecientes(root, { dias = 3, max = 6 } = {}) {
+  const l = leer(root); if (!l.canal) return null;
+  const desde = Date.now() - dias * 86400000;
+  const r = l.items.filter((x) => (x.estado === 'ejecutada' || x.estado === 'respondida') && x.clase !== 'tarea' && x.tipo !== 'tablero' && x.respuesta)
+    .filter((x) => { const t = Date.parse(String(x.respondida_en || '').replace(' ', 'T')); return !Number.isFinite(t) || t >= desde; });
+  if (!r.length) return null;
+  return ['🗂️ Decisiones del dueño ya RESUELTAS (no las vuelvas a preguntar; si tu duda es otra, dilo con --forzar):']
+    .concat(r.slice(-max).map((x) => `  · ${x.id} ${aplanar(x.titulo, 90)} → «${aplanar(x.respuesta, 160)}»`)).join(String.fromCharCode(10));
+}
+
 /** Texto corto para el hook de cada turno y para el brief: vacío si no hay nada que ejecutar. */
 function avisoParaModelo(root) {
   const l = leer(root); if (!l.canal) return null;
@@ -314,10 +325,35 @@ const limpiarEtiquetas = (e) => (Array.isArray(e) ? e : String(e || '').split(',
  * Crea un elemento del tablero (decisión, permiso o tarea). Devuelve { ok, id }.
  * `responsables`: nombres válidos (los del tablero); null = cualquiera. No acepta `origen` libre: lo pone quien llama.
  */
+/** Palabras con significado de un título (sin tildes ni conectores) para comparar preguntas. */
+function palabrasClave(t) {
+  const vacias = new Set('de la el los las un una y o a en que se por para con del al lo su sus es son si no como mas ya hay ser esta este esto'.split(' '));
+  return new Set(String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !vacias.has(w)));
+}
+/** Decisiones del dueño ya preguntadas (abiertas) o ya resueltas que se parecen a esta pregunta: así dos sesiones no la piden dos veces. */
+function similares(root, titulo, { minimo = 0.5 } = {}) {
+  const a = palabrasClave(titulo); if (a.size < 3) return [];
+  const out = [];
+  for (const x of leer(root).items) {
+    if (x.clase === 'tarea' || x.tipo === 'tablero') continue;
+    const b = palabrasClave(x.titulo); if (b.size < 3) continue;
+    let comun = 0; for (const w of a) if (b.has(w)) comun++;
+    const sim = comun / Math.min(a.size, b.size);
+    if (sim >= minimo && comun >= 3) out.push({ id: x.id, estado: x.estado, titulo: x.titulo, respuesta: x.respuesta || '', sim });
+  }
+  return out.sort((p, q) => q.sim - p.sim);
+}
+
 function crear(root, c, { por, responsables, yo } = {}) {
   const titulo = aplanar(c && c.titulo, 200);
   if (!titulo) return err('TITULO_REQUERIDO', 'Escribe un título');
   const clase = CLASES.includes(String(c.clase || c.tipo)) ? String(c.clase || c.tipo) : 'tarea';
+  if (clase !== 'tarea' && !c.forzar) {
+    const s = similares(root, titulo)[0];
+    if (s) return err(s.estado === 'pendiente' ? 'YA_PREGUNTADA' : 'YA_RESUELTA', s.estado === 'pendiente'
+      ? `${s.id} ya pregunta lo mismo y sigue esperando al dueño («${aplanar(s.titulo, 100)}»). No la dupliques; si es otra cosa, repite con --forzar.`
+      : `${s.id} ya está ${s.estado === 'ejecutada' ? 'resuelta y ejecutada' : 'respondida'}: «${aplanar(s.titulo, 100)}» → «${aplanar(s.respuesta, 200) || 'sin texto'}». Usa esa respuesta; si de verdad es otra pregunta, repite con --forzar.`);
+  }
   const prio = PRIORIDADES.includes(String(c.prioridad)) ? String(c.prioridad) : 'media';
   const estadoT = ESTADOS_TABLERO.includes(String(c.estado)) ? String(c.estado) : 'pendiente';
   const f = validarFecha(c.fecha_limite != null ? c.fecha_limite : c.limite); if (!f.ok) return err('FECHA_INVALIDA', 'La fecha límite no es válida (AAAA-MM-DD)');
@@ -447,7 +483,7 @@ function ligarCola(root, id, tareaId) {
 }
 
 module.exports = {
-  leer, responder, aplicada, pendientesDeEjecutar, avisoParaModelo, aplanar, OTRA,
+  leer, responder, aplicada, pendientesDeEjecutar, avisoParaModelo, similares, resueltasRecientes, aplanar, OTRA,
   crear, cambiar, ligarCola, estadoTablero, parsear, parsearOpciones, claveRecomendada, aISO,
   CLASES, PRIORIDADES, ESTADOS_TABLERO, FRASES_NOTA, MAX_TEXTO,
 };

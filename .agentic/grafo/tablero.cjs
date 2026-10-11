@@ -194,9 +194,11 @@ function avisoParaHook(root, rol) {
   const l = D.leer(root); if (!l.canal) return null;
   const base = avisoDeCola(root, rol);
   const esperan = l.items.filter((x) => x.estado === 'pendiente' && !rolDe(x.responsable));
-  if (!base && !esperan.length) return null;
+  const resueltas = D.resueltasRecientes(root);
+  if (!base && !esperan.length && !resueltas) return null;
   const o = base ? [base] : [];
   if (esperan.length) o.push(`⏳ ${esperan.length} decisión(es) siguen esperando al dueño: ${esperan.slice(0, 8).map((x) => x.id).join(', ')}.`);
+  if (resueltas) o.push(resueltas);
   return o.join(String.fromCharCode(10));
 }
 
