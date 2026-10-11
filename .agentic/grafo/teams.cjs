@@ -921,7 +921,7 @@ function ejecutarCmd(argv, root) {
     if (e.canal === 'CERRADO') { say('El canal está CERRADO. Usa `teams: reabrir` si hay más trabajo.'); return salida(2); }
     if (e.canal === 'ACTIVO') say('· El canal ya estaba ACTIVO.');
     else canal.fijarEstado(root, 'ACTIVO', 'iniciado ' + canal.sello());
-    est.iniciado_at = iso(); guardarEstado(root, est);
+    est.iniciado_at = iso(); est.armado = Object.assign({}, est.armado, { director: Date.now() }); guardarEstado(root, est);
     say(`✔ INICIADO — modo ${est.modo.toUpperCase()}, canal ACTIVO.`);
     if (est.modo === 'completo') {
       let vivo = false; try { const v = JSON.parse(fs.readFileSync(path.join(canal.dirEstado(root), 'vigilantes', 'builder.json'), 'utf8')); process.kill(v.pid, 0); vivo = true; } catch { /* sin vigilante */ }
@@ -950,7 +950,9 @@ function ejecutarCmd(argv, root) {
     if (e.canal === 'CERRADO') { say('El canal está CERRADO. Si hay más trabajo: `teams: reabrir`.'); return salida(2); }
     if (e.canal === 'PREPARADO') { say('El canal aún no se inició: el Director debe escribir `teams: iniciar` (modo, plan y constructor primero).'); return salida(2); }
     if (e.canal === 'PAUSADO') { canal.fijarEstado(root, 'ACTIVO', 'continuado ' + canal.sello()); say('✔ Canal ACTIVO otra vez.'); } else say('· El canal ya estaba ACTIVO.');
-    const est = leerEstado(root); est.seen = est.seen || {}; est.seen[rol] = ''; guardarEstado(root, est);
+    const est = leerEstado(root); est.seen = est.seen || {}; est.seen[rol] = '';
+    // Arma el gancho de parada de este rol YA (antes solo lo armaba la primera ronda: tras días de pausa, si el chat no la corría a la primera, se paraba).
+    est.armado = est.armado || {}; est.armado[rol] = Date.now(); guardarEstado(root, est);
     say(`CONTINÚAS como ${rol === 'builder' ? 'CONSTRUCTOR' : 'DIRECTOR'}: 1) relanza tu vigilante \`esperar --rol=${rol} --despertar\` como tarea en segundo plano; 2) reactiva tu loop de respaldo de ~3 min; 3) ejecuta \`${rol === 'builder' ? 'ronda --rol=builder' : 'revisar'}\` y retoma donde ibas.`);
     if (rol === 'director') say('  Recuerda: el constructor (Cursor) también necesita que el dueño escriba `teams: continuar` en SU chat para relanzar sus vigilantes.');
     // Punto de retoma: dónde quedó este rol, qué cambió durante la pausa y la primera acción (teams-retoma.cjs). Es una ayuda: nunca frena continuar.
@@ -1270,7 +1272,8 @@ function salud(root, opts = {}) {
   const NOMBRE = { director: 'Director (Claude Code)', builder: 'Constructor (Cursor)' };
   for (const rol of ['director', 'builder']) {
     const a = accionable(e, rol); const v = leerVigilante(root, rol);
-    const ult = est.rondas && est.rondas[rol]; const ultMin = ult ? Math.round((ahora - ult) / 60000) : null;
+    // El «loop de respaldo» cuenta también si el gancho de parada lo está empujando (empuje: solo lo escribe ese gancho): con la cola entregada por el gancho no hay rondas manuales.
+    const ult = Math.max((est.rondas && est.rondas[rol]) || 0, (est.empuje && est.empuje[rol]) || 0) || null; const ultMin = ult ? Math.round((ahora - ult) / 60000) : null;
     const sinAt = (est.wakes || []).filter((w) => w.rol === rol && !w.visto_at).map((w) => Date.parse(w.at)).filter(Number.isFinite);
     const avisoMin = sinAt.length ? Math.round((ahora - Math.min(...sinAt)) / 60000) : null;
     const sn = rol === 'builder' && est.sinNovedad && est.sinNovedad.builder; const sinNov = sn && sn.n >= 2 ? { n: sn.n, min: Math.round((ahora - sn.desde) / 60000), pedido: sn.pedido || null, umbral: sn.umbral || OCIO_RONDAS, evidencia: sn.evidencia || null, veredicto: sn.veredicto || null, empujon: sn.empujon || null } : null;
@@ -1328,7 +1331,7 @@ function salud(root, opts = {}) {
 
 // ───────────────────────────── main ─────────────────────────────────────────
 
-module.exports = { leerVigilante, registrarEvento, salud, reencolaCancelada, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
+module.exports = { leerVigilante, registrarEvento, salud, reencolaCancelada, evidenciaConstructor, ultimoCambioArchivos, detalleDecision, leerEventos, registrarEvento, calcular, accionable, ejecutar, parseArgs, leerEstado, guardarEstado, textoRondaBuilder, textoRondaDirector, activar, escribirReporte };
 
 if (require.main === module) {
   let root = process.cwd();

@@ -32,7 +32,7 @@ test('CD-1 Cursor con su propio gancho: el constructor recibe SU mensaje', () =>
   const root = proyecto();
   const r = H.procesar('cursor', 'stop', ENTRADA_CURSOR, root);
   assert.ok(r && r.followup_message, 'Cursor sigue recibiendo su aviso de constructor');
-  assert.match(r.followup_message, /CONSTRUCTOR/);
+  assert.match(r.followup_message, /^aa: \[TEAMS\] Trabaja T-001/);
   assert.doesNotMatch(r.followup_message, /DIRECTOR/);
 });
 

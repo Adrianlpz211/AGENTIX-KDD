@@ -24,7 +24,8 @@ const path = require('path');
 
 const VENTANA_MS = 15 * 60 * 1000;
 const MAX_SEGUIDAS = 3;
-const ROL_RECIENTE_MS = 6 * 3600 * 1000; // el host solo cuenta como «ese rol» si el rol hizo una ronda en las últimas 6 h
+const ROL_RECIENTE_MS = 6 * 3600 * 1000; // el host solo cuenta como «ese rol» si el rol hizo una ronda o fue armado (continuar / iniciar / este mismo gancho) en las últimas 6 h
+const LOOP_MAX = 60;                      // seguimientos seguidos entregados a Cursor en una conversación antes de dejarlo parar: red de seguridad; el freno real es el de «sin cambios»
 
 const rolDe = (host) => (host === 'cursor' ? 'builder' : 'director');
 const archivo = (root) => path.join(root, '.agentic', '_teams', 'continuidad.json');
@@ -40,7 +41,7 @@ function decidir(root, host, entrada, opts = {}) {
     if (!fs.existsSync(path.join(root, '.legion', 'AUDITORIA-CURSOR.md'))) return no('SIN_CANAL');
     // Claude ya está continuando por un gancho de parada: otra vuelta seguida sería un bucle.
     if (host === 'claude' && entrada && entrada.stop_hook_active) return no('YA_CONTINUANDO');
-    if (host === 'cursor' && entrada && Number(entrada.loop_count) >= 2) return no('YA_CONTINUANDO');
+    if (host === 'cursor' && entrada && Number(entrada.loop_count) >= LOOP_MAX) return no('TOPE_DE_SEGUIMIENTOS', 'loop_count ' + entrada.loop_count);
     const T = require('./teams.cjs');
     const e = T.calcular(root, { sinRecuperar: true });
     if (!e || e.canal !== 'ACTIVO') return no('CANAL_' + (e ? e.canal : 'NULO'));
@@ -49,7 +50,7 @@ function decidir(root, host, entrada, opts = {}) {
     const rol = rolDe(host);
     // ¿este host está haciendo de ese rol? (si no, es otra conversación cualquiera y no se le obliga a nada)
     const ahora = opts.ahora || Date.now();
-    const ult = (est.rondas || {})[rol] || 0;
+    const ult = Math.max((est.rondas || {})[rol] || 0, (est.armado || {})[rol] || 0);
     if (!(ahora - ult < ROL_RECIENTE_MS) && !opts.forzarRol) return no('NO_ES_ESTE_ROL');
     const roles = individual && host === 'claude' ? ['director', 'builder'] : [rol];
     const razones = []; let pendiente = false;
@@ -63,19 +64,27 @@ function decidir(root, host, entrada, opts = {}) {
     // freno anti-bucle
     const d = leer(root); const huella = JSON.stringify([razones, sinVigilante]);
     const reg = d[rol] || { n: 0, desde: ahora, huella: '' };
-    if (reg.huella !== huella || ahora - reg.desde > VENTANA_MS) { reg.n = 0; reg.desde = ahora; reg.huella = huella; reg.dormido = false; }
+    // Una tarea larga lleva varios turnos con el mismo pendiente: mientras el constructor SIGUE TOCANDO CÓDIGO eso es avance, no un bucle.
+    let avanza = false; try { avanza = rol === 'builder' && T.evidenciaConstructor(root, e).veredicto === 'TRABAJANDO'; } catch { avanza = false; }
+    if (reg.huella !== huella || ahora - reg.desde > VENTANA_MS || avanza) { reg.n = 0; reg.desde = ahora; reg.huella = huella; reg.dormido = false; }
     if (reg.n >= MAX_SEGUIDAS) {
       if (!reg.dormido) { reg.dormido = true; d[rol] = reg; guardar(root, d); try { T.registrarEvento(root, { rol: 'sistema', cmd: 'DORMIDO', objetivo: rol + ': ' + MAX_SEGUIDAS + ' continuaciones sin cambio' }); } catch { /* auxiliar */ } try { require('./ntfy-bridge.cjs').enviar && require('./ntfy-bridge.cjs').enviar('TEAMS: ' + (rol === 'builder' ? 'Cursor' : 'Claude Code') + ' se detuvo con trabajo pendiente tras ' + MAX_SEGUIDAS + ' intentos de reanudarlo. Escríbele en su chat: teams: continuar'); } catch { /* sin teléfono */ } }
       return no('FRENO_ANTIBUCLE', 'dormido: ' + razones.slice(0, 2).join(' | '));
     }
     reg.n += 1; d[rol] = reg; guardar(root, d);
+    // El gancho que empuja trabajo mantiene armado a su rol: sin rondas manuales no habría otra marca de vida.
+    try { const est2 = T.leerEstado(root); est2.armado = est2.armado || {}; est2.armado[rol] = ahora; est2.empuje = est2.empuje || {}; est2.empuje[rol] = ahora; T.guardarEstado(root, est2); } catch { /* auxiliar */ }
 
     const CMD = require('./teams-prompts.cjs').CMD;
     const nombre = rol === 'builder' ? 'CONSTRUCTOR' : 'DIRECTOR';
-    const partes = ['[TEAMS] No termines todavía: eres el ' + nombre + ' y el canal sigue ACTIVO.'];
-    if (pendiente) partes.push('Hay trabajo sin atender: ' + razones.join(' · ') + '.');
+    // Constructor con trabajo: se le EMPUJA el siguiente ítem completo (con aa:), no un «lee las reglas y corre la ronda».
+    let item = null;
+    try { const Rt = require('./teams-retoma.cjs'); const s = rol === 'builder' && pendiente ? Rt.siguienteTrabajo(e) : null; if (s) item = Rt.mensajeDeTrabajo(s, CMD, e.corrPend.length + e.tareasPend.length - 1); } catch { item = null; }
+    const partes = item ? [item] : ['[TEAMS] No termines todavía: eres el ' + nombre + ' y el canal sigue ACTIVO.'];
+    if (pendiente && !item) partes.push('Hay trabajo sin atender: ' + razones.join(' · ') + '.');
     if (sinVigilante) partes.push('Tu vigilante NO está vivo: relánzalo ahora, como tarea en segundo plano, ANTES de seguir (' + CMD + ' esperar --rol=' + rol + ' --despertar' + (host === 'claude' ? ' --continuo con la herramienta Monitor' : '') + '); sin él nadie te despierta cuando llegue algo.');
-    partes.push(pendiente ? 'Después corre `' + CMD + ' ' + (rol === 'builder' ? 'ronda --rol=builder' : 'revisar') + '` y trabaja lo que imprima.' : 'Con el vigilante vivo ya puedes terminar el turno.');
+    if (item) partes.push('Si te quedas sin ítems o dudas de dónde estás, corre `' + CMD + ' ronda --rol=builder`.');
+    else partes.push(pendiente ? 'Después corre `' + CMD + ' ' + (rol === 'builder' ? 'ronda --rol=builder' : 'revisar') + '` y trabaja lo que imprima.' : 'Con el vigilante vivo ya puedes terminar el turno.');
     return { continuar: true, motivo: pendiente ? 'TRABAJO_PENDIENTE' : 'SIN_VIGILANTE', mensaje: partes.join(' ') };
   } catch (err) { return no('ERROR', String(err && err.message || err).slice(0, 120)); }
 }
@@ -86,4 +95,4 @@ function salidaParaHost(host, r) {
   return host === 'cursor' ? { followup_message: r.mensaje } : { decision: 'block', reason: r.mensaje };
 }
 
-module.exports = { decidir, salidaParaHost, rolDe, MAX_SEGUIDAS, VENTANA_MS };
+module.exports = { decidir, salidaParaHost, rolDe, MAX_SEGUIDAS, VENTANA_MS, LOOP_MAX };

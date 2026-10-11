@@ -97,7 +97,7 @@ test('VIDA-4 gancho de parada: pide seguir si hay trabajo o el vigilante murió;
   // Claude ya continuando por el gancho → no se encadena otra vuelta
   assert.equal(C.decidir(root, 'claude', { stop_hook_active: true }).motivo, 'YA_CONTINUANDO');
   // otra conversación cualquiera (el rol no hizo ronda hace horas) no se obliga
-  const viejo = T.leerEstado(root); viejo.rondas = { builder: Date.now() - 12 * 3600 * 1000 };
+  const viejo = T.leerEstado(root); viejo.rondas = { builder: Date.now() - 12 * 3600 * 1000 }; viejo.armado = {};   // ni ronda ni armado reciente
   fs.writeFileSync(path.join(canal.dirEstado(root), 'estado.json'), JSON.stringify(viejo));
   assert.equal(C.decidir(root, 'cursor', {}).motivo, 'NO_ES_ESTE_ROL');
   fs.writeFileSync(path.join(canal.dirEstado(root), 'estado.json'), JSON.stringify(est));

@@ -1,5 +1,16 @@
 # Changelog — Agentic KDD
 
+## [3.25.7] — 2026-10-11
+
+**La cola se EMPUJA a Cursor: al terminar cada turno, el gancho de parada le entrega la siguiente tarea completa, con `aa:`, y su rol queda armado desde que se continúa.**
+- **Causas medidas en el código (Cursor se paraba y hacían falta varios mensajes para que retomara tras días de pausa):** (1) el gancho solo armaba al constructor si hacía una ronda en las últimas 6 h y `continuar` no lo armaba; (2) cortábamos el encadenado tras 2 seguimientos y Cursor limita a 5 por defecto (`loop_limit`); (3) el seguimiento era «lee las reglas y corre la ronda»: un modelo de jalar, que depende de que el chat lea bien las instrucciones.
+- **Empuje:** el seguimiento del constructor ya no es un recordatorio: es el **siguiente ítem completo** (lo parcial, luego las correcciones, luego la cola) empezando por `aa:` (el trabajo entra por el flujo completo de Agentix: brief y contratos antes de construir, pruebas y memoria al cerrar), con su texto y criterios, cómo reportarlo y cuántos quedan. Sin ronda, sin vigilante y sin releer reglas.
+- **Armado:** `continuar` arma al rol que continúa; `iniciar` arma al Director; y el propio gancho mantiene armado a su rol. El semáforo cuenta ese empuje como «loop activo» (campo `empuje`, solo lo escribe el gancho).
+- **Sin cortes tontos:** quitado el corte a 2 seguimientos (queda un tope de seguridad de 60 por conversación) y una tarea larga con el mismo pendiente no se marca «dormida» mientras el constructor sigue tocando código; sin avance, el freno de siempre.
+- **`hooks.json` de Cursor** sale con `loop_limit: null` en el stop de TEAMS (sin el tope de 5 por defecto; el goal-check conserva el suyo). Se reinstala solo con `akdd update`.
+- **Límite honesto:** un chat de Cursor realmente inactivo no se puede despertar desde fuera; solo encadena el chat que acaba un turno. Por eso cada jornada arranca con un solo mensaje, `teams: continuar`, y el Director debe mantener la cola con ítems por delante.
+- Pruebas: `test/teams-empuje.test.cjs` (7).
+
 ## [3.25.6] — 2026-10-10
 
 **Un archivo enorme en la raíz ya no impide verificar las pruebas: los contratos vuelven a nacer y el motor creativo vuelve a tener datos.**

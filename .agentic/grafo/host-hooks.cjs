@@ -47,7 +47,7 @@ const HOSTS = {
         beforeMCPExecution: [{ command: `${g} --event=mcp`, timeout: 10, failClosed: false }],
         beforeSubmitPrompt: [{ command: `${g} --event=prompt`, timeout: 10 }],
         // Fin de turno: anota el trabajo editado y sin commit (lo único que no se registra solo). No bloquea ni imprime.
-        stop: [{ command: `${g} --event=stop`, timeout: 10, failClosed: false }, ...(goal ? [{ command: `node ${script(root, 'goal-check.cjs')} --hook=cursor`, timeout: 10, loop_limit: LOOP_LIMIT }] : [])],
+        stop: [{ command: `${g} --event=stop`, timeout: 10, failClosed: false, loop_limit: null }, ...(goal ? [{ command: `node ${script(root, 'goal-check.cjs')} --hook=cursor`, timeout: 10, loop_limit: LOOP_LIMIT }] : [])],
       });
     },
     propia: (e) => esPropio(e.command),

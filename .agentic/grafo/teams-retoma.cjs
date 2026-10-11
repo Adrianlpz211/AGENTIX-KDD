@@ -104,9 +104,42 @@ function bloque(e, rol, snap) {
   return L;
 }
 
+/**
+ * El SIGUIENTE trabajo del constructor, en el orden de siempre: lo parcial, luego las correcciones, luego la cola. Devuelve el elemento y su tipo
+ * (o null si no hay nada). Es lo que el gancho de parada le entrega a Cursor como siguiente mensaje: la cola EMPUJADA, sin que nadie tenga que pedirla.
+ */
+function siguienteTrabajo(e) {
+  const parcial = (e.tareasPend || []).find((t) => t.reporte && t.reporte.estado === 'PARCIAL');
+  if (parcial) return { tipo: 'parcial', el: parcial };
+  if ((e.corrPend || []).length) return { tipo: 'correccion', el: e.corrPend[0] };
+  if ((e.tareasPend || []).length) return { tipo: 'tarea', el: e.tareasPend[0] };
+  return null;
+}
+
+/**
+ * Mensaje AUTOCONTENIDO para el constructor: empieza con `aa:` (así el trabajo pasa por el flujo completo de Agentix: brief y contratos antes de
+ * construir, pruebas y memoria al cerrar) y trae la tarea entera y cómo reportarla. Nadie tiene que leer reglas ni correr una ronda para saber qué hacer.
+ */
+function mensajeDeTrabajo(item, CMD, pendientesDespues) {
+  const resto = pendientesDespues > 0
+    ? ' Después de esto quedan ' + pendientesDespues + ' más en la cola: al cerrar este turno te llega la siguiente.'
+    : ' No quedan más en la cola por ahora.';
+  const cuerpo = String(item.el.crudo || item.el.texto || '').trim().slice(0, 1800);
+  if (item.tipo === 'correccion') {
+    const k = item.el;
+    return 'aa: [TEAMS] Resuelve la corrección ' + k.id + ' (' + (k.sev || 'HALLAZGO') + '): ' + corto(k.titulo, 140) + '\n' + cuerpo + '\n'
+      + 'Cuando la termines: `' + CMD + ' resolver ' + k.id + ' "qué hiciste"`.' + resto + ' No termines el turno sin cerrarla o decir por qué no puedes.';
+  }
+  const t = item.el;
+  const parcial = item.tipo === 'parcial' && t.reporte ? ' Iba PARCIAL: "' + corto(t.reporte.detalle, 160) + '". Retómala donde quedó.' : '';
+  return 'aa: [TEAMS] Trabaja ' + t.id + ' — ' + corto(t.titulo, 140) + '.' + parcial + '\n' + cuerpo + '\n'
+    + 'Al terminar repórtala: `' + CMD + ' reportar ' + t.id + ' --estado=HECHO --detalle="…" --verif="…" --archivos=…` (PARCIAL si queda algo, con el motivo).'
+    + resto + ' No termines el turno sin reportarla.';
+}
+
 /** Mensaje listo para pegar en el chat de Cursor (nada puede escribir en un chat dormido: lo pega el dueño). */
 function mensajeParaCursor(cmd) {
   return `teams: continuar — retoma donde quedaste: corre \`${cmd} continuar --rol=builder\`, relanza tu vigilante y reactiva tu loop; sigue el bloque «RETOMA» y haz primero lo que diga su PRIMERA ACCIÓN.`;
 }
 
-module.exports = { instantanea, cambios, bloque, primeraAccion, mensajeParaCursor, hace };
+module.exports = { instantanea, cambios, bloque, primeraAccion, mensajeParaCursor, hace, siguienteTrabajo, mensajeDeTrabajo };
