@@ -1,5 +1,15 @@
 # Changelog — Agentic KDD
 
+## [3.26.0] — 2026-10-11
+
+**Cierre real de los huecos que quedaban: trabajo sin commit visible (ciclo provisional), control de pruebas sin falsa alarma, `akdd update` que espera la base, `engranajes --reparar` y una prueba de campaña de punta a punta.**
+- **Ciclo provisional** (`ciclo-provisional.cjs`): al terminar cada turno, lo editado sin commit queda constancia en `.agentic/_provisional.json` (desde cuándo, archivos, módulos, líneas). El commit lo cierra: pasa a `_provisional-historial.jsonl` con el commit que lo absorbió y el tiempo real transcurrido. No es ciclo ni contrato (no ensucia métricas): es constancia, no verificación.
+- **Test integrity sin falsa alarma:** el cierre comparaba la copia de trabajo (el constructor sigue editando minutos después) contra HEAD y daba 62 «títulos desaparecidos» en un archivo con 44 pruebas. Ahora compara el commit contra su padre, ambos desde los objetos de git (`scanCommit`). Pruebas: `test/test-integrity-commit.test.cjs` (4).
+- **`akdd update` espera la base:** el sondeo de escritura reintenta 6 veces (2 s) antes de bloquear con `DB_OCUPADA`; si de verdad está tomada, sigue sin aplicar nada.
+- **`engranajes --reparar`:** reinstala ganchos de git y de los hosts y registra commits sin ciclo; nunca toca `core.hooksPath`, código del proyecto ni hace commits (lo demás lo explica).
+- **Ventanas de consola:** `windowsHide` en 4 llamadas más y la prueba `ventanas-ocultas` ahora ve también `require('child_process').X(`.
+- **Prueba de campaña** (`test/campana-teams.test.cjs`, 5): provisional → commit, pausa de 3 días y retoma empujada, auditor y reparación sobre un repo real.
+
 ## [3.25.9] — 2026-10-11
 
 **La huella del código ya no se rinde nunca por tamaño: lo que no es código o no cabe en el presupuesto de lectura se vigila por tamaño + fecha. Lo encontró el auditor de engranajes en protocolo_reserva a los pocos minutos de existir.**

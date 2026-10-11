@@ -206,7 +206,7 @@ async function main() {
     try {
       require('child_process').execSync(
         `node "${path.join(__dirname, 'grafo.cjs')}" sync`,
-        { stdio: 'pipe' }
+        { stdio: 'pipe', windowsHide: true }
       );
     } catch (syncErr) {
       console.log(`⚠ Entidades guardadas, pero el sync del grafo falló: ${syncErr.message}`);

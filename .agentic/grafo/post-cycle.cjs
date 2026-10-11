@@ -1103,8 +1103,9 @@ async function main() {
       ? svs.scan(ROOT, { staged: false, files: commitFilesForScans })
       : { findings: [], scanned: false };
     const testFiles = commitFilesForScans.filter(f => /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|py)$/i.test(f));
+    // Contra el commit y su padre (objetos de git), no contra el árbol de trabajo: el cierre corre minutos después y el constructor ya sigue editando.
     const tigRes = testFiles.length
-      ? tig.scan(ROOT, { staged: false, files: testFiles })
+      ? tig.scanCommit(ROOT, COMMIT_REF, testFiles)
       : { findings: [], scanned: false };
     if (!silent) {
       const n = (specRes.findings || []).length + (tigRes.findings || []).length;
@@ -1626,6 +1627,12 @@ async function main() {
     const fresh = require('./graph-freshness.cjs').stampGraph(process.cwd());
     if (!silent) console.log(fresh.ok ? `✅ ${fresh.commit.slice(0, 8)}` : `⚠️  (${fresh.reason})`);
   } catch (e) { if (!silent) console.log('⚠️  (omitido)'); }
+
+  // El trabajo provisional (editado sin commit) que este commit absorbió pasa a definitivo: queda en el historial con su tiempo real.
+  try {
+    const pv = require('./ciclo-provisional.cjs').cerrar(ROOT, COMMIT_REF);
+    if (pv) { results.provisional = { archivos: pv.archivos_absorbidos, transcurrido_min: Math.round(pv.transcurrido_ms / 60000) }; if (!silent) console.log(`  12. Trabajo provisional cerrado: ${pv.archivos_absorbidos} archivo(s), ${results.provisional.transcurrido_min} min desde que se abrió`); }
+  } catch { /* es constancia, no verificación */ }
 
   // Último paso: el auditor de engranajes deja constancia de qué gira y qué no (lo lee el semáforo de TEAMS y el monitor). Nunca falla el ciclo.
   try {

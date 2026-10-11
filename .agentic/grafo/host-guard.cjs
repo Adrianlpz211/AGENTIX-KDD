@@ -361,6 +361,7 @@ function procesar(host, evento, entrada, root) {
   if (evento === 'stop') {
     // Fin de turno: se anota qué quedó editado y sin commit (no escribe en la base, no bloquea, no imprime nada al host).
     try { require('./cobertura.cjs').anotarSinCommit(root); } catch { /* es un plus */ }
+    try { require('./ciclo-provisional.cjs').actualizar(root); } catch { /* es un plus */ }
     // TEAMS que no se duerme: si este host hace de Director/constructor y queda trabajo o su vigilante murió, se le pide seguir (ver teams-continuidad.cjs).
     try { const c = require('./teams-continuidad.cjs'); return c.salidaParaHost(host, c.decidir(root, host, entrada)); } catch { return null; }
   }

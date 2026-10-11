@@ -10,7 +10,8 @@ const path = require('path');
 const REPO = path.resolve(__dirname, '..');
 const DIRS = ['.agentic/grafo', 'src', 'bin'];
 const EXTRA = ['dashboard.cjs'];
-const RE = /(?<![\w.$])((?:cp|child_process|childProcess|cps)\.)?(spawnSync|spawn|execSync|execFileSync|execFile|exec)\(/g;
+// También la forma `require('child_process').spawnSync(...)`, que el patrón anterior no veía (se coló sin ocultar la ventana en test-integrity-gate).
+const RE = /(?:(?<![\w.$])((?:cp|child_process|childProcess|cps)\.)?|require\(['"]child_process['"]\)\.)(spawnSync|spawn|execSync|execFileSync|execFile|exec)\(/g;
 // Llamadas que reciben las opciones por una variable que YA trae windowsHide (se verifica abajo).
 const VARIABLE_CON_OCULTO = [
   { archivo: 'src/run-safe.js', args: /,\s*o$|Object\.assign\(\{\},\s*o,/ },

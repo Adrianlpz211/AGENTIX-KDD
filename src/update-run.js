@@ -241,10 +241,17 @@ function liberarExclusion(ctx) {
 /** Con el bloqueo tomado, una escritura inmediata prueba que ningún cliente externo tiene la base. */
 function sondearEscritura(ctx) {
   const dbPath = path.join(ctx.projectPath, '.agentic', 'memoria.db');
-  const db = ctx.motor.adapter.openWrite(dbPath, { drivers: [ctx.driver], updateOwner: true, busyTimeout: ctx.opts.busyMs || 1500 });
-  try { db.exec('BEGIN IMMEDIATE'); db.exec('ROLLBACK'); }
-  catch (e) { throw codigo('DB_OCUPADA', 'memoria.db está tomada por otro proceso que no respeta el protocolo de exclusión (' + e.message + '). No se aplica nada.'); }
-  finally { try { db.close(); } catch { /* cerrada */ } }
+  // Un cierre de ciclo o un hook suelen soltar la base en segundos: se reintenta antes de rendirse (sigue bloqueando si de verdad está tomada).
+  const intentos = ctx.opts.sondeoIntentos || 6;
+  let ultimo = null;
+  for (let i = 0; i < intentos; i++) {
+    const db = ctx.motor.adapter.openWrite(dbPath, { drivers: [ctx.driver], updateOwner: true, busyTimeout: ctx.opts.busyMs || 1500 });
+    try { db.exec('BEGIN IMMEDIATE'); db.exec('ROLLBACK'); return; }
+    catch (e) { ultimo = e; }
+    finally { try { db.close(); } catch { /* cerrada */ } }
+    if (i < intentos - 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ctx.opts.sondeoEsperaMs || 2000);
+  }
+  throw codigo('DB_OCUPADA', 'memoria.db está tomada por otro proceso que no respeta el protocolo de exclusión (' + ultimo.message + '), tras ' + intentos + ' intentos. No se aplica nada.');
 }
 
 // ──────────────────────────── instrucciones ──────────────────────────────

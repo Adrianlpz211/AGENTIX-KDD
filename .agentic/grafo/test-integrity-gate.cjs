@@ -93,9 +93,38 @@ function esTestProtegido(db, testFileRel) {
 
 function contenidoAnterior(projectRoot, fileRel) {
   const r = require('child_process').spawnSync('git', ['show', 'HEAD:' + String(fileRel).replace(/\\/g, '/')], {
-    cwd: projectRoot, timeout: 10000, maxBuffer: 32 * 1024 * 1024,
+    cwd: projectRoot, timeout: 10000, maxBuffer: 32 * 1024 * 1024, windowsHide: true,
   });
   return r.status === 0 ? r.stdout.toString('utf8') : null;
+}
+
+/** Contenido de un archivo en un commit concreto (`ref:ruta`); null si no existe ahí. */
+function contenidoEnCommit(projectRoot, spec) {
+  const r = require('child_process').spawnSync('git', ['show', String(spec).replace(/\\/g, '/')], {
+    cwd: projectRoot, timeout: 10000, maxBuffer: 32 * 1024 * 1024, windowsHide: true,
+  });
+  return r.status === 0 ? r.stdout.toString('utf8') : null;
+}
+
+/**
+ * El control para el cierre de un ciclo YA COMMITEADO: compara el commit contra su padre, los dos desde los objetos de git — nunca contra el árbol de trabajo.
+ * Medido en medinet (11/10/2026): el cierre corre minutos después del commit y el constructor sigue editando; comparar la copia de trabajo (a medio reescribir)
+ * contra HEAD daba 62 «títulos desaparecidos» críticos en un archivo que tenía 44 pruebas. Solo se miran los archivos que ese commit tocó; un archivo nuevo no
+ * tiene versión anterior (nada que comparar) y uno borrado cuenta como vacío.
+ */
+function scanCommit(projectRoot, ref, files) {
+  const sha = /^[0-9a-f]{4,64}$|^HEAD$/i.test(String(ref || '')) ? String(ref) : 'HEAD';
+  const git = (args) => { const r = require('child_process').spawnSync('git', args, { cwd: projectRoot, encoding: 'utf8', timeout: 10000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }); return r.status === 0 ? r.stdout : null; };
+  if (git(['rev-parse', '--verify', sha + '~1']) == null) return { findings: [], scanned: false };   // commit raíz: no hay padre con quien comparar
+  const tocados = new Set((git(['diff-tree', '--no-commit-id', '--name-only', '-r', sha]) || '').split('\n').map((s) => s.trim()).filter(Boolean));
+  const borrados = new Set((git(['diff-tree', '--no-commit-id', '--name-only', '--diff-filter=D', '-r', sha]) || '').split('\n').map((s) => s.trim()).filter(Boolean));
+  const lista = (files || []).filter((f) => tocados.has(String(f).replace(/\\/g, '/')));
+  if (!lista.length) return { findings: [], scanned: false };
+  return scan(projectRoot, {
+    files: lista.filter((f) => !borrados.has(f)), deleted: lista.filter((f) => borrados.has(f)),
+    readContent: (rel) => contenidoEnCommit(projectRoot, sha + ':' + rel),
+    readBase: (rel) => contenidoEnCommit(projectRoot, sha + '~1:' + rel),
+  });
 }
 
 function scan(projectRoot, { staged = true, files = null, readContent = null, readBase = null, deleted = [], renamed = {} } = {}) {
@@ -167,7 +196,7 @@ function scan(projectRoot, { staged = true, files = null, readContent = null, re
 }
 
 function gitDisponible(projectRoot) {
-  const r = require('child_process').spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectRoot, timeout: 10000 });
+  const r = require('child_process').spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectRoot, timeout: 10000, windowsHide: true });
   return r.status === 0;
 }
 
@@ -223,4 +252,4 @@ if (require.main === module) {
   process.exit(hayCritica ? 1 : 0); // CRÍTICO bloquea; WARN no (igual que los demás gates mecánicos)
 }
 
-module.exports = { scan, evaluar, formatear, extraerTitulos, contarAserciones };
+module.exports = { scan, scanCommit, evaluar, formatear, extraerTitulos, contarAserciones };

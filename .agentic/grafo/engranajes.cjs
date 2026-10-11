@@ -253,12 +253,38 @@ function texto(r) {
   return L.join('\n');
 }
 
-module.exports = { auditar, refrescar, ultimo, texto, COMPROBACIONES, ARCHIVO, OK, ATENCION, ROTO, SIN_DATO };
+/** Reparaciones SEGURAS e idempotentes de lo que el auditor marca (ganchos de git y de los hosts). Nunca toca la configuración de git, el código del proyecto ni hace commits:
+ *  lo demás (contratos, trabajo sin commit, copias de la base) solo se explica. Devuelve [{ id, hecho|omitido, msg }]. */
+function reparar(root) {
+  root = path.resolve(root);
+  const out = [];
+  const corre = (script, args) => { const r = spawnSync(process.execPath, [path.join(__dirname, script), ...args], { cwd: root, encoding: 'utf8', timeout: 60000, windowsHide: true }); return r.status === 0; };
+  let r; try { r = auditar(root); } catch (e) { return [{ id: 'auditor', msg: 'no pudo auditar: ' + String(e.message).slice(0, 100) }]; }
+  for (const g of r.engranajes) {
+    if (g.estado === OK || g.estado === SIN_DATO) continue;
+    if (g.id === 'ganchos-de-git') {
+      if (/core\.hooksPath/.test(g.dato)) out.push({ id: g.id, omitido: true, msg: 'core.hooksPath apunta a un sitio inexistente: solo la persona puede arreglarlo (git config --unset core.hooksPath)' });
+      else out.push(corre('install-hooks.cjs', ['--quiet']) ? { id: g.id, hecho: true, msg: 'ganchos de git reinstalados' } : { id: g.id, msg: 'no se pudieron instalar (¿hay un gancho ajeno? usa install-hooks.cjs --compose)' });
+    } else if (g.id === 'ganchos-de-los-hosts') {
+      out.push(corre('host-hooks.cjs', ['install']) ? { id: g.id, hecho: true, msg: 'ganchos de Claude Code y Cursor reinstalados (Cursor puede necesitar reiniciarse)' } : { id: g.id, msg: 'host-hooks install falló' });
+    } else if (g.id === 'commits-a-ciclos') {
+      out.push(corre('registro-historico.cjs', ['--aplicar']) ? { id: g.id, hecho: true, msg: 'commits sin ciclo registrados retroactivamente' } : { id: g.id, msg: 'el registro retroactivo falló' });
+    } else if (g.id === 'servicios-de-aviso') {
+      out.push({ id: g.id, omitido: true, msg: 'relanza el servicio a mano (telegram-hub.cjs servir / ntfy-bridge.cjs servir): es un proceso vivo del dueño' });
+    } else {
+      out.push({ id: g.id, omitido: true, msg: 'no se repara solo: ' + (g.hacer || g.dato) });
+    }
+  }
+  return out;
+}
+
+module.exports = { auditar, refrescar, reparar, ultimo, texto, COMPROBACIONES, ARCHIVO, OK, ATENCION, ROTO, SIN_DATO };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
   const raiz = args.find((a) => !a.startsWith('--')) || process.cwd();
   const dias = Number((args.find((a) => a.startsWith('--dias=')) || '').split('=')[1]) || 7;
+  if (args.includes('--reparar')) { const rp = reparar(raiz); for (const x of rp) console.log((x.hecho ? '🔧 ' : x.omitido ? '⏭️  ' : '⚠️  ') + x.id + ': ' + x.msg); if (!rp.length) console.log('Nada que reparar: todo gira.'); console.log(''); }
   const r = refrescar(raiz, { dias });
   process.stdout.write(args.includes('--json') ? JSON.stringify(r, null, 2) + '\n' : texto(r) + '\n');
   process.exitCode = r.rotos ? 1 : 0;

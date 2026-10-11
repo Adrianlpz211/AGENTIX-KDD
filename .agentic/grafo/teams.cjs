@@ -339,7 +339,7 @@ function cambioReciente(root) {
   if (process.env.AKDD_TEAMS_ULTIMO_CAMBIO) { const t = Number(process.env.AKDD_TEAMS_ULTIMO_CAMBIO); return t ? { t, archivo: 'archivo de prueba' } : null; }
   try {
     if (!fs.existsSync(path.join(root, '.git'))) return null;
-    const r = require('child_process').spawnSync('git', ['-c', 'safe.directory=*', 'status', '--porcelain', '-uall'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 16 * 1024 * 1024 });
+    const r = require('child_process').spawnSync('git', ['-c', 'safe.directory=*', 'status', '--porcelain', '-uall'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
     if (r.status !== 0) return null;
     let max = 0, quien = '';
     for (const l of String(r.stdout).split(String.fromCharCode(10))) {

@@ -176,7 +176,7 @@ function sincronizarGrafo() {
   if (!fs.existsSync(GRAFO_PATH)) return;
   try {
     require('child_process').execSync(`node "${GRAFO_PATH}" sync`, {
-      stdio: 'pipe', cwd: ROOT, timeout: 10000
+      stdio: 'pipe', cwd: ROOT, timeout: 10000, windowsHide: true
     });
     log('✓ Grafo sincronizado');
   } catch(e) {
